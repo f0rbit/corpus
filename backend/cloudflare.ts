@@ -1,6 +1,7 @@
 import { eq, and, desc, lt, gt, like, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
-import type { Backend, MetadataClient, DataClient, SnapshotMeta } from '../types'
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
+import { ok, err } from '../types'
 import { corpus_snapshots } from '../schema'
 
 type D1Database = { prepare: (sql: string) => unknown }
@@ -8,19 +9,21 @@ type R2Bucket = {
   get: (key: string) => Promise<{ body: ReadableStream<Uint8Array>; arrayBuffer: () => Promise<ArrayBuffer> } | null>
   put: (key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<void>
   delete: (key: string) => Promise<void>
+  head: (key: string) => Promise<{ key: string } | null>
 }
 
 export type CloudflareBackendConfig = {
   d1: D1Database
   r2: R2Bucket
+  on_event?: EventHandler
 }
 
 export function create_cloudflare_backend(config: CloudflareBackendConfig): Backend {
   const db = drizzle(config.d1)
-  const { r2 } = config
+  const { r2, on_event } = config
 
-  function r2_key(store_id: string, version: string): string {
-    return `${store_id}/${version}`
+  function emit(event: CorpusEvent) {
+    on_event?.(event)
   }
 
   function row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
@@ -33,64 +36,95 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
       content_hash: row.content_hash,
       content_type: row.content_type,
       size_bytes: row.size_bytes,
+      data_key: row.data_key,
       tags: row.tags ? JSON.parse(row.tags) : undefined,
     }
   }
 
   const metadata: MetadataClient = {
-    async get(store_id, version) {
-      const rows = await db
-        .select()
-        .from(corpus_snapshots)
-        .where(and(
-          eq(corpus_snapshots.store_id, store_id),
-          eq(corpus_snapshots.version, version)
-        ))
-        .limit(1)
-      
-      const row = rows[0]
-      if (!row) return null
-      return row_to_meta(row)
+    async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
+      try {
+        const rows = await db
+          .select()
+          .from(corpus_snapshots)
+          .where(and(
+            eq(corpus_snapshots.store_id, store_id),
+            eq(corpus_snapshots.version, version)
+          ))
+          .limit(1)
+        
+        const row = rows[0]
+        emit({ type: 'meta_get', store_id, version, found: !!row })
+        
+        if (!row) {
+          return err({ kind: 'not_found', store_id, version })
+        }
+        return ok(row_to_meta(row))
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'metadata.get' }
+        emit({ type: 'error', error })
+        return err(error)
+      }
     },
 
-    async put(meta) {
-      await db
-        .insert(corpus_snapshots)
-        .values({
-          store_id: meta.store_id,
-          version: meta.version,
-          parents: JSON.stringify(meta.parents),
-          created_at: meta.created_at.toISOString(),
-          invoked_at: meta.invoked_at?.toISOString() ?? null,
-          content_hash: meta.content_hash,
-          content_type: meta.content_type,
-          size_bytes: meta.size_bytes,
-          tags: meta.tags ? JSON.stringify(meta.tags) : null,
-        })
-        .onConflictDoUpdate({
-          target: [corpus_snapshots.store_id, corpus_snapshots.version],
-          set: {
+    async put(meta): Promise<Result<void, CorpusError>> {
+      try {
+        await db
+          .insert(corpus_snapshots)
+          .values({
+            store_id: meta.store_id,
+            version: meta.version,
             parents: JSON.stringify(meta.parents),
             created_at: meta.created_at.toISOString(),
             invoked_at: meta.invoked_at?.toISOString() ?? null,
             content_hash: meta.content_hash,
             content_type: meta.content_type,
             size_bytes: meta.size_bytes,
+            data_key: meta.data_key,
             tags: meta.tags ? JSON.stringify(meta.tags) : null,
-          },
-        })
+          })
+          .onConflictDoUpdate({
+            target: [corpus_snapshots.store_id, corpus_snapshots.version],
+            set: {
+              parents: JSON.stringify(meta.parents),
+              created_at: meta.created_at.toISOString(),
+              invoked_at: meta.invoked_at?.toISOString() ?? null,
+              content_hash: meta.content_hash,
+              content_type: meta.content_type,
+              size_bytes: meta.size_bytes,
+              data_key: meta.data_key,
+              tags: meta.tags ? JSON.stringify(meta.tags) : null,
+            },
+          })
+        
+        emit({ type: 'meta_put', store_id: meta.store_id, version: meta.version })
+        return ok(undefined)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'metadata.put' }
+        emit({ type: 'error', error })
+        return err(error)
+      }
     },
 
-    async delete(store_id, version) {
-      await db
-        .delete(corpus_snapshots)
-        .where(and(
-          eq(corpus_snapshots.store_id, store_id),
-          eq(corpus_snapshots.version, version)
-        ))
+    async delete(store_id, version): Promise<Result<void, CorpusError>> {
+      try {
+        await db
+          .delete(corpus_snapshots)
+          .where(and(
+            eq(corpus_snapshots.store_id, store_id),
+            eq(corpus_snapshots.version, version)
+          ))
+        
+        emit({ type: 'meta_delete', store_id, version })
+        return ok(undefined)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'metadata.delete' }
+        emit({ type: 'error', error })
+        return err(error)
+      }
     },
 
-    async *list(store_id, opts) {
+    async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
       const conditions = [like(corpus_snapshots.store_id, `${store_id}%`)]
       
       if (opts?.before) {
@@ -111,6 +145,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
       }
 
       const rows = await query
+      let count = 0
 
       for (const row of rows) {
         const meta = row_to_meta(row)
@@ -120,23 +155,34 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
         }
         
         yield meta
+        count++
+      }
+      
+      emit({ type: 'meta_list', store_id, count })
+    },
+
+    async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+      try {
+        const rows = await db
+          .select()
+          .from(corpus_snapshots)
+          .where(eq(corpus_snapshots.store_id, store_id))
+          .orderBy(desc(corpus_snapshots.created_at))
+          .limit(1)
+        
+        const row = rows[0]
+        if (!row) {
+          return err({ kind: 'not_found', store_id, version: 'latest' })
+        }
+        return ok(row_to_meta(row))
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'metadata.get_latest' }
+        emit({ type: 'error', error })
+        return err(error)
       }
     },
 
-    async get_latest(store_id) {
-      const rows = await db
-        .select()
-        .from(corpus_snapshots)
-        .where(eq(corpus_snapshots.store_id, store_id))
-        .orderBy(desc(corpus_snapshots.created_at))
-        .limit(1)
-      
-      const row = rows[0]
-      if (!row) return null
-      return row_to_meta(row)
-    },
-
-    async *get_children(parent_store_id, parent_version) {
+    async *get_children(parent_store_id, parent_version): AsyncIterable<SnapshotMeta> {
       const rows = await db
         .select()
         .from(corpus_snapshots)
@@ -152,29 +198,78 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
         yield row_to_meta(row)
       }
     },
+
+    async find_by_hash(store_id, content_hash): Promise<SnapshotMeta | null> {
+      try {
+        const rows = await db
+          .select()
+          .from(corpus_snapshots)
+          .where(and(
+            eq(corpus_snapshots.store_id, store_id),
+            eq(corpus_snapshots.content_hash, content_hash)
+          ))
+          .limit(1)
+        
+        const row = rows[0]
+        return row ? row_to_meta(row) : null
+      } catch {
+        return null
+      }
+    },
   }
 
   const data: DataClient = {
-    async get(store_id, version) {
-      const object = await r2.get(r2_key(store_id, version))
-      if (!object) return null
+    async get(data_key): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
+      try {
+        const object = await r2.get(data_key)
+        emit({ type: 'data_get', store_id: data_key.split('/')[0] ?? data_key, version: data_key, found: !!object })
+        
+        if (!object) {
+          return err({ kind: 'not_found', store_id: data_key, version: '' })
+        }
 
-      const body = object.body
-
-      return {
-        stream: () => body,
-        bytes: async () => new Uint8Array(await object.arrayBuffer()),
+        return ok({
+          stream: () => object.body,
+          bytes: async () => new Uint8Array(await object.arrayBuffer()),
+        })
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'data.get' }
+        emit({ type: 'error', error })
+        return err(error)
       }
     },
 
-    async put(store_id, version, input) {
-      await r2.put(r2_key(store_id, version), input)
+    async put(data_key, input): Promise<Result<void, CorpusError>> {
+      try {
+        await r2.put(data_key, input)
+        return ok(undefined)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'data.put' }
+        emit({ type: 'error', error })
+        return err(error)
+      }
     },
 
-    async delete(store_id, version) {
-      await r2.delete(r2_key(store_id, version))
+    async delete(data_key): Promise<Result<void, CorpusError>> {
+      try {
+        await r2.delete(data_key)
+        return ok(undefined)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'storage_error', cause: cause as Error, operation: 'data.delete' }
+        emit({ type: 'error', error })
+        return err(error)
+      }
+    },
+
+    async exists(data_key): Promise<boolean> {
+      try {
+        const head = await r2.head(data_key)
+        return head !== null
+      } catch {
+        return false
+      }
     },
   }
 
-  return { metadata, data }
+  return { metadata, data, on_event }
 }

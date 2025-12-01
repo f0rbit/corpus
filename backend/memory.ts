@@ -1,24 +1,43 @@
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, DataHandle, ListOpts } from '../types'
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
+import { ok, err } from '../types'
 
-export function create_memory_backend(): Backend {
+export type MemoryBackendOptions = {
+  on_event?: EventHandler
+}
+
+export function create_memory_backend(options?: MemoryBackendOptions): Backend {
   const meta_store = new Map<string, SnapshotMeta>()
   const data_store = new Map<string, Uint8Array>()
-  
-  function make_key(store_id: string, version: string): string {
+  const on_event = options?.on_event
+
+  function emit(event: CorpusEvent) {
+    on_event?.(event)
+  }
+
+  function make_meta_key(store_id: string, version: string): string {
     return `${store_id}:${version}`
   }
 
   const metadata: MetadataClient = {
-    async get(store_id, version) {
-      return meta_store.get(make_key(store_id, version)) ?? null
+    async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
+      const meta = meta_store.get(make_meta_key(store_id, version))
+      emit({ type: 'meta_get', store_id, version, found: !!meta })
+      if (!meta) {
+        return err({ kind: 'not_found', store_id, version })
+      }
+      return ok(meta)
     },
 
-    async put(meta) {
-      meta_store.set(make_key(meta.store_id, meta.version), meta)
+    async put(meta): Promise<Result<void, CorpusError>> {
+      meta_store.set(make_meta_key(meta.store_id, meta.version), meta)
+      emit({ type: 'meta_put', store_id: meta.store_id, version: meta.version })
+      return ok(undefined)
     },
 
-    async delete(store_id, version) {
-      meta_store.delete(make_key(store_id, version))
+    async delete(store_id, version): Promise<Result<void, CorpusError>> {
+      meta_store.delete(make_meta_key(store_id, version))
+      emit({ type: 'meta_delete', store_id, version })
+      return ok(undefined)
     },
 
     async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
@@ -36,19 +55,32 @@ export function create_memory_backend(): Backend {
       matches.sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
       
       const limit = opts?.limit ?? Infinity
+      let count = 0
       for (const match of matches.slice(0, limit)) {
         yield match
+        count++
       }
+      emit({ type: 'meta_list', store_id, count })
     },
 
-    async get_latest(store_id) {
-      for await (const meta of this.list(store_id, { limit: 1 })) {
-        return meta
+    async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+      let latest: SnapshotMeta | null = null
+      const prefix = `${store_id}:`
+      
+      for (const [key, meta] of meta_store) {
+        if (!key.startsWith(prefix)) continue
+        if (!latest || meta.created_at > latest.created_at) {
+          latest = meta
+        }
       }
-      return null
+      
+      if (!latest) {
+        return err({ kind: 'not_found', store_id, version: 'latest' })
+      }
+      return ok(latest)
     },
 
-    async *get_children(parent_store_id, parent_version) {
+    async *get_children(parent_store_id, parent_version): AsyncIterable<SnapshotMeta> {
       for (const meta of meta_store.values()) {
         const is_child = meta.parents.some(
           p => p.store_id === parent_store_id && p.version === parent_version
@@ -56,14 +88,27 @@ export function create_memory_backend(): Backend {
         if (is_child) yield meta
       }
     },
+
+    async find_by_hash(store_id, content_hash): Promise<SnapshotMeta | null> {
+      const prefix = `${store_id}:`
+      for (const [key, meta] of meta_store) {
+        if (key.startsWith(prefix) && meta.content_hash === content_hash) {
+          return meta
+        }
+      }
+      return null
+    },
   }
 
   const data: DataClient = {
-    async get(store_id, version) {
-      const bytes = data_store.get(make_key(store_id, version))
-      if (!bytes) return null
+    async get(data_key): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
+      const bytes = data_store.get(data_key)
+      emit({ type: 'data_get', store_id: data_key.split('/')[0] ?? data_key, version: data_key, found: !!bytes })
+      if (!bytes) {
+        return err({ kind: 'not_found', store_id: data_key, version: '' })
+      }
       
-      return {
+      return ok({
         stream: () => new ReadableStream({
           start(controller) {
             controller.enqueue(bytes)
@@ -71,10 +116,10 @@ export function create_memory_backend(): Backend {
           }
         }),
         bytes: async () => bytes,
-      }
+      })
     },
 
-    async put(store_id, version, input) {
+    async put(data_key, input): Promise<Result<void, CorpusError>> {
       let bytes: Uint8Array
       
       if (input instanceof Uint8Array) {
@@ -90,15 +135,21 @@ export function create_memory_backend(): Backend {
         bytes = concat_bytes(chunks)
       }
       
-      data_store.set(make_key(store_id, version), bytes)
+      data_store.set(data_key, bytes)
+      return ok(undefined)
     },
 
-    async delete(store_id, version) {
-      data_store.delete(make_key(store_id, version))
+    async delete(data_key): Promise<Result<void, CorpusError>> {
+      data_store.delete(data_key)
+      return ok(undefined)
+    },
+
+    async exists(data_key): Promise<boolean> {
+      return data_store.has(data_key)
     },
   }
 
-  return { metadata, data }
+  return { metadata, data, on_event }
 }
 
 function concat_bytes(chunks: Uint8Array[]): Uint8Array {
