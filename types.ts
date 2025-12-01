@@ -108,7 +108,7 @@ export type Codec<T> = {
 export type Store<T> = {
   readonly id: string
   readonly codec: Codec<T>
-  put: (version: string, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
   get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
   get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>

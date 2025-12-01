@@ -1,6 +1,7 @@
 import type { Backend, Store, StoreDefinition, SnapshotMeta, Result, CorpusError, PutOpts } from './types'
 import { ok, err } from './types'
 import { compute_hash } from './hash'
+import { generate_version } from './version'
 
 export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
   const { id, codec } = definition
@@ -17,7 +18,9 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     id,
     codec,
 
-    async put(version, data, opts): Promise<Result<SnapshotMeta, CorpusError>> {
+    async put(data, opts): Promise<Result<SnapshotMeta, CorpusError>> {
+      const version = generate_version()
+      
       let bytes: Uint8Array
       try {
         bytes = codec.encode(data)

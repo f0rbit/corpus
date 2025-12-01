@@ -38,20 +38,21 @@ describe('memory backend', () => {
     it('puts and gets a snapshot', async () => {
       const data: Timeline = { items: [{ id: '1', text: 'hello' }] }
       
-      const put_result = await corpus.stores.timelines.put('v1', data)
+      const put_result = await corpus.stores.timelines.put(data)
       expect(put_result.ok).toBe(true)
       if (!put_result.ok) return
       
       expect(put_result.value.store_id).toBe('timelines')
-      expect(put_result.value.version).toBe('v1')
+      expect(put_result.value.version).toBeString()
       expect(put_result.value.content_hash).toBeString()
       
-      const get_result = await corpus.stores.timelines.get('v1')
+      const version = put_result.value.version
+      const get_result = await corpus.stores.timelines.get(version)
       expect(get_result.ok).toBe(true)
       if (!get_result.ok) return
       
       expect(get_result.value.data).toEqual(data)
-      expect(get_result.value.meta.version).toBe('v1')
+      expect(get_result.value.meta.version).toBe(version)
     })
 
     it('returns not_found for missing version', async () => {
@@ -61,17 +62,20 @@ describe('memory backend', () => {
       if (result.ok) return
       
       expect(result.error.kind).toBe('not_found')
+      if (result.error.kind !== 'not_found') return
       expect(result.error.store_id).toBe('timelines')
       expect(result.error.version).toBe('nonexistent')
     })
 
     it('deletes a snapshot', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      const put_result = await corpus.stores.timelines.put({ items: [] })
+      if (!put_result.ok) return
+      const version = put_result.value.version
       
-      const delete_result = await corpus.stores.timelines.delete('v1')
+      const delete_result = await corpus.stores.timelines.delete(version)
       expect(delete_result.ok).toBe(true)
       
-      const get_result = await corpus.stores.timelines.get('v1')
+      const get_result = await corpus.stores.timelines.get(version)
       expect(get_result.ok).toBe(false)
     })
 
@@ -84,18 +88,20 @@ describe('memory backend', () => {
     })
 
     it('get_latest returns most recent by created_at', async () => {
-      await corpus.stores.timelines.put('v1', { items: [{ id: '1', text: 'first' }] })
+      await corpus.stores.timelines.put({ items: [{ id: '1', text: 'first' }] })
       await new Promise(r => setTimeout(r, 5))
-      await corpus.stores.timelines.put('v2', { items: [{ id: '2', text: 'second' }] })
+      await corpus.stores.timelines.put({ items: [{ id: '2', text: 'second' }] })
       await new Promise(r => setTimeout(r, 5))
-      await corpus.stores.timelines.put('v3', { items: [{ id: '3', text: 'third' }] })
+      const last_put = await corpus.stores.timelines.put({ items: [{ id: '3', text: 'third' }] })
+      expect(last_put.ok).toBe(true)
+      if (!last_put.ok) return
       
       const result = await corpus.stores.timelines.get_latest()
       expect(result.ok).toBe(true)
       if (!result.ok) return
       
-      expect(result.value.meta.version).toBe('v3')
-      expect(result.value.data.items[0].text).toBe('third')
+      expect(result.value.meta.version).toBe(last_put.value.version)
+      expect(result.value.data.items[0]?.text).toBe('third')
     })
 
     it('get_latest returns not_found on empty store', async () => {
@@ -107,11 +113,12 @@ describe('memory backend', () => {
     })
 
     it('list returns all snapshots newest first', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      const put1 = await corpus.stores.timelines.put({ items: [] })
       await new Promise(r => setTimeout(r, 5))
-      await corpus.stores.timelines.put('v2', { items: [] })
+      const put2 = await corpus.stores.timelines.put({ items: [] })
       await new Promise(r => setTimeout(r, 5))
-      await corpus.stores.timelines.put('v3', { items: [] })
+      const put3 = await corpus.stores.timelines.put({ items: [] })
+      if (!put1.ok || !put2.ok || !put3.ok) return
       
       const versions: string[] = []
       for await (const meta of corpus.stores.timelines.list()) {
@@ -119,18 +126,20 @@ describe('memory backend', () => {
       }
       
       expect(versions).toHaveLength(3)
-      expect(versions[0]).toBe('v3')
-      expect(versions[2]).toBe('v1')
+      expect(versions[0]).toBe(put3.value.version)
+      expect(versions[2]).toBe(put1.value.version)
     })
 
     it('get_meta returns only metadata without data', async () => {
-      await corpus.stores.timelines.put('v1', { items: [{ id: '1', text: 'test' }] })
+      const put_result = await corpus.stores.timelines.put({ items: [{ id: '1', text: 'test' }] })
+      if (!put_result.ok) return
+      const version = put_result.value.version
       
-      const result = await corpus.stores.timelines.get_meta('v1')
+      const result = await corpus.stores.timelines.get_meta(version)
       expect(result.ok).toBe(true)
       if (!result.ok) return
       
-      expect(result.value.version).toBe('v1')
+      expect(result.value.version).toBe(version)
       expect(result.value.content_hash).toBeString()
       expect((result.value as any).data).toBeUndefined()
     })
@@ -140,8 +149,8 @@ describe('memory backend', () => {
     it('reuses data_key for identical content', async () => {
       const data: Timeline = { items: [{ id: '1', text: 'same' }] }
       
-      const result1 = await corpus.stores.timelines.put('v1', data)
-      const result2 = await corpus.stores.timelines.put('v2', data)
+      const result1 = await corpus.stores.timelines.put(data)
+      const result2 = await corpus.stores.timelines.put(data)
       
       expect(result1.ok && result2.ok).toBe(true)
       if (!result1.ok || !result2.ok) return
@@ -151,8 +160,8 @@ describe('memory backend', () => {
     })
 
     it('uses different data_key for different content', async () => {
-      const result1 = await corpus.stores.timelines.put('v1', { items: [{ id: '1', text: 'a' }] })
-      const result2 = await corpus.stores.timelines.put('v2', { items: [{ id: '2', text: 'b' }] })
+      const result1 = await corpus.stores.timelines.put({ items: [{ id: '1', text: 'a' }] })
+      const result2 = await corpus.stores.timelines.put({ items: [{ id: '2', text: 'b' }] })
       
       expect(result1.ok && result2.ok).toBe(true)
       if (!result1.ok || !result2.ok) return
@@ -164,77 +173,85 @@ describe('memory backend', () => {
     it('emits deduplicated event on second put', async () => {
       const data: Timeline = { items: [] }
       
-      await corpus.stores.timelines.put('v1', data)
-      await corpus.stores.timelines.put('v2', data)
+      await corpus.stores.timelines.put(data)
+      await corpus.stores.timelines.put(data)
       
       const data_puts = events.filter(e => e.type === 'data_put') as Array<Extract<CorpusEvent, { type: 'data_put' }>>
       
       expect(data_puts).toHaveLength(2)
-      expect(data_puts[0].deduplicated).toBe(false)
-      expect(data_puts[1].deduplicated).toBe(true)
+      expect(data_puts[0]?.deduplicated).toBe(false)
+      expect(data_puts[1]?.deduplicated).toBe(true)
     })
   })
 
   describe('lineage tracking', () => {
     it('stores parents on put', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      const parent = await corpus.stores.timelines.put({ items: [] })
+      if (!parent.ok) return
       
-      const result = await corpus.stores.timelines.put('v2', { items: [] }, {
-        parents: [{ store_id: 'timelines', version: 'v1', role: 'source' }],
+      const result = await corpus.stores.timelines.put({ items: [] }, {
+        parents: [{ store_id: 'timelines', version: parent.value.version, role: 'source' }],
       })
       
       expect(result.ok).toBe(true)
       if (!result.ok) return
       
       expect(result.value.parents).toHaveLength(1)
-      expect(result.value.parents[0].store_id).toBe('timelines')
-      expect(result.value.parents[0].version).toBe('v1')
-      expect(result.value.parents[0].role).toBe('source')
+      expect(result.value.parents[0]?.store_id).toBe('timelines')
+      expect(result.value.parents[0]?.version).toBe(parent.value.version)
+      expect(result.value.parents[0]?.role).toBe('source')
     })
 
     it('preserves parents on get', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
-      await corpus.stores.timelines.put('v2', { items: [] }, {
-        parents: [{ store_id: 'timelines', version: 'v1' }],
-      })
+      const parent = await corpus.stores.timelines.put({ items: [] })
+      if (!parent.ok) return
       
-      const result = await corpus.stores.timelines.get('v2')
+      const child = await corpus.stores.timelines.put({ items: [] }, {
+        parents: [{ store_id: 'timelines', version: parent.value.version }],
+      })
+      if (!child.ok) return
+      
+      const result = await corpus.stores.timelines.get(child.value.version)
       expect(result.ok).toBe(true)
       if (!result.ok) return
       
       expect(result.value.meta.parents).toHaveLength(1)
-      expect(result.value.meta.parents[0].version).toBe('v1')
+      expect(result.value.meta.parents[0]?.version).toBe(parent.value.version)
     })
 
     it('get_children returns snapshots with matching parent', async () => {
-      await corpus.stores.timelines.put('parent', { items: [] })
-      await corpus.stores.timelines.put('child1', { items: [] }, {
-        parents: [{ store_id: 'timelines', version: 'parent' }],
+      const parent = await corpus.stores.timelines.put({ items: [] })
+      if (!parent.ok) return
+      
+      const child1 = await corpus.stores.timelines.put({ items: [{ id: '1', text: 'child1' }] }, {
+        parents: [{ store_id: 'timelines', version: parent.value.version }],
       })
-      await corpus.stores.timelines.put('child2', { items: [] }, {
-        parents: [{ store_id: 'timelines', version: 'parent' }],
+      const child2 = await corpus.stores.timelines.put({ items: [{ id: '2', text: 'child2' }] }, {
+        parents: [{ store_id: 'timelines', version: parent.value.version }],
       })
-      await corpus.stores.timelines.put('unrelated', { items: [] })
+      const unrelated = await corpus.stores.timelines.put({ items: [{ id: '3', text: 'unrelated' }] })
+      if (!child1.ok || !child2.ok || !unrelated.ok) return
       
       const children: string[] = []
-      for await (const meta of corpus.metadata.get_children('timelines', 'parent')) {
+      for await (const meta of corpus.metadata.get_children('timelines', parent.value.version)) {
         children.push(meta.version)
       }
       
       expect(children).toHaveLength(2)
-      expect(children).toContain('child1')
-      expect(children).toContain('child2')
-      expect(children).not.toContain('unrelated')
+      expect(children).toContain(child1.value.version)
+      expect(children).toContain(child2.value.version)
+      expect(children).not.toContain(unrelated.value.version)
     })
 
     it('supports multiple parents', async () => {
-      await corpus.stores.timelines.put('source1', { items: [] })
-      await corpus.stores.timelines.put('source2', { items: [] })
+      const source1 = await corpus.stores.timelines.put({ items: [{ id: '1', text: 's1' }] })
+      const source2 = await corpus.stores.timelines.put({ items: [{ id: '2', text: 's2' }] })
+      if (!source1.ok || !source2.ok) return
       
-      const result = await corpus.stores.timelines.put('derived', { items: [] }, {
+      const result = await corpus.stores.timelines.put({ items: [] }, {
         parents: [
-          { store_id: 'timelines', version: 'source1', role: 'primary' },
-          { store_id: 'timelines', version: 'source2', role: 'secondary' },
+          { store_id: 'timelines', version: source1.value.version, role: 'primary' },
+          { store_id: 'timelines', version: source2.value.version, role: 'secondary' },
         ],
       })
       
@@ -247,7 +264,7 @@ describe('memory backend', () => {
 
   describe('tags and filtering', () => {
     it('stores tags on put', async () => {
-      const result = await corpus.stores.timelines.put('v1', { items: [] }, {
+      const result = await corpus.stores.timelines.put({ items: [] }, {
         tags: ['important', 'daily'],
       })
       
@@ -258,9 +275,10 @@ describe('memory backend', () => {
     })
 
     it('filters list by tags', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] }, { tags: ['a'] })
-      await corpus.stores.timelines.put('v2', { items: [] }, { tags: ['b'] })
-      await corpus.stores.timelines.put('v3', { items: [] }, { tags: ['a', 'b'] })
+      const v1 = await corpus.stores.timelines.put({ items: [{ id: '1', text: 'v1' }] }, { tags: ['a'] })
+      const v2 = await corpus.stores.timelines.put({ items: [{ id: '2', text: 'v2' }] }, { tags: ['b'] })
+      const v3 = await corpus.stores.timelines.put({ items: [{ id: '3', text: 'v3' }] }, { tags: ['a', 'b'] })
+      if (!v1.ok || !v2.ok || !v3.ok) return
       
       const tagged_a: string[] = []
       for await (const meta of corpus.stores.timelines.list({ tags: ['a'] })) {
@@ -268,14 +286,14 @@ describe('memory backend', () => {
       }
       
       expect(tagged_a).toHaveLength(2)
-      expect(tagged_a).toContain('v1')
-      expect(tagged_a).toContain('v3')
+      expect(tagged_a).toContain(v1.value.version)
+      expect(tagged_a).toContain(v3.value.version)
     })
 
     it('filters list with limit', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
-      await corpus.stores.timelines.put('v2', { items: [] })
-      await corpus.stores.timelines.put('v3', { items: [] })
+      await corpus.stores.timelines.put({ items: [{ id: '1', text: 'v1' }] })
+      await corpus.stores.timelines.put({ items: [{ id: '2', text: 'v2' }] })
+      await corpus.stores.timelines.put({ items: [{ id: '3', text: 'v3' }] })
       
       const limited: string[] = []
       for await (const meta of corpus.stores.timelines.list({ limit: 2 })) {
@@ -287,7 +305,7 @@ describe('memory backend', () => {
 
     it('filters list by before date', async () => {
       const now = new Date()
-      await corpus.stores.timelines.put('v1', { items: [] })
+      await corpus.stores.timelines.put({ items: [] })
       
       const future = new Date(now.getTime() + 10000)
       
@@ -308,7 +326,7 @@ describe('memory backend', () => {
 
   describe('event observability', () => {
     it('fires events for put operation', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      await corpus.stores.timelines.put({ items: [] })
       
       const event_types = events.map(e => e.type)
       
@@ -318,10 +336,11 @@ describe('memory backend', () => {
     })
 
     it('fires events for get operation', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      const put_result = await corpus.stores.timelines.put({ items: [] })
+      if (!put_result.ok) return
       events.length = 0
       
-      await corpus.stores.timelines.get('v1')
+      await corpus.stores.timelines.get(put_result.value.version)
       
       const event_types = events.map(e => e.type)
       expect(event_types).toContain('meta_get')
@@ -338,8 +357,8 @@ describe('memory backend', () => {
     })
 
     it('fires meta_list with count', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
-      await corpus.stores.timelines.put('v2', { items: [] })
+      await corpus.stores.timelines.put({ items: [{ id: '1', text: 'a' }] })
+      await corpus.stores.timelines.put({ items: [{ id: '2', text: 'b' }] })
       events.length = 0
       
       for await (const _ of corpus.stores.timelines.list()) {}
@@ -350,13 +369,14 @@ describe('memory backend', () => {
     })
 
     it('records snapshot_put with content_hash', async () => {
-      await corpus.stores.timelines.put('v1', { items: [] })
+      const put_result = await corpus.stores.timelines.put({ items: [] })
+      if (!put_result.ok) return
       
       const snapshot_put = events.find(e => e.type === 'snapshot_put') as Extract<CorpusEvent, { type: 'snapshot_put' }>
       expect(snapshot_put).toBeDefined()
       expect(snapshot_put.content_hash).toBeString()
       expect(snapshot_put.store_id).toBe('timelines')
-      expect(snapshot_put.version).toBe('v1')
+      expect(snapshot_put.version).toBe(put_result.value.version)
     })
   })
 
@@ -374,11 +394,12 @@ describe('memory backend', () => {
         .with_store(define_store('users', json_codec(UserSchema)))
         .build()
 
-      await multi_corpus.stores.timelines.put('t1', { items: [] })
-      await multi_corpus.stores.users.put('u1', { name: 'Alice', email: 'alice@test.com' })
+      const t1 = await multi_corpus.stores.timelines.put({ items: [] })
+      const u1 = await multi_corpus.stores.users.put({ name: 'Alice', email: 'alice@test.com' })
+      if (!t1.ok || !u1.ok) return
 
-      const timeline = await multi_corpus.stores.timelines.get('t1')
-      const user = await multi_corpus.stores.users.get('u1')
+      const timeline = await multi_corpus.stores.timelines.get(t1.value.version)
+      const user = await multi_corpus.stores.users.get(u1.value.version)
 
       expect(timeline.ok).toBe(true)
       expect(user.ok).toBe(true)
@@ -398,16 +419,17 @@ describe('memory backend', () => {
         .with_store(define_store('store_b', json_codec(ItemSchema)))
         .build()
 
-      await multi_corpus.stores.store_a.put('v1', { id: '1', text: 'a' })
-      await multi_corpus.stores.store_b.put('v1', { id: '1', text: 'b' })
+      const a = await multi_corpus.stores.store_a.put({ id: '1', text: 'a' })
+      const b = await multi_corpus.stores.store_b.put({ id: '1', text: 'b' })
+      if (!a.ok || !b.ok) return
 
-      const a = await multi_corpus.stores.store_a.get('v1')
-      const b = await multi_corpus.stores.store_b.get('v1')
+      const a_result = await multi_corpus.stores.store_a.get(a.value.version)
+      const b_result = await multi_corpus.stores.store_b.get(b.value.version)
 
-      expect(a.ok && b.ok).toBe(true)
-      if (a.ok && b.ok) {
-        expect(a.value.data.text).toBe('a')
-        expect(b.value.data.text).toBe('b')
+      expect(a_result.ok && b_result.ok).toBe(true)
+      if (a_result.ok && b_result.ok) {
+        expect(a_result.value.data.text).toBe('a')
+        expect(b_result.value.data.text).toBe('b')
       }
     })
 
@@ -418,9 +440,10 @@ describe('memory backend', () => {
         .with_store(define_store('store_b', json_codec(ItemSchema)))
         .build()
 
-      await multi_corpus.stores.store_a.put('a1', { id: '1', text: 'a' })
-      await multi_corpus.stores.store_a.put('a2', { id: '2', text: 'a' })
-      await multi_corpus.stores.store_b.put('b1', { id: '1', text: 'b' })
+      const a1 = await multi_corpus.stores.store_a.put({ id: '1', text: 'a' })
+      const a2 = await multi_corpus.stores.store_a.put({ id: '2', text: 'a' })
+      const b1 = await multi_corpus.stores.store_b.put({ id: '1', text: 'b' })
+      if (!a1.ok || !a2.ok || !b1.ok) return
 
       const a_versions: string[] = []
       for await (const meta of multi_corpus.stores.store_a.list()) {
@@ -428,9 +451,9 @@ describe('memory backend', () => {
       }
 
       expect(a_versions).toHaveLength(2)
-      expect(a_versions).toContain('a1')
-      expect(a_versions).toContain('a2')
-      expect(a_versions).not.toContain('b1')
+      expect(a_versions).toContain(a1.value.version)
+      expect(a_versions).toContain(a2.value.version)
+      expect(a_versions).not.toContain(b1.value.version)
     })
   })
 
@@ -438,7 +461,7 @@ describe('memory backend', () => {
     it('stores invoked_at timestamp', async () => {
       const invoked = new Date('2024-01-15T10:00:00Z')
       
-      const result = await corpus.stores.timelines.put('v1', { items: [] }, {
+      const result = await corpus.stores.timelines.put({ items: [] }, {
         invoked_at: invoked,
       })
       
@@ -450,9 +473,10 @@ describe('memory backend', () => {
 
     it('preserves invoked_at on get', async () => {
       const invoked = new Date('2024-01-15T10:00:00Z')
-      await corpus.stores.timelines.put('v1', { items: [] }, { invoked_at: invoked })
+      const put_result = await corpus.stores.timelines.put({ items: [] }, { invoked_at: invoked })
+      if (!put_result.ok) return
       
-      const result = await corpus.stores.timelines.get('v1')
+      const result = await corpus.stores.timelines.get(put_result.value.version)
       expect(result.ok).toBe(true)
       if (!result.ok) return
       

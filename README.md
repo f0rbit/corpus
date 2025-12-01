@@ -23,8 +23,8 @@ const corpus = create_corpus()
   .with_store(define_store('timelines', json_codec(TimelineSchema)))
   .build()
 
-// typed store access
-const result = await corpus.stores.timelines.put('v1', { 
+// typed store access - version is auto-generated
+const result = await corpus.stores.timelines.put({ 
   items: [{ id: '1', text: 'hello' }] 
 })
 

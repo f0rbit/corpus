@@ -10,6 +10,7 @@ export { json_codec, text_codec, binary_codec } from './codec'
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema'
 
 export { compute_hash } from './hash'
+export { generate_version } from './version'
 
 export type {
   ContentType,
