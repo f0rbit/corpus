@@ -1,11 +1,25 @@
 {
   "name": "corpus",
+  "version": "0.1.0",
   "module": "index.ts",
   "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./types.ts",
+    "./schema": "./schema.ts"
+  },
+  "files": [
+    "*.ts",
+    "backend/*.ts"
+  ],
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "zod": "^3"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.7"
   }
 }
