@@ -1,17 +1,54 @@
 {
-  "name": "corpus",
+  "name": "@f0rbit/corpus",
   "version": "0.1.0",
-  "module": "index.ts",
+  "description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
   "exports": {
-    ".": "./index.ts",
-    "./types": "./types.ts",
-    "./schema": "./schema.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types.js",
+      "types": "./dist/types.d.ts"
+    },
+    "./schema": {
+      "import": "./dist/schema.js",
+      "types": "./dist/schema.d.ts"
+    }
   },
   "files": [
-    "*.ts",
-    "backend/*.ts"
+    "dist"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/f0rbit/corpus.git"
+  },
+  "keywords": [
+    "snapshot",
+    "versioning",
+    "data-store",
+    "lineage",
+    "typescript"
+  ],
+  "author": "f0rbit",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/f0rbit/corpus/issues"
+  },
+  "homepage": "https://github.com/f0rbit/corpus#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
