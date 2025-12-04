@@ -1,7 +1,9 @@
-import type { ZodSchema } from "zod";
 import type { Codec } from "./types";
 
-export function json_codec<T>(schema: ZodSchema<T>): Codec<T> {
+// Use a structural type that matches both Zod 3.x and 4.x
+type ZodLike<T> = { parse: (data: unknown) => T };
+
+export function json_codec<T>(schema: ZodLike<T>): Codec<T> {
 	return {
 		content_type: "application/json",
 		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
