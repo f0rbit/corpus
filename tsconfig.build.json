@@ -18,6 +18,7 @@
   },
   "include": [
     "index.ts",
+    "cloudflare.ts",
     "types.ts",
     "store.ts",
     "corpus.ts",

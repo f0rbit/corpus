@@ -1,6 +1,6 @@
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
 import { ok, err } from '../types'
-import { mkdir, unlink, readdir } from 'node:fs/promises'
+import { mkdir, readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 
 export type FileBackendConfig = {
@@ -189,7 +189,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
       try {
         const file = Bun.file(path)
         if (await file.exists()) {
-          await unlink(path)
+          await file.delete()
         }
         return ok(undefined)
       } catch (cause) {
