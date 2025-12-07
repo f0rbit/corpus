@@ -7,55 +7,207 @@ description: File-system storage backend for local persistence
 function create_file_backend(config: FileBackendConfig): Backend
 ```
 
-Creates a file-system storage backend for local persistence using Bun's file APIs.
+The file backend provides durable local storage using the file system. Metadata is stored as JSON, and binary data is stored in separate files with content-addressable naming for automatic deduplication.
 
-## Usage
+## Why Use File Backend?
+
+- **Persistence**: Data survives process restarts
+- **Inspectable**: Human-readable JSON metadata, standard binary files
+- **No dependencies**: No database server or external services needed
+- **Portable**: Just copy the directory to move your data
+
+## Basic Usage
 
 ```ts
 import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const DocumentSchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  updatedAt: z.string(),
+})
 
 const corpus = create_corpus()
   .with_backend(create_file_backend({ base_path: './data' }))
-  .with_store(define_store('documents', json_codec(DocSchema)))
+  .with_store(define_store('documents', json_codec(DocumentSchema)))
   .build()
+
+// Data persists across restarts
+await corpus.stores.documents.put({
+  title: 'My Document',
+  content: 'Hello, world!',
+  updatedAt: new Date().toISOString(),
+})
 ```
 
 ## Configuration
 
 ```ts
 type FileBackendConfig = {
-  base_path: string      // Root directory for storage
+  base_path: string
   on_event?: EventHandler
 }
 ```
 
+| Option | Type | Description |
+|--------|------|-------------|
+| `base_path` | `string` | Root directory for all storage (created if doesn't exist) |
+| `on_event` | `(event: CorpusEvent) => void` | Optional callback for storage events |
+
 ## Directory Structure
+
+The file backend organizes data predictably:
 
 ```
 base_path/
 ├── documents/
-│   └── _meta.json       # Metadata
+│   └── _meta.json           # All metadata for 'documents' store
+├── images/
+│   └── _meta.json           # All metadata for 'images' store
 └── _data/
-    └── documents_abc123.bin  # Binary data
+    ├── documents_a1b2c3.bin # Binary data (named by hash)
+    ├── documents_d4e5f6.bin
+    └── images_789abc.bin
 ```
+
+### Metadata Format
+
+The `_meta.json` file contains an array of `[version, metadata]` pairs:
+
+```json
+[
+  ["AZx5kQ", {
+    "store_id": "documents",
+    "version": "AZx5kQ",
+    "content_hash": "a1b2c3...",
+    "created_at": "2024-01-15T10:30:00Z",
+    "size_bytes": 1234,
+    "parents": []
+  }]
+]
+```
+
+### Data Files
+
+Binary data is stored in the `_data` directory with content-addressable names. If two versions have identical content, they share the same data file (deduplication).
 
 ## CLI Tool Example
 
+Perfect for local CLI tools that need persistent configuration or data:
+
 ```ts
 #!/usr/bin/env bun
+
+import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const ConfigSchema = z.object({
+  theme: z.enum(['light', 'dark']),
+  recentFiles: z.array(z.string()),
+  lastOpened: z.string().optional(),
+})
+
+// Store config in user's home directory
+const configPath = `${process.env.HOME}/.myapp`
+
 const corpus = create_corpus()
-  .with_backend(create_file_backend({ 
-    base_path: `${process.env.HOME}/.myapp` 
-  }))
+  .with_backend(create_file_backend({ base_path: configPath }))
   .with_store(define_store('config', json_codec(ConfigSchema)))
   .build()
+
+// Load existing config or use defaults
+async function loadConfig() {
+  const result = await corpus.stores.config.get_latest()
+  if (result.ok) {
+    return result.value.data
+  }
+  return { theme: 'dark' as const, recentFiles: [] }
+}
+
+// Save updated config
+async function saveConfig(config: z.infer<typeof ConfigSchema>) {
+  await corpus.stores.config.put({
+    ...config,
+    lastOpened: new Date().toISOString(),
+  })
+}
+
+// Usage
+const config = await loadConfig()
+console.log(`Theme: ${config.theme}`)
 ```
 
-:::note
-Requires Bun runtime - uses `Bun.file()` and `Bun.write()`.
+## Development Server Example
+
+Use file backend during development for data that persists across restarts:
+
+```ts
+import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+
+const corpus = create_corpus()
+  .with_backend(create_file_backend({ 
+    base_path: './dev-data',
+    on_event: (e) => {
+      if (e.type === 'snapshot_put') {
+        console.log(`[corpus] Saved ${e.store_id}@${e.version}`)
+      }
+    }
+  }))
+  .with_store(define_store('sessions', json_codec(SessionSchema)))
+  .with_store(define_store('cache', json_codec(CacheSchema)))
+  .build()
+
+// Data survives `bun --watch` restarts
+```
+
+## Error Handling
+
+File operations can fail due to permissions, disk space, or I/O errors:
+
+```ts
+const result = await corpus.stores.documents.put(data)
+
+if (!result.ok) {
+  switch (result.error.kind) {
+    case 'storage_error':
+      console.error(`I/O error during ${result.error.operation}:`, result.error.cause)
+      break
+    case 'encode_error':
+      console.error('Failed to serialize data:', result.error.cause)
+      break
+  }
+}
+```
+
+## When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Local development | ✅ Yes |
+| CLI tools | ✅ Yes |
+| Desktop applications | ✅ Yes |
+| Single-server deployment | ✅ Yes |
+| Multi-server deployment | ❌ No (no replication) |
+| Serverless/Edge | ❌ No (use Cloudflare) |
+| High-write workloads | ⚠️ Consider (I/O bound) |
+
+## Requirements
+
+:::note[Bun Required]
+This backend uses Bun-specific APIs (`Bun.file()`, `Bun.write()`). It's not compatible with Node.js. For Node.js, use the [Memory](/corpus/api/backends/memory) backend for testing or implement a custom backend.
 :::
+
+## Performance Considerations
+
+- **Metadata**: All metadata for a store is in one JSON file. Very large stores (100K+ versions) may see slower list operations.
+- **Data**: Binary data is stored in separate files, so retrieval is fast regardless of total data size.
+- **Writes**: Each write updates the metadata JSON file, which requires reading and rewriting the entire file.
+
+For high-throughput scenarios, consider the [Layered](/corpus/api/backends/layered) backend with memory caching.
 
 ## See Also
 
 - [Memory](/corpus/api/backends/memory) - For testing
-- [Cloudflare](/corpus/api/backends/cloudflare) - For production
+- [Cloudflare](/corpus/api/backends/cloudflare) - For production deployment
+- [Layered](/corpus/api/backends/layered) - Add caching to file backend
