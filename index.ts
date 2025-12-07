@@ -22,6 +22,8 @@ export type {
   Codec,
   Store,
   StoreDefinition,
+  DefineStoreOpts,
+  DataKeyContext,
   PutOpts,
   CorpusBuilder,
   Corpus,

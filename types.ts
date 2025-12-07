@@ -292,10 +292,28 @@ export type PutOpts = {
   tags?: string[]
 }
 
+/**
+ * Context passed to data_key_fn for generating custom storage paths.
+ */
+export type DataKeyContext = {
+  store_id: string
+  version: string
+  content_hash: string
+  tags?: string[]
+}
+
 export type StoreDefinition<Id extends string, T> = {
   id: Id
   codec: Codec<T>
   description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
+}
+
+export type DefineStoreOpts = {
+  description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
 }
 
 /**
@@ -308,7 +326,7 @@ export type StoreDefinition<Id extends string, T> = {
  * @group Helpers
  * @param id - Unique identifier for the store (becomes the key in corpus.stores)
  * @param codec - Serialization codec for the store's data type
- * @param description - Optional description for documentation
+ * @param opts - Optional configuration (description, custom data_key_fn)
  * @returns A StoreDefinition to pass to `create_corpus().with_store()`
  * 
  * @example
@@ -321,7 +339,15 @@ export type StoreDefinition<Id extends string, T> = {
  *   published: z.boolean()
  * })
  * 
- * const posts = define_store('posts', json_codec(PostSchema), 'Blog posts')
+ * const posts = define_store('posts', json_codec(PostSchema), { description: 'Blog posts' })
+ * 
+ * // With custom path generation based on tags
+ * const hansard = define_store('hansard', text_codec(), {
+ *   data_key_fn: (ctx) => {
+ *     const date = ctx.tags?.find(t => t.startsWith('date:'))?.slice(5) ?? 'unknown'
+ *     return `australia-house/raw/${date}/${ctx.version}`
+ *   }
+ * })
  * 
  * const corpus = create_corpus()
  *   .with_backend(backend)
@@ -335,9 +361,13 @@ export type StoreDefinition<Id extends string, T> = {
 export function define_store<Id extends string, T>(
   id: Id,
   codec: Codec<T>,
-  description?: string
+  opts?: DefineStoreOpts | string
 ): StoreDefinition<Id, T> {
-  return { id, codec, description }
+  // Support old signature: define_store(id, codec, description)
+  if (typeof opts === 'string') {
+    return { id, codec, description: opts }
+  }
+  return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn }
 }
 
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {

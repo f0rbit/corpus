@@ -3,7 +3,7 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError } from './types'
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext } from './types'
 import { ok, err } from './types'
 import { compute_hash, generate_version } from './utils'
 
@@ -41,14 +41,17 @@ import { compute_hash, generate_version } from './utils'
  * ```
  */
 export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
-  const { id, codec } = definition
+  const { id, codec, data_key_fn } = definition
   
   function emit(event: Parameters<NonNullable<Backend['on_event']>>[0]) {
     backend.on_event?.(event)
   }
 
-  function make_data_key(store_id: string, content_hash: string): string {
-    return `${store_id}/${content_hash}`
+  function make_data_key(ctx: DataKeyContext): string {
+    if (data_key_fn) {
+      return data_key_fn(ctx)
+    }
+    return `${ctx.store_id}/${ctx.content_hash}`
   }
 
   return {
@@ -68,11 +71,12 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       }
 
       const content_hash = await compute_hash(bytes)
+      const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
       
       // deduplication: reuse existing data_key if content already exists
       const existing = await backend.metadata.find_by_hash(id, content_hash)
       const deduplicated = existing !== null
-      const data_key = deduplicated ? existing.data_key : make_data_key(id, content_hash)
+      const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
 
       if (!deduplicated) {
         const data_result = await backend.data.put(data_key, bytes)
