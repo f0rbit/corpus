@@ -1,5 +1,28 @@
 import { sqliteTable, text, integer, primaryKey, index } from 'drizzle-orm/sqlite-core'
 
+/**
+ * Drizzle ORM schema for the corpus_snapshots table.
+ * 
+ * Used by the Cloudflare backend with D1 (SQLite). Defines the table structure
+ * for storing snapshot metadata.
+ * 
+ * Columns:
+ * - `store_id` + `version` - Composite primary key
+ * - `parents` - JSON array of parent references
+ * - `created_at` / `invoked_at` - ISO 8601 timestamps
+ * - `content_hash` - SHA-256 hash for deduplication
+ * - `data_key` - Key to retrieve binary data from R2
+ * - `tags` - Optional JSON array of tags
+ * 
+ * @example
+ * ```ts
+ * import { drizzle } from 'drizzle-orm/d1'
+ * import { corpus_snapshots } from 'corpus/schema'
+ * 
+ * const db = drizzle(env.D1)
+ * const rows = await db.select().from(corpus_snapshots).limit(10)
+ * ```
+ */
 export const corpus_snapshots = sqliteTable('corpus_snapshots', {
   store_id: text('store_id').notNull(),
   version: text('version').notNull(),

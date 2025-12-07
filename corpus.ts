@@ -2,10 +2,37 @@ import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMe
 import { ok, err } from './types'
 import { compute_hash, generate_version } from './utils'
 
-// ============================================================================
-// Store
-// ============================================================================
-
+/**
+ * Creates a typed Store instance bound to a Backend.
+ * 
+ * Each store manages versioned snapshots of data with automatic deduplication:
+ * when the same content is stored twice, only one copy of the data is kept
+ * (identified by content hash), though separate metadata entries are created.
+ * 
+ * Stores are typically created via `create_corpus().with_store()` rather than
+ * directly, which provides type-safe access through `corpus.stores.<id>`.
+ * 
+ * @param backend - The storage backend for persistence
+ * @param definition - Store configuration including id and codec
+ * @returns A Store instance for the specified type
+ * 
+ * @example
+ * ```ts
+ * const backend = create_memory_backend()
+ * const users = define_store('users', json_codec(UserSchema))
+ * const store = create_store(backend, users)
+ * 
+ * // Store a snapshot
+ * const result = await store.put({ name: 'Alice', email: 'alice@example.com' })
+ * if (result.ok) {
+ *   console.log('Stored version:', result.value.version)
+ * }
+ * 
+ * // Storing identical content reuses the same data_key (deduplication)
+ * const result2 = await store.put({ name: 'Alice', email: 'alice@example.com' })
+ * // result.value.data_key === result2.value.data_key (same content hash)
+ * ```
+ */
 export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
   const { id, codec } = definition
   
@@ -151,10 +178,33 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
   }
 }
 
-// ============================================================================
-// Corpus
-// ============================================================================
-
+/**
+ * Creates a new Corpus instance using the builder pattern.
+ * 
+ * A Corpus is a collection of typed stores backed by a storage backend.
+ * Use the builder chain to configure: `with_backend()` → `with_store()` → `build()`.
+ * 
+ * @returns A CorpusBuilder to configure and build the Corpus
+ * 
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * const UserSchema = z.object({ name: z.string(), email: z.string() })
+ * const users = define_store('users', json_codec(UserSchema))
+ * const notes = define_store('notes', text_codec())
+ * 
+ * const corpus = create_corpus()
+ *   .with_backend(create_memory_backend())
+ *   .with_store(users)
+ *   .with_store(notes)
+ *   .build()
+ * 
+ * // Type-safe access to stores
+ * await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
+ * await corpus.stores.notes.put('Hello, world!')
+ * ```
+ */
 export function create_corpus(): CorpusBuilder<{}> {
   let backend: Backend | null = null
   const definitions: StoreDefinition<string, any>[] = []

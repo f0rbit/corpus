@@ -5,6 +5,31 @@ export type MemoryBackendOptions = {
   on_event?: EventHandler
 }
 
+/**
+ * Creates an in-memory storage backend.
+ * 
+ * Ideal for testing, development, and ephemeral storage scenarios.
+ * All data is lost when the process ends.
+ * 
+ * @param options - Optional configuration
+ * @param options.on_event - Event handler for storage operations
+ * @returns A Backend instance using in-memory storage
+ * 
+ * @example
+ * ```ts
+ * // Basic usage for testing
+ * const backend = create_memory_backend()
+ * const corpus = create_corpus()
+ *   .with_backend(backend)
+ *   .with_store(define_store('test', text_codec()))
+ *   .build()
+ * 
+ * // With event logging
+ * const backend = create_memory_backend({
+ *   on_event: (e) => console.log(`[${e.type}]`, e)
+ * })
+ * ```
+ */
 export function create_memory_backend(options?: MemoryBackendOptions): Backend {
   const meta_store = new Map<string, SnapshotMeta>()
   const data_store = new Map<string, Uint8Array>()
