@@ -1,5 +1,3 @@
-import type { ZodSchema } from "zod"
-
 export type CorpusError =
   | { kind: 'not_found'; store_id: string; version: string }
   | { kind: 'already_exists'; store_id: string; version: string }
