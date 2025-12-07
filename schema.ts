@@ -1,3 +1,8 @@
+/**
+ * @module Schema
+ * @description Database schema definitions for Drizzle ORM.
+ */
+
 import { sqliteTable, text, integer, primaryKey, index } from 'drizzle-orm/sqlite-core'
 
 /**

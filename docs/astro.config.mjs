@@ -16,7 +16,7 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       plugins: [
         starlightTypeDoc({
-          entryPoints: ['../index.ts', '../cloudflare.ts'],
+          entryPoints: ['../core.ts', '../backends.ts', '../codecs.ts'],
           tsconfig: '../tsconfig.build.json',
           output: 'api',
           sidebar: {
@@ -28,6 +28,8 @@ export default defineConfig({
             excludeProtected: true,
             excludeInternal: true,
             readme: 'none',
+            categorizeByGroup: true,
+            categoryOrder: ['Core', 'Backends', 'Codecs', 'Utilities', 'Types', '*'],
             sort: ['source-order'],
           },
         }),

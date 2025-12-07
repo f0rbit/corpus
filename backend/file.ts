@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description File-system storage backend for local persistence.
+ */
+
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
 import { ok, err } from '../types'
 import { mkdir, readdir } from 'node:fs/promises'
@@ -10,6 +15,8 @@ export type FileBackendConfig = {
 
 /**
  * Creates a file-system storage backend for local persistence.
+ * @category Backends
+ * @group Storage Backends
  * 
  * Uses Bun's file APIs for efficient I/O. Metadata is stored as JSON files
  * per store, and data is stored as binary files in a shared `_data` directory.

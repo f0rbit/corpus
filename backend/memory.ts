@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description In-memory storage backend for testing and development.
+ */
+
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
 import { ok, err } from '../types'
 
@@ -7,6 +12,8 @@ export type MemoryBackendOptions = {
 
 /**
  * Creates an in-memory storage backend.
+ * @category Backends
+ * @group Storage Backends
  * 
  * Ideal for testing, development, and ephemeral storage scenarios.
  * All data is lost when the process ends.

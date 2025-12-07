@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description Cloudflare Workers storage backend using D1 and R2.
+ */
+
 import { eq, and, desc, lt, gt, like, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
@@ -20,6 +25,8 @@ export type CloudflareBackendConfig = {
 
 /**
  * Creates a Cloudflare Workers storage backend using D1 and R2.
+ * @category Backends
+ * @group Storage Backends
  * 
  * Uses D1 (SQLite) for metadata storage and R2 (object storage) for binary data.
  * Requires running `CORPUS_MIGRATION_SQL` on the D1 database before first use.

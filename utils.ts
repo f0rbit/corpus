@@ -1,7 +1,14 @@
+/**
+ * @module Utilities
+ * @description Utility functions for hashing, versioning, and codecs.
+ */
+
 import type { Codec } from "./types";
 
 /**
  * Computes the SHA-256 hash of binary data.
+ * @category Utilities
+ * @group Hashing
  * 
  * Returns a lowercase hexadecimal string (64 characters).
  * Used internally for content-addressable storage and deduplication.
@@ -34,6 +41,8 @@ let sequence = 0
  * Versions sort lexicographically in chronological order, making them suitable
  * for use as database keys where ordering matters.
  * 
+ * @category Utilities
+ * @group Versioning
  * @returns A unique version string like `AZJx4vM` or `AZJx4vM.1`
  * 
  * @example
@@ -86,6 +95,8 @@ type ZodLike<T> = { parse: (data: unknown) => T };
  * Note: Validation only happens on decode. Invalid data passed to encode will
  * serialize but may fail validation when decoded later.
  * 
+ * @category Codecs
+ * @group Codec Factories
  * @param schema - A Zod schema (or any object with a `parse` method)
  * @returns A Codec for JSON serialization with validation
  * 
@@ -121,6 +132,8 @@ export function json_codec<T>(schema: ZodLike<T>): Codec<T> {
  * No validation is performed - any string can be encoded and any valid
  * UTF-8 bytes can be decoded.
  * 
+ * @category Codecs
+ * @group Codec Factories
  * @returns A Codec for plain text strings
  * 
  * @example
@@ -149,6 +162,8 @@ export function text_codec(): Codec<string> {
  * No transformation is performed - bytes are stored and retrieved as-is.
  * Use for images, PDFs, pre-serialized data, or any binary content.
  * 
+ * @category Codecs
+ * @group Codec Factories
  * @returns A Codec for raw binary data
  * 
  * @example

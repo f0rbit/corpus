@@ -1,5 +1,12 @@
 /**
+ * @module Types
+ * @description Type definitions for the corpus library.
+ */
+
+/**
  * Error types that can occur during Corpus operations.
+ * @category Types
+ * @group Error Types
  * 
  * Uses discriminated unions for type-safe error handling via the `kind` field:
  * - `not_found` - Requested snapshot or data does not exist
@@ -34,6 +41,11 @@ export type CorpusError =
   | { kind: 'hash_mismatch'; expected: string; actual: string }
   | { kind: 'invalid_config'; message: string }
 
+/**
+ * A discriminated union representing either success or failure.
+ * @category Types
+ * @group Result Types
+ */
 export type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }
@@ -41,6 +53,8 @@ export type Result<T, E = CorpusError> =
 /**
  * Creates a successful Result containing a value.
  * 
+ * @category Core
+ * @group Result Helpers
  * @param value - The success value to wrap
  * @returns A Result with `ok: true` and the value
  * 
@@ -62,6 +76,8 @@ export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
 /**
  * Creates a failed Result containing an error.
  * 
+ * @category Core
+ * @group Result Helpers
  * @param error - The error to wrap
  * @returns A Result with `ok: false` and the error
  * 
@@ -117,6 +133,8 @@ export type ParentRef = {
  * - `parents` - Links to parent snapshots for building data lineage graphs
  * - `tags` - Optional labels for filtering and organization
  * 
+ * @category Types
+ * @group Snapshot Types
  * @example
  * ```ts
  * const result = await store.put(data, {
@@ -191,6 +209,8 @@ export type ListOpts = {
  * - `create_cloudflare_backend()` - Cloudflare D1 + R2
  * - `create_layered_backend()` - Combines multiple backends
  * 
+ * @category Types
+ * @group Backend Types
  * @example
  * ```ts
  * // Custom backend implementation
@@ -220,6 +240,8 @@ export type Backend = {
  * - `text_codec()` - Plain UTF-8 text
  * - `binary_codec()` - Raw binary pass-through
  * 
+ * @category Types
+ * @group Codec Types
  * @example
  * ```ts
  * // Custom codec for MessagePack
@@ -249,6 +271,9 @@ export type Codec<T> = {
  * 
  * Stores automatically deduplicate: storing the same content twice creates
  * two metadata entries pointing to the same underlying data.
+ * 
+ * @category Types
+ * @group Store Types
  */
 export type Store<T> = {
   readonly id: string
@@ -279,6 +304,8 @@ export type StoreDefinition<Id extends string, T> = {
  * The `id` becomes the key in `corpus.stores`, providing type-safe access
  * to the store after building the corpus.
  * 
+ * @category Core
+ * @group Helpers
  * @param id - Unique identifier for the store (becomes the key in corpus.stores)
  * @param codec - Serialization codec for the store's data type
  * @param description - Optional description for documentation

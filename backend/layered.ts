@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description Layered backend for caching and replication strategies.
+ */
+
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle } from '../types'
 import { ok, err } from '../types'
 
@@ -9,6 +14,8 @@ export type LayeredBackendOptions = {
 
 /**
  * Creates a layered backend that combines multiple backends with read/write separation.
+ * @category Backends
+ * @group Composite Backends
  * 
  * Read operations use fallback: tries each read backend in order until one succeeds.
  * Write operations use fanout: writes to all write backends (fails if any fail).

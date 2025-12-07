@@ -1,9 +1,16 @@
+/**
+ * @module Core
+ * @description Core corpus and store creation functions.
+ */
+
 import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError } from './types'
 import { ok, err } from './types'
 import { compute_hash, generate_version } from './utils'
 
 /**
  * Creates a typed Store instance bound to a Backend.
+ * @category Core
+ * @group Builders
  * 
  * Each store manages versioned snapshots of data with automatic deduplication:
  * when the same content is stored twice, only one copy of the data is kept
@@ -184,6 +191,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
  * A Corpus is a collection of typed stores backed by a storage backend.
  * Use the builder chain to configure: `with_backend()` → `with_store()` → `build()`.
  * 
+ * @category Core
+ * @group Builders
  * @returns A CorpusBuilder to configure and build the Corpus
  * 
  * @example
