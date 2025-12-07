@@ -1,0 +1,118 @@
+---
+title: Getting Started
+description: Install Corpus and store your first versioned snapshot in under 5 minutes.
+---
+
+import { Steps, Tabs, TabItem, Code } from '@astrojs/starlight/components';
+
+Get up and running with Corpus in minutes.
+
+<Steps>
+
+1. ### Install the package
+
+   <Tabs>
+     <TabItem label="bun">
+       ```bash
+       bun add @f0rbit/corpus zod
+       ```
+     </TabItem>
+     <TabItem label="npm">
+       ```bash
+       npm install @f0rbit/corpus zod
+       ```
+     </TabItem>
+     <TabItem label="pnpm">
+       ```bash
+       pnpm add @f0rbit/corpus zod
+       ```
+     </TabItem>
+   </Tabs>
+
+2. ### Define a schema
+
+   Corpus uses Zod for type-safe serialization. Define a schema for your data:
+
+   ```typescript
+   import { z } from 'zod'
+
+   const PostSchema = z.object({
+     title: z.string(),
+     body: z.string(),
+     published: z.boolean(),
+     tags: z.array(z.string()).optional(),
+   })
+
+   type Post = z.infer<typeof PostSchema>
+   ```
+
+3. ### Create a corpus
+
+   Use the builder pattern to configure your corpus with a backend and stores:
+
+   ```typescript
+   import { 
+     create_corpus, 
+     create_memory_backend, 
+     define_store, 
+     json_codec 
+   } from '@f0rbit/corpus'
+
+   const corpus = create_corpus()
+     .with_backend(create_memory_backend())
+     .with_store(define_store('posts', json_codec(PostSchema)))
+     .build()
+   ```
+
+4. ### Store and retrieve data
+
+   Use the typed store to save and load snapshots:
+
+   ```typescript
+   const post: Post = {
+     title: 'Hello World',
+     body: 'My first post using Corpus.',
+     published: true,
+   }
+
+   const result = await corpus.stores.posts.put(post)
+
+   if (result.ok) {
+     const { version, content_hash } = result.value
+     console.log(`Saved version ${version} with hash ${content_hash}`)
+   }
+   ```
+
+5. ### Handle errors with pattern matching
+
+   Corpus uses `Result<T, E>` types instead of throwing exceptions:
+
+   ```typescript
+   const snapshot = await corpus.stores.posts.get('nonexistent-version')
+
+   if (!snapshot.ok) {
+     switch (snapshot.error.kind) {
+       case 'not_found':
+         console.log(`Version ${snapshot.error.version} does not exist`)
+         break
+       case 'decode_error':
+         console.log('Data corruption detected:', snapshot.error.cause)
+         break
+       case 'storage_error':
+         console.log('Backend failed:', snapshot.error.operation)
+         break
+     }
+     return
+   }
+
+   console.log('Post title:', snapshot.value.data.title)
+   ```
+
+</Steps>
+
+## Next Steps
+
+- **[Storage Backends](/corpus/guides/backends/)** - Learn about memory, file, and Cloudflare backends
+- **[Cloudflare Deployment](/corpus/guides/cloudflare/)** - Deploy to Cloudflare Workers with D1 and R2
+- **[Testing Patterns](/corpus/guides/testing/)** - Write tests using the memory backend
+- **[API Reference](/corpus/api/)** - Full API documentation

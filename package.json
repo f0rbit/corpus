@@ -31,7 +31,10 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "docs:dev": "cd docs && bun run dev",
+    "docs:build": "cd docs && bun run build",
+    "docs:preview": "cd docs && bun run preview"
   },
   "repository": {
     "type": "git",

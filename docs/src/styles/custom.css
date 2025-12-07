@@ -1,0 +1,21 @@
+:root {
+  --sl-color-accent-low: hsl(140, 30%, 20%);
+  --sl-color-accent: hsl(140, 50%, 45%);
+  --sl-color-accent-high: hsl(140, 50%, 70%);
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: hsl(140, 40%, 90%);
+  --sl-color-accent: hsl(140, 50%, 35%);
+  --sl-color-accent-high: hsl(140, 40%, 25%);
+}
+
+.hero {
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+.card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}

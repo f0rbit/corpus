@@ -11,8 +11,7 @@ export type MemoryBackendOptions = {
  * Ideal for testing, development, and ephemeral storage scenarios.
  * All data is lost when the process ends.
  * 
- * @param options - Optional configuration
- * @param options.on_event - Event handler for storage operations
+ * @param options - Optional configuration with `on_event` handler for observability
  * @returns A Backend instance using in-memory storage
  * 
  * @example

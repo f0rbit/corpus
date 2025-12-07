@@ -18,10 +18,7 @@ export type LayeredBackendOptions = {
  * - **Replication**: Write to multiple backends for redundancy
  * - **Migration**: Read from old + new backends, write only to new
  * 
- * @param options - Configuration options
- * @param options.read - Backends to try for read operations (in order)
- * @param options.write - Backends to write to (all receive writes)
- * @param options.list_strategy - How to handle list: 'merge' (default) combines all backends, 'first' uses only the first
+ * @param options - Configuration with `read` backends (tried in order), `write` backends (all receive writes), and optional `list_strategy` ('merge' or 'first')
  * @returns A Backend that delegates to the configured backends
  * 
  * @example

@@ -27,10 +27,7 @@ export type CloudflareBackendConfig = {
  * This backend is designed for production use in Cloudflare Workers environments,
  * providing durable, globally distributed storage.
  * 
- * @param config - Configuration options
- * @param config.d1 - Cloudflare D1 database binding
- * @param config.r2 - Cloudflare R2 bucket binding
- * @param config.on_event - Optional event handler
+ * @param config - Configuration with `d1` (D1 database), `r2` (R2 bucket), and optional `on_event` handler
  * @returns A Backend instance using Cloudflare D1 + R2
  * 
  * @example

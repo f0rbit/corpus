@@ -21,9 +21,7 @@ export type FileBackendConfig = {
  *   _data/<store_id>_<hash>.bin  # Binary data files
  * ```
  * 
- * @param config - Configuration options
- * @param config.base_path - Root directory for storage
- * @param config.on_event - Optional event handler
+ * @param config - Configuration with `base_path` (root directory) and optional `on_event` handler
  * @returns A Backend instance using file-system storage
  * 
  * @example
