@@ -1,0 +1,66 @@
+---
+title: Memory
+description: In-memory storage backend for testing and development
+---
+
+```ts
+function create_memory_backend(options?: MemoryBackendOptions): Backend
+```
+
+Creates an in-memory storage backend. Ideal for testing, development, and ephemeral storage. All data is lost when the process ends.
+
+## Usage
+
+```ts
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('items', json_codec(ItemSchema)))
+  .build()
+```
+
+## With Event Logging
+
+```ts
+const events: CorpusEvent[] = []
+
+const backend = create_memory_backend({
+  on_event: (event) => {
+    events.push(event)
+    console.log(`[${event.type}]`, event)
+  }
+})
+```
+
+## Testing Example
+
+```ts
+import { describe, it, expect, beforeEach } from 'bun:test'
+
+describe('my feature', () => {
+  let corpus: ReturnType<typeof createTestCorpus>
+
+  function createTestCorpus() {
+    return create_corpus()
+      .with_backend(create_memory_backend())
+      .with_store(define_store('items', json_codec(ItemSchema)))
+      .build()
+  }
+
+  beforeEach(() => {
+    corpus = createTestCorpus() // Fresh backend each test
+  })
+
+  it('stores and retrieves data', async () => {
+    await corpus.stores.items.put({ name: 'test' })
+    const latest = await corpus.stores.items.get_latest()
+    expect(latest.ok && latest.value.data.name).toBe('test')
+  })
+})
+```
+
+## See Also
+
+- [File System](/corpus/api/backends/file) - Persistent local storage
+- [Layered](/corpus/api/backends/layered) - Add memory caching to other backends

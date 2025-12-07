@@ -1,0 +1,66 @@
+---
+title: create_corpus
+description: Create a new Corpus instance using the builder pattern
+---
+
+```ts
+function create_corpus(): CorpusBuilder<{}>
+```
+
+Creates a new Corpus instance using the builder pattern. A Corpus is a collection of typed stores backed by a storage backend.
+
+## Usage
+
+Chain the builder methods to configure your corpus:
+
+1. `with_backend(backend)` - Set the storage backend
+2. `with_store(definition)` - Add a typed store (can be called multiple times)
+3. `build()` - Create the final Corpus instance
+
+```ts
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const UserSchema = z.object({ 
+  name: z.string(), 
+  email: z.string() 
+})
+
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('users', json_codec(UserSchema)))
+  .with_store(define_store('notes', text_codec()))
+  .build()
+```
+
+## Accessing Stores
+
+After building, access your stores through the `stores` property with full type safety:
+
+```ts
+// Type-safe store access
+await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
+await corpus.stores.notes.put('Hello, world!')
+
+// Get latest snapshot
+const latest = await corpus.stores.users.get_latest()
+if (latest.ok) {
+  console.log(latest.value.data.name) // "Alice"
+}
+```
+
+## Returns
+
+Returns a `CorpusBuilder` that provides:
+
+| Method | Description |
+|--------|-------------|
+| `with_backend(backend)` | Sets the storage backend (required) |
+| `with_store(definition)` | Adds a store definition |
+| `build()` | Creates the final Corpus instance |
+
+## See Also
+
+- [define_store](/corpus/api/core/define-store) - Create store definitions
+- [Backends](/corpus/api/backends/memory) - Available storage backends
+- [Codecs](/corpus/api/codecs) - Data serialization options

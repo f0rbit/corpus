@@ -1,0 +1,68 @@
+---
+title: Layered
+description: Combine multiple backends for caching and replication
+---
+
+```ts
+function create_layered_backend(options: LayeredBackendOptions): Backend
+```
+
+Creates a composite backend combining multiple backends with read/write separation.
+
+- **Reads**: Try each backend in order until one succeeds
+- **Writes**: Write to all configured backends
+
+## Usage
+
+```ts
+import { create_layered_backend, create_memory_backend, create_file_backend } from '@f0rbit/corpus'
+
+const backend = create_layered_backend({
+  read: [memoryBackend, fileBackend],  // Try memory first
+  write: [memoryBackend, fileBackend], // Write to both
+})
+```
+
+## Configuration
+
+```ts
+type LayeredBackendOptions = {
+  read: Backend[]           // Backends to try for reads (in order)
+  write: Backend[]          // Backends to write to (all receive writes)
+  list_strategy?: 'merge' | 'first'  // How to handle list() (default: 'merge')
+}
+```
+
+## Common Patterns
+
+### Caching Layer
+
+```ts
+const backend = create_layered_backend({
+  read: [create_memory_backend(), create_file_backend({ base_path: './data' })],
+  write: [create_memory_backend(), create_file_backend({ base_path: './data' })],
+})
+```
+
+### Migration
+
+```ts
+const backend = create_layered_backend({
+  read: [newBackend, oldBackend],  // Prefer new
+  write: [newBackend],             // Only write to new
+})
+```
+
+### Replication
+
+```ts
+const backend = create_layered_backend({
+  read: [primary, replica1, replica2],
+  write: [primary, replica1, replica2],
+})
+```
+
+## See Also
+
+- [Memory](/corpus/api/backends/memory) - Fast cache layer
+- [File System](/corpus/api/backends/file) - Persistent storage

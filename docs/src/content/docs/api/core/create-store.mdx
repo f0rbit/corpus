@@ -1,0 +1,72 @@
+---
+title: create_store
+description: Create a typed Store instance bound to a backend
+---
+
+```ts
+function create_store<T>(
+  backend: Backend, 
+  definition: StoreDefinition<string, T>
+): Store<T>
+```
+
+Creates a typed Store instance bound to a specific backend. This is primarily used internally by `create_corpus().build()`, but can be used directly for advanced use cases.
+
+:::note
+In most cases, you should use `create_corpus()` instead, which handles store creation automatically and provides better type inference for multiple stores.
+:::
+
+## Usage
+
+```ts
+import { create_store, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const backend = create_memory_backend()
+const definition = define_store('items', json_codec(z.object({ name: z.string() })))
+
+const store = create_store(backend, definition)
+await store.put({ name: 'Example' })
+```
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `backend` | `Backend` | The storage backend to use |
+| `definition` | `StoreDefinition<Id, T>` | Store definition from `define_store()` |
+
+## Returns
+
+Returns a `Store<T>` with the following methods:
+
+| Method | Description |
+|--------|-------------|
+| `put(data, opts?)` | Store a new snapshot |
+| `get(version)` | Get a specific version |
+| `get_latest()` | Get the most recent snapshot |
+| `get_meta(version)` | Get metadata only (no data) |
+| `list(opts?)` | List all snapshots |
+| `delete(version)` | Delete a specific version |
+
+## Content Deduplication
+
+Stores automatically deduplicate content. If you store the same data twice, it creates two versions pointing to the same underlying data:
+
+```ts
+const v1 = await store.put({ name: 'Same' })
+const v2 = await store.put({ name: 'Same' })
+
+// Same content hash, same data_key
+v1.value.content_hash === v2.value.content_hash // true
+v1.value.data_key === v2.value.data_key // true
+
+// But different versions
+v1.value.version !== v2.value.version // true
+```
+
+## See Also
+
+- [create_corpus](/corpus/api/core/create-corpus) - Recommended way to create stores
+- [define_store](/corpus/api/core/define-store) - Create store definitions
+- [Core Types](/corpus/api/core/types) - `Store`, `SnapshotMeta`, `Result`

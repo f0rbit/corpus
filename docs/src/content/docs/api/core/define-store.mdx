@@ -1,0 +1,65 @@
+---
+title: define_store
+description: Create a type-safe store definition
+---
+
+```ts
+function define_store<Id extends string, T>(
+  id: Id,
+  codec: Codec<T>,
+  description?: string
+): StoreDefinition<Id, T>
+```
+
+Creates a type-safe store definition that can be passed to `create_corpus().with_store()`. The store ID becomes the key used to access the store, and the codec determines how data is serialized.
+
+## Usage
+
+```ts
+import { define_store, json_codec, text_codec, binary_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+// JSON store with Zod validation
+const UserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+})
+const users = define_store('users', json_codec(UserSchema))
+
+// Plain text store
+const logs = define_store('logs', text_codec())
+
+// Binary store for files
+const images = define_store('images', binary_codec())
+```
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `string` | Unique identifier for the store |
+| `codec` | `Codec<T>` | Serialization codec for the data |
+| `description` | `string?` | Optional description for documentation |
+
+## With create_corpus
+
+Store definitions are passed to the corpus builder:
+
+```ts
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(users)    // Access via corpus.stores.users
+  .with_store(logs)     // Access via corpus.stores.logs
+  .with_store(images)   // Access via corpus.stores.images
+  .build()
+
+// Type-safe access
+await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
+await corpus.stores.logs.put('User Alice created')
+```
+
+## See Also
+
+- [create_corpus](/corpus/api/core/create-corpus) - Use store definitions
+- [Codecs](/corpus/api/codecs) - Available codecs
+- [Core Types](/corpus/api/core/types) - `StoreDefinition`, `Codec`

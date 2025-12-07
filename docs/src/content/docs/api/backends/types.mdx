@@ -1,0 +1,87 @@
+---
+title: Backend Types
+description: Type definitions for storage backends
+---
+
+## Backend
+
+```ts
+type Backend = {
+  metadata: MetadataClient
+  data: DataClient
+  on_event?: EventHandler
+}
+```
+
+---
+
+## MetadataClient
+
+```ts
+type MetadataClient = {
+  get: (store_id: string, version: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>
+  delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>
+  list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>
+  get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>
+  find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>
+}
+```
+
+---
+
+## DataClient
+
+```ts
+type DataClient = {
+  get: (data_key: string) => Promise<Result<DataHandle, CorpusError>>
+  put: (data_key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<Result<void, CorpusError>>
+  delete: (data_key: string) => Promise<Result<void, CorpusError>>
+  exists: (data_key: string) => Promise<boolean>
+}
+```
+
+---
+
+## DataHandle
+
+```ts
+type DataHandle = {
+  stream: () => ReadableStream<Uint8Array>
+  bytes: () => Promise<Uint8Array>
+}
+```
+
+---
+
+## CorpusEvent
+
+```ts
+type CorpusEvent =
+  | { type: 'meta_get'; store_id: string; version: string; found: boolean }
+  | { type: 'meta_put'; store_id: string; version: string }
+  | { type: 'meta_delete'; store_id: string; version: string }
+  | { type: 'meta_list'; store_id: string; count: number }
+  | { type: 'data_get'; store_id: string; version: string; found: boolean }
+  | { type: 'data_put'; store_id: string; version: string; size_bytes: number; deduplicated: boolean }
+  | { type: 'snapshot_put'; store_id: string; version: string; content_hash: string; deduplicated: boolean }
+  | { type: 'snapshot_get'; store_id: string; version: string; found: boolean }
+  | { type: 'error'; error: CorpusError }
+
+type EventHandler = (event: CorpusEvent) => void
+```
+
+---
+
+## Configuration Types
+
+```ts
+type MemoryBackendOptions = { on_event?: EventHandler }
+
+type FileBackendConfig = { base_path: string; on_event?: EventHandler }
+
+type CloudflareBackendConfig = { d1: D1Database; r2: R2Bucket; on_event?: EventHandler }
+
+type LayeredBackendOptions = { read: Backend[]; write: Backend[]; list_strategy?: 'merge' | 'first' }
+```

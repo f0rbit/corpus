@@ -1,0 +1,61 @@
+---
+title: File System
+description: File-system storage backend for local persistence
+---
+
+```ts
+function create_file_backend(config: FileBackendConfig): Backend
+```
+
+Creates a file-system storage backend for local persistence using Bun's file APIs.
+
+## Usage
+
+```ts
+import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+
+const corpus = create_corpus()
+  .with_backend(create_file_backend({ base_path: './data' }))
+  .with_store(define_store('documents', json_codec(DocSchema)))
+  .build()
+```
+
+## Configuration
+
+```ts
+type FileBackendConfig = {
+  base_path: string      // Root directory for storage
+  on_event?: EventHandler
+}
+```
+
+## Directory Structure
+
+```
+base_path/
+├── documents/
+│   └── _meta.json       # Metadata
+└── _data/
+    └── documents_abc123.bin  # Binary data
+```
+
+## CLI Tool Example
+
+```ts
+#!/usr/bin/env bun
+const corpus = create_corpus()
+  .with_backend(create_file_backend({ 
+    base_path: `${process.env.HOME}/.myapp` 
+  }))
+  .with_store(define_store('config', json_codec(ConfigSchema)))
+  .build()
+```
+
+:::note
+Requires Bun runtime - uses `Bun.file()` and `Bun.write()`.
+:::
+
+## See Also
+
+- [Memory](/corpus/api/backends/memory) - For testing
+- [Cloudflare](/corpus/api/backends/cloudflare) - For production

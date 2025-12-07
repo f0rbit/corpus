@@ -1,0 +1,73 @@
+---
+title: Cloudflare
+description: Cloudflare Workers storage backend using D1 and R2
+---
+
+```ts
+function create_cloudflare_backend(config: CloudflareBackendConfig): Backend
+```
+
+Creates a storage backend for Cloudflare Workers using D1 (SQLite) for metadata and R2 (object storage) for binary data.
+
+## Usage
+
+```ts
+import { create_corpus, create_cloudflare_backend, define_store, json_codec } from '@f0rbit/corpus/cloudflare'
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const backend = create_cloudflare_backend({
+      d1: env.CORPUS_DB,
+      r2: env.CORPUS_BUCKET
+    })
+
+    const corpus = create_corpus()
+      .with_backend(backend)
+      .with_store(define_store('cache', json_codec(CacheSchema)))
+      .build()
+
+    // ...
+  }
+}
+```
+
+## Configuration
+
+```ts
+type CloudflareBackendConfig = {
+  d1: D1Database
+  r2: R2Bucket
+  on_event?: EventHandler
+}
+```
+
+## Setup
+
+1. Create D1 database: `wrangler d1 create corpus-db`
+2. Create R2 bucket: `wrangler r2 bucket create corpus-bucket`
+3. Run migration: `await env.DB.exec(CORPUS_MIGRATION_SQL)`
+
+## wrangler.toml
+
+```toml
+[[d1_databases]]
+binding = "CORPUS_DB"
+database_name = "corpus-db"
+database_id = "your-id"
+
+[[r2_buckets]]
+binding = "CORPUS_BUCKET"
+bucket_name = "corpus-bucket"
+```
+
+:::caution
+Use the `/cloudflare` import to avoid bundling Node.js code:
+```ts
+import { ... } from '@f0rbit/corpus/cloudflare'
+```
+:::
+
+## See Also
+
+- [Cloudflare Deployment Guide](/corpus/guides/cloudflare)
+- [Layered](/corpus/api/backends/layered) - Add caching
