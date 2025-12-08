@@ -1,0 +1,64 @@
+---
+title: Corpus
+description: A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support.
+template: splash
+hero:
+  tagline: Store versioned data with lineage tracking, content deduplication, and pluggable backends.
+  actions:
+    - text: Get Started
+      link: /corpus/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/f0rbit/corpus
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Type-Safe Stores" icon="seti:typescript">
+    Define stores with Zod schemas. Get full TypeScript inference for your data types, with validation on decode.
+  </Card>
+  <Card title="Content Deduplication" icon="seti:db">
+    Automatic SHA-256 content hashing. Store the same data twice and only pay for one copy.
+  </Card>
+  <Card title="Lineage Tracking" icon="seti:git">
+    Link snapshots with parent references to build data provenance graphs. Track where your data came from.
+  </Card>
+  <Card title="Multiple Backends" icon="seti:config">
+    Memory for testing, file system for local dev, Cloudflare D1+R2 for production. Or combine them with layered backends.
+  </Card>
+</CardGrid>
+
+## Quick Example
+
+```typescript
+import { z } from 'zod'
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+
+const TimelineSchema = z.object({
+  items: z.array(z.object({ id: z.string(), text: z.string() })),
+})
+
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('timelines', json_codec(TimelineSchema)))
+  .build()
+
+const result = await corpus.stores.timelines.put({ 
+  items: [{ id: '1', text: 'hello' }] 
+})
+
+if (result.ok) {
+  console.log('saved:', result.value.content_hash)
+}
+```
+
+## Why Corpus?
+
+**Errors as values** - No thrown exceptions. Every operation returns a `Result<T, CorpusError>` that you pattern match on.
+
+**Functional composition** - Builder pattern for setup, pure functions for operations. No hidden state.
+
+**Local-first ready** - Design your app to work offline with the memory or file backend, then sync to Cloudflare when online.

@@ -19,12 +19,16 @@
   "include": [
     "index.ts",
     "cloudflare.ts",
+    "core.ts",
+    "backends.ts",
+    "codecs.ts",
     "types.ts",
     "store.ts",
     "corpus.ts",
     "codec.ts",
     "hash.ts",
     "version.ts",
+    "utils.ts",
     "schema.ts",
     "sst.ts",
     "backend/*.ts"

@@ -1,0 +1,154 @@
+---
+title: Core Types
+description: Type definitions for Corpus, Store, Result, and errors
+---
+
+## Corpus
+
+The main corpus instance returned by `create_corpus().build()`.
+
+```ts
+type Corpus<Stores extends Record<string, Store<any>>> = {
+  stores: Stores
+  metadata: MetadataClient
+  data: DataClient
+}
+```
+
+---
+
+## CorpusBuilder
+
+Builder interface for configuring a Corpus.
+
+```ts
+type CorpusBuilder<Stores extends Record<string, Store<any>>> = {
+  with_backend: (backend: Backend) => CorpusBuilder<Stores>
+  with_store: <Id extends string, T>(
+    definition: StoreDefinition<Id, T>
+  ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
+  build: () => Corpus<Stores>
+}
+```
+
+---
+
+## Store
+
+Interface for interacting with a versioned data store.
+
+```ts
+type Store<T> = {
+  readonly id: string
+  readonly codec: Codec<T>
+  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
+  get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
+  get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>
+  delete: (version: string) => Promise<Result<void, CorpusError>>
+}
+```
+
+---
+
+## Result
+
+All corpus operations return a `Result` type for explicit error handling.
+
+```ts
+type Result<T, E = CorpusError> =
+  | { ok: true; value: T }
+  | { ok: false; error: E }
+
+// Helper functions
+const ok = <T>(value: T): Result<T, never>
+const err = <E>(error: E): Result<never, E>
+```
+
+### Usage
+
+```ts
+const result = await store.get(version)
+
+if (result.ok) {
+  console.log(result.value.data)
+} else {
+  console.error(result.error.kind)
+}
+```
+
+---
+
+## CorpusError
+
+Union type of all possible errors.
+
+```ts
+type CorpusError =
+  | { kind: 'not_found'; store_id: string; version: string }
+  | { kind: 'already_exists'; store_id: string; version: string }
+  | { kind: 'storage_error'; cause: Error; operation: string }
+  | { kind: 'decode_error'; cause: Error }
+  | { kind: 'encode_error'; cause: Error }
+  | { kind: 'hash_mismatch'; expected: string; actual: string }
+  | { kind: 'invalid_config'; message: string }
+```
+
+| Kind | Description |
+|------|-------------|
+| `not_found` | Requested version doesn't exist |
+| `storage_error` | Backend I/O failure |
+| `decode_error` | Codec failed to parse data |
+| `encode_error` | Codec failed to serialize data |
+
+---
+
+## SnapshotMeta
+
+Metadata about a stored snapshot.
+
+```ts
+type SnapshotMeta = {
+  store_id: string
+  version: string
+  parents: ParentRef[]
+  created_at: Date
+  invoked_at?: Date
+  content_hash: string
+  content_type: ContentType
+  size_bytes: number
+  data_key: string
+  tags?: string[]
+}
+```
+
+---
+
+## PutOpts
+
+Options for storing a snapshot.
+
+```ts
+type PutOpts = {
+  parents?: ParentRef[]
+  invoked_at?: Date
+  tags?: string[]
+}
+```
+
+---
+
+## ListOpts
+
+Options for listing snapshots.
+
+```ts
+type ListOpts = {
+  limit?: number
+  cursor?: string
+  before?: Date
+  after?: Date
+  tags?: string[]
+}
+```

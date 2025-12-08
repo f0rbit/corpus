@@ -1,0 +1,100 @@
+/* Leafy green accent theme */
+:root {
+  --sl-color-accent-low: hsl(140, 30%, 20%);
+  --sl-color-accent: hsl(140, 50%, 45%);
+  --sl-color-accent-high: hsl(140, 50%, 70%);
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: hsl(140, 40%, 90%);
+  --sl-color-accent: hsl(140, 50%, 35%);
+  --sl-color-accent-high: hsl(140, 40%, 25%);
+}
+
+/* Hero section styling */
+.hero {
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+/* Card grid for feature cards */
+.card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+/* Fix inline code blocks in API docs */
+.sl-markdown-content code:not(pre code) {
+  background-color: var(--sl-color-bg-inline-code);
+  border-radius: 0.25rem;
+  padding: 0.15em 0.35em;
+  font-size: 0.9em;
+  word-break: break-word;
+}
+
+/* Better function signature display */
+.sl-markdown-content blockquote {
+  background-color: var(--sl-color-gray-6);
+  border-left: 3px solid var(--sl-color-accent);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.sl-markdown-content blockquote code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.95em;
+}
+
+/* API page title styling */
+.sl-markdown-content h1 code {
+  font-size: 0.9em;
+  background: transparent;
+}
+
+/* Sidebar improvements */
+nav.sidebar .top-level > li > details > summary,
+nav.sidebar .top-level > li > a {
+  font-weight: 600;
+}
+
+/* API sidebar - make function names monospace */
+nav.sidebar a[href*="/api/"] {
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+}
+
+/* Parameters section styling */
+.sl-markdown-content h3 {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--sl-color-gray-5);
+}
+
+.sl-markdown-content h3:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* Type links styling */
+.sl-markdown-content a code {
+  color: var(--sl-color-accent-high);
+}
+
+/* Defined in: source link styling */
+.sl-markdown-content p:has(a[href*="github.com"]) {
+  font-size: 0.85em;
+  color: var(--sl-color-gray-3);
+}
+
+/* Example code blocks */
+.sl-markdown-content h2 + .expressive-code,
+.sl-markdown-content h2:has(+ .expressive-code) {
+  margin-top: 0.5rem;
+}
+
+/* Return type section */
+.sl-markdown-content h2:contains("Returns") + p {
+  font-family: var(--sl-font-mono);
+}

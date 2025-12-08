@@ -1,0 +1,284 @@
+---
+title: Cloudflare
+description: Cloudflare Workers storage backend using D1 and R2
+---
+
+```ts
+function create_cloudflare_backend(config: CloudflareBackendConfig): Backend
+```
+
+The Cloudflare backend provides production-ready, globally distributed storage using Cloudflare's infrastructure. It uses D1 (SQLite at the edge) for metadata queries and R2 (S3-compatible object storage) for binary data.
+
+## Why Use Cloudflare Backend?
+
+- **Global distribution**: Data replicated across Cloudflare's network
+- **Edge performance**: Low latency from any location
+- **Serverless**: No servers to manage, scales automatically
+- **Cost effective**: Pay only for what you use
+- **Durable**: Enterprise-grade storage reliability
+
+## Basic Usage
+
+```ts
+import { 
+  create_corpus, 
+  create_cloudflare_backend, 
+  define_store, 
+  json_codec 
+} from '@f0rbit/corpus/cloudflare'
+import { z } from 'zod'
+
+const SessionSchema = z.object({
+  userId: z.string(),
+  data: z.record(z.unknown()),
+  expiresAt: z.string(),
+})
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const backend = create_cloudflare_backend({
+      d1: env.CORPUS_DB,
+      r2: env.CORPUS_BUCKET,
+    })
+
+    const corpus = create_corpus()
+      .with_backend(backend)
+      .with_store(define_store('sessions', json_codec(SessionSchema)))
+      .build()
+
+    // Handle request using corpus...
+    return new Response('OK')
+  }
+}
+```
+
+## Configuration
+
+```ts
+type CloudflareBackendConfig = {
+  d1: D1Database
+  r2: R2Bucket
+  on_event?: EventHandler
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `d1` | `D1Database` | D1 database binding from `env` |
+| `r2` | `R2Bucket` | R2 bucket binding from `env` |
+| `on_event` | `EventHandler` | Optional callback for storage events |
+
+## Setup Guide
+
+### 1. Create D1 Database
+
+```bash
+# Create the database
+wrangler d1 create corpus-db
+
+# Note the database_id from the output
+```
+
+### 2. Create R2 Bucket
+
+```bash
+wrangler r2 bucket create corpus-bucket
+```
+
+### 3. Run Database Migration
+
+Before first use, create the required table:
+
+```ts
+import { CORPUS_MIGRATION_SQL } from '@f0rbit/corpus'
+
+// In a setup script or migration worker
+await env.CORPUS_DB.exec(CORPUS_MIGRATION_SQL)
+```
+
+Or create a migration file and run with Wrangler:
+
+```sql
+-- migrations/0001_init.sql
+CREATE TABLE IF NOT EXISTS corpus_snapshots (
+  store_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  parents TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  invoked_at TEXT,
+  content_hash TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  data_key TEXT NOT NULL,
+  tags TEXT,
+  PRIMARY KEY (store_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_created ON corpus_snapshots(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_content_hash ON corpus_snapshots(store_id, content_hash);
+```
+
+```bash
+wrangler d1 migrations apply corpus-db
+```
+
+### 4. Configure wrangler.toml
+
+```toml
+name = "my-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "CORPUS_DB"
+database_name = "corpus-db"
+database_id = "your-database-id-here"
+
+[[r2_buckets]]
+binding = "CORPUS_BUCKET"
+bucket_name = "corpus-bucket"
+```
+
+### 5. TypeScript Types
+
+```ts
+// src/env.d.ts
+interface Env {
+  CORPUS_DB: D1Database
+  CORPUS_BUCKET: R2Bucket
+}
+```
+
+## Complete Worker Example
+
+```ts
+import { 
+  create_corpus, 
+  create_cloudflare_backend, 
+  define_store, 
+  json_codec 
+} from '@f0rbit/corpus/cloudflare'
+import { z } from 'zod'
+
+const NoteSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+})
+
+type Note = z.infer<typeof NoteSchema>
+
+interface Env {
+  CORPUS_DB: D1Database
+  CORPUS_BUCKET: R2Bucket
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const corpus = create_corpus()
+      .with_backend(create_cloudflare_backend({
+        d1: env.CORPUS_DB,
+        r2: env.CORPUS_BUCKET,
+      }))
+      .with_store(define_store('notes', json_codec(NoteSchema)))
+      .build()
+
+    const url = new URL(request.url)
+
+    // GET /notes - List all notes
+    if (url.pathname === '/notes' && request.method === 'GET') {
+      const notes: Note[] = []
+      for await (const meta of corpus.stores.notes.list({ limit: 100 })) {
+        const result = await corpus.stores.notes.get(meta.version)
+        if (result.ok) notes.push(result.value.data)
+      }
+      return Response.json(notes)
+    }
+
+    // POST /notes - Create a note
+    if (url.pathname === '/notes' && request.method === 'POST') {
+      const body = await request.json() as Omit<Note, 'id' | 'createdAt'>
+      const note: Note = {
+        ...body,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+      }
+      
+      const result = await corpus.stores.notes.put(note)
+      if (result.ok) {
+        return Response.json({ 
+          id: note.id, 
+          version: result.value.version 
+        }, { status: 201 })
+      }
+      return Response.json({ error: result.error.kind }, { status: 500 })
+    }
+
+    return new Response('Not Found', { status: 404 })
+  }
+}
+```
+
+## Import Path
+
+:::caution[Use the Cloudflare Import]
+Always import from `@f0rbit/corpus/cloudflare` when deploying to Workers:
+
+```ts
+// ✅ Correct - Cloudflare-compatible, excludes Node.js code
+import { ... } from '@f0rbit/corpus/cloudflare'
+
+// ❌ Wrong - includes file backend with Node.js dependencies
+import { ... } from '@f0rbit/corpus'
+```
+
+The `/cloudflare` entry point excludes the file backend, which uses Node.js-specific APIs that aren't available in Workers.
+:::
+
+## Error Handling
+
+Handle Cloudflare-specific errors gracefully:
+
+```ts
+const result = await corpus.stores.data.put(item)
+
+if (!result.ok) {
+  switch (result.error.kind) {
+    case 'storage_error':
+      // D1 or R2 operation failed
+      console.error(`${result.error.operation} failed:`, result.error.cause)
+      return new Response('Storage error', { status: 503 })
+    
+    case 'encode_error':
+      return new Response('Invalid data format', { status: 400 })
+    
+    default:
+      return new Response('Internal error', { status: 500 })
+  }
+}
+```
+
+## When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Cloudflare Workers | ✅ Yes |
+| Production workloads | ✅ Yes |
+| Global applications | ✅ Yes |
+| High availability needs | ✅ Yes |
+| Local development | ⚠️ Use Memory for tests |
+| Non-Cloudflare hosting | ❌ No |
+
+## Performance Tips
+
+1. **Batch reads**: Use `list()` to get metadata, then fetch only what you need
+2. **Deduplication**: Corpus automatically deduplicates content, reducing R2 storage
+3. **Caching**: Use [Layered backend](/corpus/api/backends/layered) with Memory for hot data
+4. **Indexes**: D1 indexes are created by the migration for common queries
+
+## See Also
+
+- [Cloudflare Deployment Guide](/corpus/guides/cloudflare) - Complete setup walkthrough
+- [Memory](/corpus/api/backends/memory) - For local testing
+- [Layered](/corpus/api/backends/layered) - Add caching layer

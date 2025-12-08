@@ -1,0 +1,243 @@
+---
+title: Cloudflare Deployment
+description: Deploy Corpus to Cloudflare Workers with D1 database and R2 object storage.
+---
+
+import { Steps, Aside, Code, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This guide covers deploying Corpus to Cloudflare Workers using D1 for metadata and R2 for data storage.
+
+## Prerequisites
+
+- A Cloudflare account with Workers enabled
+- [wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed
+- A project initialized with `wrangler init`
+
+## Setup
+
+<Steps>
+
+1. ### Create D1 database and R2 bucket
+
+   ```bash
+   wrangler d1 create corpus-db
+   wrangler r2 bucket create corpus-bucket
+   ```
+
+2. ### Run the migration
+
+   Create `migrations/0001_init.sql`:
+
+   ```sql
+   CREATE TABLE IF NOT EXISTS corpus_snapshots (
+     store_id TEXT NOT NULL,
+     version TEXT NOT NULL,
+     parents TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     invoked_at TEXT,
+     content_hash TEXT NOT NULL,
+     content_type TEXT NOT NULL,
+     size_bytes INTEGER NOT NULL,
+     data_key TEXT NOT NULL,
+     tags TEXT,
+     PRIMARY KEY (store_id, version)
+   );
+
+   CREATE INDEX IF NOT EXISTS idx_store_created 
+     ON corpus_snapshots(store_id, created_at);
+   CREATE INDEX IF NOT EXISTS idx_content_hash 
+     ON corpus_snapshots(store_id, content_hash);
+   CREATE INDEX IF NOT EXISTS idx_data_key 
+     ON corpus_snapshots(data_key);
+   ```
+
+   Apply it:
+
+   ```bash
+   wrangler d1 execute corpus-db --file=migrations/0001_init.sql
+   ```
+
+   <Aside type="tip">
+     You can also run the migration programmatically using `CORPUS_MIGRATION_SQL` exported from `@f0rbit/corpus`.
+   </Aside>
+
+3. ### Configure wrangler.toml
+
+   ```toml
+   name = "my-worker"
+   main = "src/index.ts"
+   compatibility_date = "2024-01-01"
+
+   [[d1_databases]]
+   binding = "CORPUS_DB"
+   database_name = "corpus-db"
+   database_id = "<your-database-id>"
+
+   [[r2_buckets]]
+   binding = "CORPUS_BUCKET"
+   bucket_name = "corpus-bucket"
+   ```
+
+4. ### Create your Worker
+
+   ```typescript
+   import { z } from 'zod'
+   import { 
+     create_corpus, 
+     create_cloudflare_backend, 
+     define_store, 
+     json_codec 
+   } from '@f0rbit/corpus/cloudflare'
+
+   const CacheSchema = z.object({
+     key: z.string(),
+     value: z.unknown(),
+     ttl: z.number().optional(),
+   })
+
+   interface Env {
+     CORPUS_DB: D1Database
+     CORPUS_BUCKET: R2Bucket
+   }
+
+   export default {
+     async fetch(request: Request, env: Env): Promise<Response> {
+       const backend = create_cloudflare_backend({
+         d1: env.CORPUS_DB,
+         r2: env.CORPUS_BUCKET,
+       })
+
+       const corpus = create_corpus()
+         .with_backend(backend)
+         .with_store(define_store('cache', json_codec(CacheSchema)))
+         .build()
+
+       // Example: Store a cache entry
+       const result = await corpus.stores.cache.put({
+         key: 'greeting',
+         value: 'Hello from Cloudflare!',
+       })
+
+       if (!result.ok) {
+         return new Response(JSON.stringify(result.error), { status: 500 })
+       }
+
+       return new Response(JSON.stringify({
+         version: result.value.version,
+         hash: result.value.content_hash,
+       }))
+     },
+   }
+   ```
+
+5. ### Deploy
+
+   ```bash
+   wrangler deploy
+   ```
+
+</Steps>
+
+## SST Integration
+
+If you're using [SST](https://sst.dev) for infrastructure as code, Corpus provides helper functions:
+
+```typescript
+// sst.config.ts
+import { createCorpusInfra } from '@f0rbit/corpus'
+
+const corpus = createCorpusInfra('myapp')
+
+const db = new sst.cloudflare.D1(corpus.database.name)
+const bucket = new sst.cloudflare.R2(corpus.bucket.name)
+
+// Creates resources: 'myappDb' and 'myappBucket'
+```
+
+## Using the Cloudflare Entry Point
+
+The `@f0rbit/corpus/cloudflare` entry point excludes the file backend (which requires Node.js APIs) for smaller bundle sizes in Workers:
+
+<Tabs>
+  <TabItem label="Cloudflare Workers">
+    ```typescript
+    // Smaller bundle, Workers-compatible
+    import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+    ```
+  </TabItem>
+  <TabItem label="Node.js / Bun">
+    ```typescript
+    // Full package with all backends
+    import { create_cloudflare_backend } from '@f0rbit/corpus'
+    ```
+  </TabItem>
+</Tabs>
+
+## Performance Tips
+
+### Batch Operations
+
+When storing multiple items, consider using a layered backend with memory caching:
+
+```typescript
+const cache = create_memory_backend()
+const cf = create_cloudflare_backend({ d1: env.DB, r2: env.BUCKET })
+
+const backend = create_layered_backend({
+  read: [cache, cf],   // Check cache first
+  write: [cache, cf],  // Write to both
+})
+```
+
+### Content Deduplication
+
+Corpus automatically deduplicates content by hash. If you store the same data twice:
+- Two metadata entries are created (different versions)
+- Only one copy of the data is stored in R2
+- The `data_key` in metadata points to the shared blob
+
+### Minimize Cold Starts
+
+Create the corpus once and reuse it across requests:
+
+```typescript
+let corpus: ReturnType<typeof create_corpus>['build'] | null = null
+
+function getCorpus(env: Env) {
+  if (corpus) return corpus
+  
+  const backend = create_cloudflare_backend({
+    d1: env.CORPUS_DB,
+    r2: env.CORPUS_BUCKET,
+  })
+  
+  corpus = create_corpus()
+    .with_backend(backend)
+    .with_store(define_store('data', json_codec(DataSchema)))
+    .build()
+    
+  return corpus
+}
+```
+
+## Error Handling
+
+Always check the `Result` type from operations:
+
+```typescript
+const result = await corpus.stores.cache.get(version)
+
+if (!result.ok) {
+  switch (result.error.kind) {
+    case 'not_found':
+      return new Response('Not found', { status: 404 })
+    case 'storage_error':
+      console.error('D1/R2 error:', result.error.cause)
+      return new Response('Storage error', { status: 500 })
+    default:
+      return new Response('Error', { status: 500 })
+  }
+}
+
+return new Response(JSON.stringify(result.value.data))
+```

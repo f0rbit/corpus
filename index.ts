@@ -1,17 +1,13 @@
-export { create_corpus } from './corpus'
-export { create_store } from './store'
+export { create_corpus, create_store } from './corpus'
 
 export { create_memory_backend, type MemoryBackendOptions } from './backend/memory'
 export { create_file_backend, type FileBackendConfig } from './backend/file'
 export { create_cloudflare_backend, type CloudflareBackendConfig } from './backend/cloudflare'
 export { create_layered_backend, type LayeredBackendOptions } from './backend/layered'
 
-export { json_codec, text_codec, binary_codec } from './codec'
+export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from './utils'
 
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema'
-
-export { compute_hash } from './hash'
-export { generate_version } from './version'
 
 export type {
   ContentType,
@@ -26,6 +22,8 @@ export type {
   Codec,
   Store,
   StoreDefinition,
+  DefineStoreOpts,
+  DataKeyContext,
   PutOpts,
   CorpusBuilder,
   Corpus,

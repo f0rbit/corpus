@@ -1,0 +1,228 @@
+---
+title: Codecs
+description: Serialize and deserialize data with JSON, text, and binary codecs
+---
+
+Codecs define how data is serialized for storage and deserialized on retrieval. Each codec specifies an encoding format and content type.
+
+## json_codec
+
+```ts
+function json_codec<T>(schema: ZodLike<T>): Codec<T>
+```
+
+Creates a JSON codec with Zod schema validation. Data is validated on decode (read), ensuring type safety when retrieving stored data.
+
+### Usage
+
+```ts
+import { json_codec, define_store } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const UserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().min(0),
+})
+
+const users = define_store('users', json_codec(UserSchema))
+```
+
+### Zod Compatibility
+
+Works with both Zod 3.x and 4.x through structural typing:
+
+```ts
+// Any object with a parse method works
+type ZodLike<T> = { parse: (data: unknown) => T }
+```
+
+### Validation Example
+
+```ts
+// Valid data - works fine
+await store.put({ name: 'Alice', email: 'alice@example.com', age: 30 })
+
+// Invalid data on retrieval - decode_error
+// (if stored data doesn't match schema)
+const result = await store.get(version)
+if (!result.ok && result.error.kind === 'decode_error') {
+  console.error('Data validation failed:', result.error.cause)
+}
+```
+
+### Content Type
+
+`application/json`
+
+---
+
+## text_codec
+
+```ts
+function text_codec(): Codec<string>
+```
+
+Creates a plain text codec using UTF-8 encoding. No validation is performed.
+
+### Usage
+
+```ts
+import { text_codec, define_store } from '@f0rbit/corpus'
+
+const logs = define_store('logs', text_codec())
+const notes = define_store('notes', text_codec())
+```
+
+### Example
+
+```ts
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('logs', text_codec()))
+  .build()
+
+await corpus.stores.logs.put('2024-01-15 10:30:00 - Server started')
+await corpus.stores.logs.put('2024-01-15 10:30:05 - Connected to database')
+
+const latest = await corpus.stores.logs.get_latest()
+if (latest.ok) {
+  console.log(latest.value.data) // "2024-01-15 10:30:05 - Connected to database"
+}
+```
+
+### Content Type
+
+`text/plain`
+
+---
+
+## binary_codec
+
+```ts
+function binary_codec(): Codec<Uint8Array>
+```
+
+Creates a pass-through codec for raw binary data. No transformation is applied - data is stored and retrieved as-is.
+
+### Usage
+
+```ts
+import { binary_codec, define_store } from '@f0rbit/corpus'
+
+const images = define_store('images', binary_codec())
+const documents = define_store('documents', binary_codec())
+```
+
+### Example
+
+```ts
+const corpus = create_corpus()
+  .with_backend(create_file_backend({ base_path: './data' }))
+  .with_store(define_store('images', binary_codec()))
+  .build()
+
+// Store an image
+const imageBytes = await Bun.file('photo.png').bytes()
+await corpus.stores.images.put(new Uint8Array(imageBytes))
+
+// Retrieve and save
+const result = await corpus.stores.images.get_latest()
+if (result.ok) {
+  await Bun.write('output.png', result.value.data)
+}
+```
+
+### Use Cases
+
+- Images (PNG, JPEG, WebP)
+- PDFs and documents
+- Pre-serialized data (Protocol Buffers, MessagePack)
+- Any binary file format
+
+### Content Type
+
+`application/octet-stream`
+
+---
+
+## Custom Codecs
+
+Create your own codec by implementing the `Codec<T>` interface:
+
+```ts
+type Codec<T> = {
+  content_type: ContentType
+  encode: (value: T) => Uint8Array
+  decode: (bytes: Uint8Array) => T
+}
+```
+
+### MessagePack Example
+
+```ts
+import { encode, decode } from '@msgpack/msgpack'
+
+function msgpack_codec<T>(schema: ZodLike<T>): Codec<T> {
+  return {
+    content_type: 'application/msgpack',
+    encode: (value) => encode(value),
+    decode: (bytes) => schema.parse(decode(bytes)),
+  }
+}
+```
+
+### XML Example
+
+```ts
+function xml_codec(): Codec<string> {
+  return {
+    content_type: 'text/xml',
+    encode: (value) => new TextEncoder().encode(value),
+    decode: (bytes) => new TextDecoder().decode(bytes),
+  }
+}
+```
+
+---
+
+## Types
+
+### Codec
+
+```ts
+type Codec<T> = {
+  content_type: ContentType
+  encode: (value: T) => Uint8Array
+  decode: (bytes: Uint8Array) => T
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `content_type` | `ContentType` | MIME type for the encoded data |
+| `encode` | `(T) => Uint8Array` | Serialize value to bytes |
+| `decode` | `(Uint8Array) => T` | Deserialize bytes to value |
+
+### ContentType
+
+```ts
+type ContentType =
+  | "application/json"
+  | "text/plain"
+  | "text/xml"
+  | "image/png"
+  | "image/jpeg"
+  | "application/octet-stream"
+  | (string & {})  // Any other MIME type
+```
+
+---
+
+## Comparison
+
+| Codec | Type | Validation | Use Case |
+|-------|------|------------|----------|
+| `json_codec` | Structured data | Zod schema | Most application data |
+| `text_codec` | Strings | None | Logs, notes, markup |
+| `binary_codec` | Raw bytes | None | Files, images, blobs |

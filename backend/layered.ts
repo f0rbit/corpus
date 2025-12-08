@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description Layered backend for caching and replication strategies.
+ */
+
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle } from '../types'
 import { ok, err } from '../types'
 
@@ -7,6 +12,40 @@ export type LayeredBackendOptions = {
   list_strategy?: 'merge' | 'first'
 }
 
+/**
+ * Creates a layered backend that combines multiple backends with read/write separation.
+ * @category Backends
+ * @group Composite Backends
+ * 
+ * Read operations use fallback: tries each read backend in order until one succeeds.
+ * Write operations use fanout: writes to all write backends (fails if any fail).
+ * 
+ * Common use cases:
+ * - **Caching**: Memory backend first for reads, file backend for persistence
+ * - **Replication**: Write to multiple backends for redundancy
+ * - **Migration**: Read from old + new backends, write only to new
+ * 
+ * @param options - Configuration with `read` backends (tried in order), `write` backends (all receive writes), and optional `list_strategy` ('merge' or 'first')
+ * @returns A Backend that delegates to the configured backends
+ * 
+ * @example
+ * ```ts
+ * // Caching layer: memory cache with file persistence
+ * const cache = create_memory_backend()
+ * const storage = create_file_backend({ base_path: './data' })
+ * 
+ * const backend = create_layered_backend({
+ *   read: [cache, storage],   // Try cache first, fall back to disk
+ *   write: [cache, storage],  // Write to both
+ * })
+ * 
+ * // Migration: read from old and new, write only to new
+ * const backend = create_layered_backend({
+ *   read: [newBackend, oldBackend],
+ *   write: [newBackend],
+ * })
+ * ```
+ */
 export function create_layered_backend(options: LayeredBackendOptions): Backend {
   const { read, write, list_strategy = 'merge' } = options
 

@@ -1,0 +1,179 @@
+---
+title: Storage Backends
+description: Learn about the different storage backends available in Corpus and when to use each one.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+Corpus separates storage concerns into **backends** that implement the `Backend` interface. Each backend provides two clients:
+
+- **MetadataClient** - Stores snapshot metadata (version, hash, timestamps, parents)
+- **DataClient** - Stores the actual binary content
+
+## Available Backends
+
+### Memory Backend
+
+In-memory storage that persists only for the lifetime of the process.
+
+```typescript
+import { create_memory_backend } from '@f0rbit/corpus'
+
+const backend = create_memory_backend()
+```
+
+**Best for:**
+- Unit and integration tests
+- Prototyping and development
+- Ephemeral data that doesn't need persistence
+
+**Options:**
+
+```typescript
+create_memory_backend({
+  on_event: (event) => console.log(event.type)
+})
+```
+
+### File Backend
+
+Local filesystem storage using Bun's file APIs.
+
+```typescript
+import { create_file_backend } from '@f0rbit/corpus'
+
+const backend = create_file_backend({
+  base_path: './data/corpus'
+})
+```
+
+**Best for:**
+- Local development with persistence
+- Desktop applications
+- Single-machine deployments
+
+**Directory structure:**
+
+```
+base_path/
+  <store_id>/_meta.json      # Metadata for each store
+  _data/<store_id>_<hash>.bin  # Binary data files
+```
+
+<Aside type="note">
+The file backend uses `Bun.file()` and `Bun.write()` - it requires the Bun runtime.
+</Aside>
+
+### Cloudflare Backend
+
+Production backend using Cloudflare D1 (SQLite) for metadata and R2 (object storage) for data.
+
+```typescript
+import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+
+const backend = create_cloudflare_backend({
+  d1: env.CORPUS_DB,
+  r2: env.CORPUS_BUCKET
+})
+```
+
+**Best for:**
+- Production deployments on Cloudflare Workers
+- Globally distributed applications
+- High availability requirements
+
+See the [Cloudflare Deployment](/corpus/guides/cloudflare/) guide for setup instructions.
+
+### Layered Backend
+
+Combines multiple backends with read/write separation for caching and replication.
+
+```typescript
+import { 
+  create_layered_backend, 
+  create_memory_backend, 
+  create_file_backend 
+} from '@f0rbit/corpus'
+
+const cache = create_memory_backend()
+const storage = create_file_backend({ base_path: './data' })
+
+const backend = create_layered_backend({
+  read: [cache, storage],   // Try cache first, fall back to disk
+  write: [cache, storage],  // Write to both
+})
+```
+
+**Read behavior:** Tries each backend in order until one returns successfully.
+
+**Write behavior:** Writes to all backends; fails if any backend fails.
+
+**Use cases:**
+
+<Tabs>
+  <TabItem label="Caching">
+    ```typescript
+    // Fast reads from memory, persisted to disk
+    const backend = create_layered_backend({
+      read: [memoryBackend, fileBackend],
+      write: [memoryBackend, fileBackend],
+    })
+    ```
+  </TabItem>
+  <TabItem label="Migration">
+    ```typescript
+    // Read from old and new, write only to new
+    const backend = create_layered_backend({
+      read: [newBackend, oldBackend],
+      write: [newBackend],
+    })
+    ```
+  </TabItem>
+  <TabItem label="Replication">
+    ```typescript
+    // Write to multiple backends for redundancy
+    const backend = create_layered_backend({
+      read: [primary],
+      write: [primary, replica],
+    })
+    ```
+  </TabItem>
+</Tabs>
+
+## Backend Comparison
+
+| Backend | Persistence | Use Case | Requirements |
+|---------|-------------|----------|--------------|
+| Memory | None | Testing, prototyping | None |
+| File | Local disk | Local development | Bun runtime |
+| Cloudflare | D1 + R2 | Production | Cloudflare Workers |
+| Layered | Varies | Caching, migration | At least one other backend |
+
+## Implementing Custom Backends
+
+You can create custom backends by implementing the `Backend` interface:
+
+```typescript
+import type { Backend, MetadataClient, DataClient } from '@f0rbit/corpus'
+
+const customBackend: Backend = {
+  metadata: {
+    get: async (store_id, version) => { /* ... */ },
+    put: async (meta) => { /* ... */ },
+    delete: async (store_id, version) => { /* ... */ },
+    list: async function* (store_id, opts) { /* ... */ },
+    get_latest: async (store_id) => { /* ... */ },
+    get_children: async function* (parent_store_id, parent_version) { /* ... */ },
+    find_by_hash: async (store_id, content_hash) => { /* ... */ },
+  },
+  data: {
+    get: async (data_key) => { /* ... */ },
+    put: async (data_key, data) => { /* ... */ },
+    delete: async (data_key) => { /* ... */ },
+    exists: async (data_key) => { /* ... */ },
+  },
+  on_event: (event) => { /* optional event handler */ },
+}
+```
+
+All methods should return `Result<T, CorpusError>` types for consistent error handling.

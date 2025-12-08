@@ -1,0 +1,206 @@
+---
+title: Memory
+description: In-memory storage backend for testing and development
+---
+
+```ts
+function create_memory_backend(options?: MemoryBackendOptions): Backend
+```
+
+The memory backend stores all data in JavaScript Maps, making it the fastest backend option. Since data exists only in memory, it's lost when the process ends - perfect for testing where you want isolated, ephemeral storage.
+
+## Why Use Memory Backend?
+
+- **Speed**: No I/O overhead, instant reads and writes
+- **Isolation**: Each instance is completely independent
+- **Simplicity**: No setup, no cleanup, no external dependencies
+- **Predictability**: Deterministic behavior for testing
+
+## Basic Usage
+
+```ts
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const ItemSchema = z.object({ 
+  id: z.string(),
+  name: z.string() 
+})
+
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('items', json_codec(ItemSchema)))
+  .build()
+
+// Store data
+await corpus.stores.items.put({ id: '1', name: 'First item' })
+
+// Retrieve it
+const result = await corpus.stores.items.get_latest()
+if (result.ok) {
+  console.log(result.value.data.name) // "First item"
+}
+```
+
+## Options
+
+```ts
+type MemoryBackendOptions = {
+  on_event?: EventHandler
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `on_event` | `(event: CorpusEvent) => void` | Callback fired on every storage operation |
+
+## Event Logging
+
+The `on_event` callback receives detailed information about every operation, useful for debugging, metrics, or audit logging:
+
+```ts
+const events: CorpusEvent[] = []
+
+const backend = create_memory_backend({
+  on_event: (event) => {
+    events.push(event)
+    
+    // Log operations
+    if (event.type === 'snapshot_put') {
+      console.log(`Stored version ${event.version}`)
+      console.log(`Deduplicated: ${event.deduplicated}`)
+    }
+    
+    // Track errors
+    if (event.type === 'error') {
+      console.error(`Error: ${event.error.kind}`)
+    }
+  }
+})
+```
+
+### Event Types
+
+| Event | Description |
+|-------|-------------|
+| `snapshot_put` | A complete snapshot was stored |
+| `snapshot_get` | A snapshot was retrieved |
+| `meta_get` | Metadata lookup |
+| `meta_put` | Metadata stored |
+| `data_put` | Binary data stored (includes `deduplicated` flag) |
+| `error` | An error occurred |
+
+## Testing Patterns
+
+### Fresh Backend Per Test
+
+Create a new backend for each test to ensure complete isolation:
+
+```ts
+import { describe, it, expect, beforeEach } from 'bun:test'
+
+describe('shopping cart', () => {
+  let corpus: ReturnType<typeof createTestCorpus>
+
+  function createTestCorpus() {
+    return create_corpus()
+      .with_backend(create_memory_backend())
+      .with_store(define_store('carts', json_codec(CartSchema)))
+      .build()
+  }
+
+  beforeEach(() => {
+    corpus = createTestCorpus()
+  })
+
+  it('adds items to cart', async () => {
+    const result = await corpus.stores.carts.put({ 
+      items: [{ id: '1', qty: 2 }] 
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('starts with empty state', async () => {
+    // This test has a fresh backend - no data from previous test
+    const result = await corpus.stores.carts.get_latest()
+    expect(result.ok).toBe(false)
+    expect(result.error.kind).toBe('not_found')
+  })
+})
+```
+
+### Asserting on Events
+
+Use events to verify internal behavior:
+
+```ts
+it('deduplicates identical content', async () => {
+  const events: CorpusEvent[] = []
+  const backend = create_memory_backend({
+    on_event: (e) => events.push(e)
+  })
+  
+  const corpus = create_corpus()
+    .with_backend(backend)
+    .with_store(define_store('items', json_codec(ItemSchema)))
+    .build()
+
+  // Store same data twice
+  await corpus.stores.items.put({ id: '1', name: 'Test' })
+  await corpus.stores.items.put({ id: '1', name: 'Test' })
+
+  const puts = events.filter(e => e.type === 'data_put')
+  expect(puts[0].deduplicated).toBe(false) // First write
+  expect(puts[1].deduplicated).toBe(true)  // Second was deduplicated
+})
+```
+
+### Shared Backend for Integration Tests
+
+When testing interactions between stores, share a backend:
+
+```ts
+it('tracks lineage across stores', async () => {
+  const backend = create_memory_backend()
+  
+  const corpus = create_corpus()
+    .with_backend(backend)
+    .with_store(define_store('sources', json_codec(SourceSchema)))
+    .with_store(define_store('derived', json_codec(DerivedSchema)))
+    .build()
+
+  const source = await corpus.stores.sources.put({ data: 'input' })
+  
+  await corpus.stores.derived.put(
+    { result: 'output' },
+    { parents: [{ store_id: 'sources', version: source.value.version }] }
+  )
+})
+```
+
+## When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Unit tests | ✅ Yes |
+| Integration tests | ✅ Yes |
+| Development/prototyping | ✅ Yes |
+| CLI tools (ephemeral) | ✅ Yes |
+| Production (data matters) | ❌ No |
+| Data needs to survive restart | ❌ No |
+
+## Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| `put` | O(1) | Hash computation is O(n) on data size |
+| `get` | O(1) | Direct Map lookup |
+| `get_latest` | O(n) | Scans all versions to find newest |
+| `list` | O(n) | Iterates all versions |
+| `delete` | O(1) | Direct Map deletion |
+
+## See Also
+
+- [File System](/corpus/api/backends/file) - When you need persistence
+- [Layered](/corpus/api/backends/layered) - Combine memory with persistent backends
+- [Testing Patterns Guide](/corpus/guides/testing) - More testing examples

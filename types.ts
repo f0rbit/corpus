@@ -1,5 +1,37 @@
-import type { ZodSchema } from "zod"
+/**
+ * @module Types
+ * @description Type definitions for the corpus library.
+ */
 
+/**
+ * Error types that can occur during Corpus operations.
+ * @category Types
+ * @group Error Types
+ * 
+ * Uses discriminated unions for type-safe error handling via the `kind` field:
+ * - `not_found` - Requested snapshot or data does not exist
+ * - `already_exists` - Attempted to create a snapshot that already exists
+ * - `storage_error` - Backend storage operation failed (includes cause and operation name)
+ * - `decode_error` - Failed to decode data using the store's codec
+ * - `encode_error` - Failed to encode data using the store's codec
+ * - `hash_mismatch` - Content hash verification failed (data corruption)
+ * - `invalid_config` - Configuration error during setup
+ * 
+ * @example
+ * ```ts
+ * const result = await store.get('nonexistent')
+ * if (!result.ok) {
+ *   switch (result.error.kind) {
+ *     case 'not_found':
+ *       console.log(`Version ${result.error.version} not found`)
+ *       break
+ *     case 'storage_error':
+ *       console.log(`Storage failed during ${result.error.operation}:`, result.error.cause)
+ *       break
+ *   }
+ * }
+ * ```
+ */
 export type CorpusError =
   | { kind: 'not_found'; store_id: string; version: string }
   | { kind: 'already_exists'; store_id: string; version: string }
@@ -9,11 +41,56 @@ export type CorpusError =
   | { kind: 'hash_mismatch'; expected: string; actual: string }
   | { kind: 'invalid_config'; message: string }
 
+/**
+ * A discriminated union representing either success or failure.
+ * @category Types
+ * @group Result Types
+ */
 export type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }
 
+/**
+ * Creates a successful Result containing a value.
+ * 
+ * @category Core
+ * @group Result Helpers
+ * @param value - The success value to wrap
+ * @returns A Result with `ok: true` and the value
+ * 
+ * @example
+ * ```ts
+ * function divide(a: number, b: number): Result<number, string> {
+ *   if (b === 0) return err('Division by zero')
+ *   return ok(a / b)
+ * }
+ * 
+ * const result = divide(10, 2)
+ * if (result.ok) {
+ *   console.log(result.value) // 5
+ * }
+ * ```
+ */
 export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
+
+/**
+ * Creates a failed Result containing an error.
+ * 
+ * @category Core
+ * @group Result Helpers
+ * @param error - The error to wrap
+ * @returns A Result with `ok: false` and the error
+ * 
+ * @example
+ * ```ts
+ * function parsePositive(s: string): Result<number, string> {
+ *   const n = parseInt(s, 10)
+ *   if (isNaN(n)) return err('Not a number')
+ *   if (n <= 0) return err('Must be positive')
+ *   return ok(n)
+ * }
+ * ```
+ */
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error })
 
 export type CorpusEvent =
@@ -45,6 +122,32 @@ export type ParentRef = {
   role?: string
 }
 
+/**
+ * Metadata about a stored snapshot (without the actual data).
+ * 
+ * Key fields:
+ * - `store_id` - Which store this snapshot belongs to
+ * - `version` - Unique, time-sortable identifier for this snapshot
+ * - `content_hash` - SHA-256 hash of the encoded data (enables deduplication)
+ * - `data_key` - Key to retrieve the actual data from the backend
+ * - `parents` - Links to parent snapshots for building data lineage graphs
+ * - `tags` - Optional labels for filtering and organization
+ * 
+ * @category Types
+ * @group Snapshot Types
+ * @example
+ * ```ts
+ * const result = await store.put(data, {
+ *   parents: [{ store_id: 'source', version: 'abc123' }],
+ *   tags: ['draft', 'reviewed']
+ * })
+ * 
+ * if (result.ok) {
+ *   const meta = result.value
+ *   console.log(`Stored ${meta.size_bytes} bytes as version ${meta.version}`)
+ * }
+ * ```
+ */
 export type SnapshotMeta = {
   store_id: string
   version: string
@@ -93,18 +196,85 @@ export type ListOpts = {
   tags?: string[]
 }
 
+/**
+ * Interface that storage backends implement.
+ * 
+ * A Backend provides two clients:
+ * - `metadata` - For storing/retrieving snapshot metadata (versions, hashes, etc.)
+ * - `data` - For storing/retrieving the actual binary content
+ * 
+ * Built-in backends:
+ * - `create_memory_backend()` - In-memory, ephemeral storage
+ * - `create_file_backend()` - Local filesystem persistence
+ * - `create_cloudflare_backend()` - Cloudflare D1 + R2
+ * - `create_layered_backend()` - Combines multiple backends
+ * 
+ * @category Types
+ * @group Backend Types
+ * @example
+ * ```ts
+ * // Custom backend implementation
+ * const myBackend: Backend = {
+ *   metadata: { get, put, delete, list, get_latest, get_children, find_by_hash },
+ *   data: { get, put, delete, exists },
+ *   on_event: (event) => console.log('Event:', event.type)
+ * }
+ * ```
+ */
 export type Backend = {
   metadata: MetadataClient
   data: DataClient
   on_event?: EventHandler
 }
 
+/**
+ * Serialization interface for encoding/decoding store data.
+ * 
+ * A Codec converts between typed values and binary data:
+ * - `encode` - Converts a value to bytes for storage
+ * - `decode` - Converts bytes back to a typed value
+ * - `content_type` - MIME type stored in metadata
+ * 
+ * Built-in codecs:
+ * - `json_codec(schema)` - JSON with Zod validation on decode
+ * - `text_codec()` - Plain UTF-8 text
+ * - `binary_codec()` - Raw binary pass-through
+ * 
+ * @category Types
+ * @group Codec Types
+ * @example
+ * ```ts
+ * // Custom codec for MessagePack
+ * const msgpack_codec = <T>(schema: ZodSchema<T>): Codec<T> => ({
+ *   content_type: 'application/msgpack',
+ *   encode: (value) => encode(value),
+ *   decode: (bytes) => schema.parse(decode(bytes))
+ * })
+ * ```
+ */
 export type Codec<T> = {
   content_type: ContentType
   encode: (value: T) => Uint8Array
   decode: (bytes: Uint8Array) => T
 }
 
+/**
+ * A typed store for managing versioned data snapshots.
+ * 
+ * Stores provide the main API for reading and writing data:
+ * - `put(data, opts?)` - Store a new snapshot, returns metadata with version
+ * - `get(version)` - Retrieve a specific snapshot by version
+ * - `get_latest()` - Get the most recent snapshot
+ * - `get_meta(version)` - Get just the metadata (without data)
+ * - `list(opts?)` - Iterate over snapshot metadata with filtering
+ * - `delete(version)` - Remove a snapshot's metadata
+ * 
+ * Stores automatically deduplicate: storing the same content twice creates
+ * two metadata entries pointing to the same underlying data.
+ * 
+ * @category Types
+ * @group Store Types
+ */
 export type Store<T> = {
   readonly id: string
   readonly codec: Codec<T>
@@ -122,18 +292,82 @@ export type PutOpts = {
   tags?: string[]
 }
 
+/**
+ * Context passed to data_key_fn for generating custom storage paths.
+ */
+export type DataKeyContext = {
+  store_id: string
+  version: string
+  content_hash: string
+  tags?: string[]
+}
+
 export type StoreDefinition<Id extends string, T> = {
   id: Id
   codec: Codec<T>
   description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
 }
 
+export type DefineStoreOpts = {
+  description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
+}
+
+/**
+ * Helper to define a type-safe store definition.
+ * 
+ * The `id` becomes the key in `corpus.stores`, providing type-safe access
+ * to the store after building the corpus.
+ * 
+ * @category Core
+ * @group Helpers
+ * @param id - Unique identifier for the store (becomes the key in corpus.stores)
+ * @param codec - Serialization codec for the store's data type
+ * @param opts - Optional configuration (description, custom data_key_fn)
+ * @returns A StoreDefinition to pass to `create_corpus().with_store()`
+ * 
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * const PostSchema = z.object({
+ *   title: z.string(),
+ *   body: z.string(),
+ *   published: z.boolean()
+ * })
+ * 
+ * const posts = define_store('posts', json_codec(PostSchema), { description: 'Blog posts' })
+ * 
+ * // With custom path generation based on tags
+ * const hansard = define_store('hansard', text_codec(), {
+ *   data_key_fn: (ctx) => {
+ *     const date = ctx.tags?.find(t => t.startsWith('date:'))?.slice(5) ?? 'unknown'
+ *     return `australia-house/raw/${date}/${ctx.version}`
+ *   }
+ * })
+ * 
+ * const corpus = create_corpus()
+ *   .with_backend(backend)
+ *   .with_store(posts)
+ *   .build()
+ * 
+ * // Type-safe: corpus.stores.posts expects Post type
+ * await corpus.stores.posts.put({ title: 'Hello', body: '...', published: true })
+ * ```
+ */
 export function define_store<Id extends string, T>(
   id: Id,
   codec: Codec<T>,
-  description?: string
+  opts?: DefineStoreOpts | string
 ): StoreDefinition<Id, T> {
-  return { id, codec, description }
+  // Support old signature: define_store(id, codec, description)
+  if (typeof opts === 'string') {
+    return { id, codec, description: opts }
+  }
+  return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn }
 }
 
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {

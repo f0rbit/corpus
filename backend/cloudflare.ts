@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description Cloudflare Workers storage backend using D1 and R2.
+ */
+
 import { eq, and, desc, lt, gt, like, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
@@ -18,6 +23,42 @@ export type CloudflareBackendConfig = {
   on_event?: EventHandler
 }
 
+/**
+ * Creates a Cloudflare Workers storage backend using D1 and R2.
+ * @category Backends
+ * @group Storage Backends
+ * 
+ * Uses D1 (SQLite) for metadata storage and R2 (object storage) for binary data.
+ * Requires running `CORPUS_MIGRATION_SQL` on the D1 database before first use.
+ * 
+ * This backend is designed for production use in Cloudflare Workers environments,
+ * providing durable, globally distributed storage.
+ * 
+ * @param config - Configuration with `d1` (D1 database), `r2` (R2 bucket), and optional `on_event` handler
+ * @returns A Backend instance using Cloudflare D1 + R2
+ * 
+ * @example
+ * ```ts
+ * // In a Cloudflare Worker
+ * export default {
+ *   async fetch(request: Request, env: Env) {
+ *     const backend = create_cloudflare_backend({
+ *       d1: env.CORPUS_DB,
+ *       r2: env.CORPUS_BUCKET
+ *     })
+ * 
+ *     const corpus = create_corpus()
+ *       .with_backend(backend)
+ *       .with_store(define_store('cache', json_codec(CacheSchema)))
+ *       .build()
+ * 
+ *     // Use corpus...
+ *   }
+ * }
+ * ```
+ * 
+ * @see CORPUS_MIGRATION_SQL for required database setup
+ */
 export function create_cloudflare_backend(config: CloudflareBackendConfig): Backend {
   const db = drizzle(config.d1)
   const { r2, on_event } = config

@@ -1,3 +1,8 @@
+/**
+ * @module Backends
+ * @description File-system storage backend for local persistence.
+ */
+
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from '../types'
 import { ok, err } from '../types'
 import { mkdir, readdir } from 'node:fs/promises'
@@ -8,6 +13,37 @@ export type FileBackendConfig = {
   on_event?: EventHandler
 }
 
+/**
+ * Creates a file-system storage backend for local persistence.
+ * @category Backends
+ * @group Storage Backends
+ * 
+ * Uses Bun's file APIs for efficient I/O. Metadata is stored as JSON files
+ * per store, and data is stored as binary files in a shared `_data` directory.
+ * 
+ * Directory structure:
+ * ```
+ * base_path/
+ *   <store_id>/_meta.json     # Metadata for each store
+ *   _data/<store_id>_<hash>.bin  # Binary data files
+ * ```
+ * 
+ * @param config - Configuration with `base_path` (root directory) and optional `on_event` handler
+ * @returns A Backend instance using file-system storage
+ * 
+ * @example
+ * ```ts
+ * const backend = create_file_backend({
+ *   base_path: './data/corpus',
+ *   on_event: (e) => console.log(e.type)
+ * })
+ * 
+ * const corpus = create_corpus()
+ *   .with_backend(backend)
+ *   .with_store(define_store('documents', json_codec(DocSchema)))
+ *   .build()
+ * ```
+ */
 export function create_file_backend(config: FileBackendConfig): Backend {
   const { base_path, on_event } = config
 

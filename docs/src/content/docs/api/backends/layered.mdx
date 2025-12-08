@@ -1,0 +1,240 @@
+---
+title: Layered
+description: Combine multiple backends for caching, replication, and migration
+---
+
+```ts
+function create_layered_backend(options: LayeredBackendOptions): Backend
+```
+
+The layered backend is a meta-backend that combines multiple backends with configurable read and write strategies. It enables powerful patterns like caching, replication, and gradual migrations without changing your application code.
+
+## Why Use Layered Backend?
+
+- **Caching**: Put fast storage (memory) in front of slow storage (disk, network)
+- **Replication**: Write to multiple backends for redundancy
+- **Migration**: Gradually move data from old to new storage
+- **Flexibility**: Change storage strategy without touching business logic
+
+## How It Works
+
+**Reads** use a fallback pattern:
+1. Try the first backend in the `read` list
+2. If not found, try the next backend
+3. Continue until found or all backends exhausted
+
+**Writes** use a fanout pattern:
+1. Write to all backends in the `write` list
+2. Fail if any backend fails
+
+## Basic Usage
+
+```ts
+import { 
+  create_layered_backend, 
+  create_memory_backend, 
+  create_file_backend 
+} from '@f0rbit/corpus'
+
+const cache = create_memory_backend()
+const storage = create_file_backend({ base_path: './data' })
+
+const backend = create_layered_backend({
+  read: [cache, storage],   // Check cache first
+  write: [cache, storage],  // Keep both in sync
+})
+
+const corpus = create_corpus()
+  .with_backend(backend)
+  .with_store(define_store('items', json_codec(ItemSchema)))
+  .build()
+```
+
+## Configuration
+
+```ts
+type LayeredBackendOptions = {
+  read: Backend[]
+  write: Backend[]
+  list_strategy?: 'merge' | 'first'
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `read` | `Backend[]` | Backends to try for reads, in order of preference |
+| `write` | `Backend[]` | Backends that receive all writes |
+| `list_strategy` | `'merge' \| 'first'` | How to handle `list()` operations (default: `'merge'`) |
+
+### List Strategies
+
+**`'merge'`** (default): Combines results from all read backends, deduplicating by version. Use when backends might have different data.
+
+**`'first'`**: Only lists from the first read backend. Use when the first backend is authoritative and complete.
+
+```ts
+const backend = create_layered_backend({
+  read: [cache, storage],
+  write: [cache, storage],
+  list_strategy: 'first', // Only list from cache
+})
+```
+
+## Common Patterns
+
+### Write-Through Cache
+
+The most common pattern: memory cache with persistent storage. All data is written to both, reads hit the cache first.
+
+```ts
+const cache = create_memory_backend()
+const disk = create_file_backend({ base_path: './data' })
+
+const backend = create_layered_backend({
+  read: [cache, disk],   // Fast reads from cache
+  write: [cache, disk],  // Writes go to both
+})
+```
+
+**Behavior:**
+- First read: cache miss, hits disk, returns data
+- Second read: cache hit, instant response
+- Write: updates both cache and disk atomically
+
+### Read-Through Cache
+
+Cache is populated on read, but writes only go to primary storage. Useful when you want the cache to naturally fill based on access patterns.
+
+```ts
+const cache = create_memory_backend()
+const primary = create_file_backend({ base_path: './data' })
+
+const backend = create_layered_backend({
+  read: [cache, primary],
+  write: [primary],  // Only persist to primary
+})
+
+// To populate cache on read, wrap the backend:
+async function getWithCache(store, version) {
+  const result = await store.get(version)
+  if (result.ok) {
+    // Manually write to cache for next time
+    await cache.metadata.put(result.value.meta)
+    await cache.data.put(result.value.meta.data_key, /* ... */)
+  }
+  return result
+}
+```
+
+### Data Migration
+
+Gradually migrate from old storage to new storage without downtime:
+
+```ts
+const oldStorage = create_file_backend({ base_path: './old-data' })
+const newStorage = create_file_backend({ base_path: './new-data' })
+
+// Phase 1: Read from both (prefer new), write only to new
+const migrationBackend = create_layered_backend({
+  read: [newStorage, oldStorage],  // Try new first
+  write: [newStorage],             // Only write to new
+  list_strategy: 'merge',          // See all data
+})
+
+// As data is accessed, it's naturally migrated:
+// - Reads from old storage still work
+// - All new writes go to new storage
+// - Updates to old data create new versions in new storage
+```
+
+### Multi-Region Replication
+
+Write to multiple backends for geographic redundancy:
+
+```ts
+const usBackend = createUsBackend()
+const euBackend = createEuBackend()
+const apBackend = createApBackend()
+
+const backend = create_layered_backend({
+  read: [usBackend],  // Read from nearest region
+  write: [usBackend, euBackend, apBackend],  // Replicate everywhere
+})
+```
+
+:::note
+For true multi-region replication, you'd typically use a database with built-in replication (like Cloudflare D1) rather than multiple separate backends.
+:::
+
+### Development vs Production
+
+Use different backends based on environment:
+
+```ts
+function createBackend() {
+  if (process.env.NODE_ENV === 'production') {
+    return create_cloudflare_backend({
+      d1: env.DB,
+      r2: env.BUCKET,
+    })
+  }
+  
+  // Development: memory cache + file persistence
+  return create_layered_backend({
+    read: [create_memory_backend(), create_file_backend({ base_path: './dev-data' })],
+    write: [create_memory_backend(), create_file_backend({ base_path: './dev-data' })],
+  })
+}
+```
+
+## Error Handling
+
+The layered backend handles errors differently for reads and writes:
+
+**Reads:**
+- `not_found` errors continue to the next backend
+- Other errors (storage_error, etc.) are returned immediately
+
+**Writes:**
+- Any error from any backend fails the entire operation
+- Partial writes are possible if a backend fails mid-operation
+
+```ts
+const result = await store.put(data)
+
+if (!result.ok && result.error.kind === 'storage_error') {
+  // One of the backends failed
+  console.error(`Write failed: ${result.error.operation}`)
+}
+```
+
+## Performance Considerations
+
+| Operation | Behavior |
+|-----------|----------|
+| `get` | Returns on first success, O(1) best case |
+| `put` | Writes to all backends sequentially |
+| `list` (merge) | Queries all backends, deduplicates in memory |
+| `list` (first) | Only queries first backend |
+| `delete` | Deletes from all write backends |
+
+For high-throughput scenarios:
+- Use `list_strategy: 'first'` if possible
+- Consider async replication for non-critical writes
+- Monitor cache hit rates to optimize layer order
+
+## When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Add caching to slow backend | ✅ Yes |
+| Replicate for redundancy | ✅ Yes |
+| Migrate between backends | ✅ Yes |
+| Development + persistence | ✅ Yes |
+| Simple single-backend needs | ❌ Overkill |
+
+## See Also
+
+- [Memory](/corpus/api/backends/memory) - Ideal cache layer
+- [File System](/corpus/api/backends/file) - Local persistence
+- [Cloudflare](/corpus/api/backends/cloudflare) - Production storage
