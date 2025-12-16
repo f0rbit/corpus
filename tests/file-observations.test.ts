@@ -32,7 +32,7 @@ describe('observations integration - file backend', () => {
     await rm(TEST_DIR, { recursive: true, force: true })
     await mkdir(TEST_DIR, { recursive: true })
     backend = create_file_backend({ base_path: TEST_DIR })
-    observations = backend.observations
+    observations = backend.observations!
   })
 
   afterEach(async () => {
@@ -479,7 +479,7 @@ describe('observations integration - file backend', () => {
       const obsId = result.value.id
 
       const newBackend = create_file_backend({ base_path: TEST_DIR })
-      const newObservations = newBackend.observations
+      const newObservations = newBackend.observations!
 
       const getResult = await newObservations.get(obsId)
       expect(getResult.ok).toBe(true)
@@ -499,7 +499,7 @@ describe('observations integration - file backend', () => {
       })
 
       const newBackend = create_file_backend({ base_path: TEST_DIR })
-      const newObservations = newBackend.observations
+      const newObservations = newBackend.observations!
 
       let count = 0
       for await (const _ of newObservations.query({ include_stale: true })) {

@@ -26,7 +26,7 @@ describe('observations integration - memory backend', () => {
 
   beforeEach(() => {
     backend = create_memory_backend()
-    observations = backend.observations
+    observations = backend.observations!
   })
 
   describe('basic CRUD', () => {
