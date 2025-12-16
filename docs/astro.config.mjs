@@ -23,6 +23,7 @@ export default defineConfig({
           items: [
             { label: 'Storage Backends', slug: 'guides/backends' },
             { label: 'Cloudflare Deployment', slug: 'guides/cloudflare' },
+            { label: 'Observations', slug: 'guides/observations' },
             { label: 'Testing Patterns', slug: 'guides/testing' },
           ],
         },
@@ -32,6 +33,7 @@ export default defineConfig({
             { label: 'create_corpus', slug: 'api/core/create-corpus' },
             { label: 'create_store', slug: 'api/core/create-store' },
             { label: 'define_store', slug: 'api/core/define-store' },
+            { label: 'Observations', slug: 'api/core/observations' },
             { label: 'Types', slug: 'api/core/types' },
           ],
         },
