@@ -3,6 +3,15 @@
  * @description Type definitions for the corpus library.
  */
 
+import type {
+  SnapshotPointer,
+  Observation,
+  ObservationMeta,
+  ObservationTypeDef,
+  ObservationPutOpts,
+  ObservationQueryOpts
+} from './observations/types'
+
 /**
  * Error types that can occur during Corpus operations.
  * @category Types
@@ -40,6 +49,8 @@ export type CorpusError =
   | { kind: 'encode_error'; cause: Error }
   | { kind: 'hash_mismatch'; expected: string; actual: string }
   | { kind: 'invalid_config'; message: string }
+  | { kind: 'validation_error'; cause: Error; message: string }
+  | { kind: 'observation_not_found'; id: string }
 
 /**
  * A discriminated union representing either success or failure.
@@ -224,6 +235,7 @@ export type ListOpts = {
 export type Backend = {
   metadata: MetadataClient
   data: DataClient
+  observations?: ObservationsClient
   on_event?: EventHandler
 }
 
@@ -375,6 +387,7 @@ export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
   with_store: <Id extends string, T>(
     definition: StoreDefinition<Id, T>
   ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>
   build: () => Corpus<Stores>
 }
 
@@ -382,4 +395,53 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
   stores: Stores
   metadata: MetadataClient
   data: DataClient
+  observations?: ObservationsClient
+  create_pointer: (store_id: string, version: string, path?: string, span?: { start: number; end: number }) => SnapshotPointer
+  resolve_pointer: <T>(pointer: SnapshotPointer) => Promise<Result<T, CorpusError>>
+  is_superseded: (pointer: SnapshotPointer) => Promise<boolean>
+}
+
+/**
+ * Client interface for managing observations.
+ * 
+ * Observations are structured facts that point back to specific locations
+ * in versioned content. The ObservationsClient provides CRUD operations
+ * with type-safe validation via ObservationTypeDef schemas.
+ * 
+ * Key operations:
+ * - `put` - Create a new observation with validated content
+ * - `get` - Retrieve a single observation by ID
+ * - `query` / `query_meta` - Filter observations with various criteria
+ * - `delete` / `delete_by_source` - Remove observations
+ * - `is_stale` - Check if source content has been superseded
+ * 
+ * @category Types
+ * @group Observation Types
+ * 
+ * @example
+ * ```ts
+ * // Define observation type
+ * const entity_mention = define_observation_type('entity_mention', EntitySchema)
+ * 
+ * // Create observation
+ * const result = await observations.put(entity_mention, {
+ *   source: { store_id: 'hansard', version: 'abc123', path: '$.speeches[0]' },
+ *   content: { entity: 'Climate Change', entity_type: 'topic' },
+ *   confidence: 0.95
+ * })
+ * 
+ * // Query observations
+ * for await (const obs of observations.query({ type: 'entity_mention' })) {
+ *   console.log(obs.content)
+ * }
+ * ```
+ */
+export type ObservationsClient = {
+  put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
+  get: (id: string) => Promise<Result<Observation, CorpusError>>
+  query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>
+  query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>
+  delete: (id: string) => Promise<Result<void, CorpusError>>
+  delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>
+  is_stale: (pointer: SnapshotPointer) => Promise<boolean>
 }

@@ -3,8 +3,11 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from "../types";
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from "../types";
+import type { ObservationRow } from "../observations";
+import { create_observations_client, create_observations_storage } from "../observations";
 import { ok, err } from "../types";
+import { to_bytes, create_emitter, filter_snapshots, parse_snapshot_meta } from "../utils";
 import { mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
@@ -46,10 +49,7 @@ export type FileBackendConfig = {
  */
 export function create_file_backend(config: FileBackendConfig): Backend {
 	const { base_path, on_event } = config;
-
-	function emit(event: CorpusEvent) {
-		on_event?.(event);
-	}
+	const emit = create_emitter(on_event);
 
 	function meta_path(store_id: string): string {
 		return join(base_path, store_id, "_meta.json");
@@ -66,13 +66,8 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 
 		try {
 			const content = await file.text();
-			const entries = JSON.parse(content, (key, value) => {
-				if (key === "created_at" || key === "invoked_at") {
-					return value ? new Date(value) : value;
-				}
-				return value;
-			}) as [string, SnapshotMeta][];
-			return new Map(entries);
+			const entries = JSON.parse(content) as [string, unknown][];
+			return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw as any)]));
 		} catch {
 			return new Map();
 		}
@@ -115,18 +110,9 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
 			const store_meta = await read_store_meta(store_id);
 
-			const matches = Array.from(store_meta.values())
-				.filter(meta => {
-					if (opts?.before && meta.created_at >= opts.before) return false;
-					if (opts?.after && meta.created_at <= opts.after) return false;
-					if (opts?.tags?.length && !opts.tags.every(t => meta.tags?.includes(t))) return false;
-					return true;
-				})
-				.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
-
-			const limit = opts?.limit ?? Infinity;
+			const filtered = filter_snapshots(Array.from(store_meta.values()), opts);
 			let count = 0;
-			for (const meta of matches.slice(0, limit)) {
+			for (const meta of filtered) {
 				yield meta;
 				count++;
 			}
@@ -198,19 +184,8 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			await mkdir(dirname(path), { recursive: true });
 
 			try {
-				if (input instanceof Uint8Array) {
-					await Bun.write(path, input);
-				} else {
-					const chunks: Uint8Array[] = [];
-					const reader = input.getReader();
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						chunks.push(value);
-					}
-					const bytes = concat_bytes(chunks);
-					await Bun.write(path, bytes);
-				}
+				const bytes = await to_bytes(input)
+				await Bun.write(path, bytes);
 				return ok(undefined);
 			} catch (cause) {
 				return err({ kind: "storage_error", cause: cause as Error, operation: "put" });
@@ -237,16 +212,44 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		},
 	};
 
-	return { metadata, data, on_event };
-}
+	const file_path = join(base_path, "_observations.json");
 
-function concat_bytes(chunks: Uint8Array[]): Uint8Array {
-	const total = chunks.reduce((sum, c) => sum + c.length, 0);
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.length;
+	async function read_observations(): Promise<ObservationRow[]> {
+		const file = Bun.file(file_path);
+		if (!(await file.exists())) return [];
+		try {
+			return await file.json();
+		} catch {
+			return [];
+		}
 	}
-	return result;
+
+	async function write_observations(rows: ObservationRow[]): Promise<void> {
+		await Bun.write(file_path, JSON.stringify(rows, null, 2));
+	}
+
+	const storage = create_observations_storage({
+		get_all: read_observations,
+		set_all: write_observations,
+		get_one: async (id) => {
+			const rows = await read_observations()
+			return rows.find(r => r.id === id) ?? null
+		},
+		add_one: async (row) => {
+			const rows = await read_observations()
+			rows.push(row)
+			await write_observations(rows)
+		},
+		remove_one: async (id) => {
+			const rows = await read_observations()
+			const idx = rows.findIndex(r => r.id === id)
+			if (idx === -1) return false
+			rows.splice(idx, 1)
+			await write_observations(rows)
+			return true
+		}
+	})
+	const observations = create_observations_client(storage, metadata);
+
+	return { metadata, data, observations, on_event };
 }

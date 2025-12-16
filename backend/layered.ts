@@ -3,8 +3,9 @@
  * @description Layered backend for caching and replication strategies.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle } from '../types'
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types'
 import { ok, err } from '../types'
+import { to_bytes } from '../utils'
 
 export type LayeredBackendOptions = {
   read: Backend[]
@@ -185,26 +186,83 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
     },
   }
 
-  return { metadata, data }
+  const observations = createLayeredObservationsClient(read, write)
+
+  return {
+    metadata,
+    data,
+    ...(observations ? { observations } : {}),
+  }
 }
 
-async function to_bytes(data: ReadableStream<Uint8Array> | Uint8Array): Promise<Uint8Array> {
-  if (data instanceof Uint8Array) return data
+function createLayeredObservationsClient(
+  readLayers: Backend[],
+  writeLayers: Backend[]
+): ObservationsClient | undefined {
+  const readLayer = readLayers.find(l => l.observations)
+  const writeLayersWithObs = writeLayers.filter(l => l.observations)
 
-  const chunks: Uint8Array[] = []
-  const reader = data.getReader()
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
+  if (!readLayer?.observations && writeLayersWithObs.length === 0) {
+    return undefined
   }
 
-  const total = chunks.reduce((sum, c) => sum + c.length, 0)
-  const result = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.length
+  const primary = readLayer?.observations
+
+  return {
+    async put(type, opts) {
+      if (writeLayersWithObs.length === 0) {
+        return err({ kind: 'invalid_config', message: 'No write layers support observations' })
+      }
+      let result
+      for (const layer of writeLayersWithObs) {
+        result = await layer.observations!.put(type, opts)
+        if (!result.ok) return result
+      }
+      return result!
+    },
+
+    async get(id) {
+      if (!primary) {
+        return err({ kind: 'observation_not_found', id })
+      }
+      return primary.get(id)
+    },
+
+    async *query(opts) {
+      if (!primary) return
+      yield* primary.query(opts)
+    },
+
+    async *query_meta(opts) {
+      if (!primary) return
+      yield* primary.query_meta(opts)
+    },
+
+    async delete(id) {
+      if (writeLayersWithObs.length === 0) {
+        return err({ kind: 'observation_not_found', id })
+      }
+      let result
+      for (const layer of writeLayersWithObs) {
+        result = await layer.observations!.delete(id)
+      }
+      return result!
+    },
+
+    async delete_by_source(source) {
+      let total = 0
+      for (const layer of writeLayersWithObs) {
+        const result = await layer.observations!.delete_by_source(source)
+        if (result.ok) total += result.value
+      }
+      return ok(total)
+    },
+
+    async is_stale(pointer) {
+      if (!primary) return false
+      return primary.is_stale(pointer)
+    },
   }
-  return result
 }
+
+
