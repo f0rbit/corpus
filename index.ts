@@ -31,8 +31,11 @@ export type {
   Result,
   CorpusEvent,
   EventHandler,
+  ObservationsClient,
 } from './types'
 
 export { ok, err, define_store } from './types'
+
+export * from './observations'
 
 export { createCorpusInfra, CORPUS_MIGRATION_SQL, type CorpusInfra, type CorpusInfraConfig } from './sst'

@@ -3,8 +3,12 @@
  * @description In-memory storage backend for testing and development.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from "../types";
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError } from "../types";
+import type { ObservationRow } from "../observations";
+import { create_observations_client, create_observations_storage } from "../observations";
 import { ok, err } from "../types";
+import { to_bytes, create_emitter, filter_snapshots } from "../utils";
+import type { EventHandler } from "../types";
 
 export type MemoryBackendOptions = {
 	on_event?: EventHandler;
@@ -39,11 +43,9 @@ export type MemoryBackendOptions = {
 export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 	const meta_store = new Map<string, SnapshotMeta>();
 	const data_store = new Map<string, Uint8Array>();
+	const observation_store = new Map<string, ObservationRow>();
 	const on_event = options?.on_event;
-
-	function emit(event: CorpusEvent) {
-		on_event?.(event);
-	}
+	const emit = create_emitter(on_event);
 
 	function make_meta_key(store_id: string, version: string): string {
 		return `${store_id}:${version}`;
@@ -73,22 +75,18 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 
 		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
 			const prefix = `${store_id}:`;
-			const matches: SnapshotMeta[] = [];
+			const store_metas: SnapshotMeta[] = [];
 
 			for (const [key, meta] of meta_store) {
-				if (!key.startsWith(prefix)) continue;
-				if (opts?.before && meta.created_at >= opts.before) continue;
-				if (opts?.after && meta.created_at <= opts.after) continue;
-				if (opts?.tags?.length && !opts.tags.every(t => meta.tags?.includes(t))) continue;
-				matches.push(meta);
+				if (key.startsWith(prefix)) {
+					store_metas.push(meta);
+				}
 			}
 
-			matches.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
-
-			const limit = opts?.limit ?? Infinity;
+			const filtered = filter_snapshots(store_metas, opts);
 			let count = 0;
-			for (const match of matches.slice(0, limit)) {
-				yield match;
+			for (const meta of filtered) {
+				yield meta;
 				count++;
 			}
 			emit({ type: "meta_list", store_id, count });
@@ -150,21 +148,7 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		},
 
 		async put(data_key, input): Promise<Result<void, CorpusError>> {
-			let bytes: Uint8Array;
-
-			if (input instanceof Uint8Array) {
-				bytes = input;
-			} else {
-				const chunks: Uint8Array[] = [];
-				const reader = input.getReader();
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					chunks.push(value);
-				}
-				bytes = concat_bytes(chunks);
-			}
-
+			const bytes = await to_bytes(input)
 			data_store.set(data_key, bytes);
 			return ok(undefined);
 		},
@@ -179,16 +163,21 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		},
 	};
 
-	return { metadata, data, on_event };
-}
+	const storage = create_observations_storage({
+		get_all: async () => Array.from(observation_store.values()),
+		set_all: async (rows) => {
+			observation_store.clear()
+			for (const row of rows) observation_store.set(row.id, row)
+		},
+		get_one: async (id) => observation_store.get(id) ?? null,
+		add_one: async (row) => { observation_store.set(row.id, row) },
+		remove_one: async (id) => {
+			const had = observation_store.has(id)
+			observation_store.delete(id)
+			return had
+		}
+	})
+	const observations = create_observations_client(storage, metadata);
 
-function concat_bytes(chunks: Uint8Array[]): Uint8Array {
-	const total = chunks.reduce((sum, c) => sum + c.length, 0);
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.length;
-	}
-	return result;
+	return { metadata, data, observations, on_event };
 }

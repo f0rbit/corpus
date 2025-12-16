@@ -3,9 +3,11 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext } from './types'
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types'
+import type { ObservationTypeDef, SnapshotPointer } from './observations/types'
 import { ok, err } from './types'
 import { compute_hash, generate_version } from './utils'
+import { create_pointer, resolve_path, apply_span } from './observations/utils'
 
 /**
  * Creates a typed Store instance bound to a Backend.
@@ -216,11 +218,23 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
  * // Type-safe access to stores
  * await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
  * await corpus.stores.notes.put('Hello, world!')
+ * 
+ * // With observations
+ * const corpus_with_obs = create_corpus()
+ *   .with_backend(create_memory_backend())
+ *   .with_store(users)
+ *   .with_observations([EntityType, SentimentType])
+ *   .build()
+ * 
+ * // Pointer utilities
+ * const pointer = corpus_with_obs.create_pointer('users', 'v123', '$.name')
+ * const value = await corpus_with_obs.resolve_pointer(pointer)
  * ```
  */
 export function create_corpus(): CorpusBuilder<{}> {
   let backend: Backend | null = null
   const definitions: StoreDefinition<string, any>[] = []
+  let observation_types: ObservationTypeDef<unknown>[] = []
 
   const builder: CorpusBuilder<any> = {
     with_backend(b) {
@@ -230,6 +244,11 @@ export function create_corpus(): CorpusBuilder<{}> {
 
     with_store(definition) {
       definitions.push(definition)
+      return builder
+    },
+
+    with_observations(types) {
+      observation_types = types
       return builder
     },
 
@@ -245,10 +264,49 @@ export function create_corpus(): CorpusBuilder<{}> {
         stores[def.id] = create_store(b, def)
       }
 
+      const observations_client = observation_types.length > 0 && 'observations' in b
+        ? (b as Backend & { observations: ObservationsClient }).observations
+        : undefined
+
+      async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
+        const store = stores[pointer.store_id]
+        if (!store) {
+          return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
+        }
+
+        const snapshot_result = await store.get(pointer.version)
+        if (!snapshot_result.ok) return snapshot_result
+
+        let value: unknown = snapshot_result.value.data
+
+        if (pointer.path) {
+          const path_result = resolve_path(value, pointer.path)
+          if (!path_result.ok) return path_result
+          value = path_result.value
+        }
+
+        if (pointer.span && typeof value === 'string') {
+          const span_result = apply_span(value, pointer.span)
+          if (!span_result.ok) return span_result
+          value = span_result.value
+        }
+
+        return ok(value as T)
+      }
+
+      async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
+        if (!observations_client?.is_stale) return false
+        return observations_client.is_stale(pointer)
+      }
+
       return {
         stores,
         metadata: b.metadata,
         data: b.data,
+        observations: observations_client,
+        create_pointer,
+        resolve_pointer: resolve_pointer_impl,
+        is_superseded: is_superseded_impl,
       } as Corpus<any>
     },
   }

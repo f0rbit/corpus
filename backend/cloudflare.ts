@@ -3,11 +3,13 @@
  * @description Cloudflare Workers storage backend using D1 and R2.
  */
 
-import { eq, and, desc, lt, gt, like, sql } from "drizzle-orm";
+import { eq, and, desc, lt, gt, like, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, ListOpts, Result, CorpusError, CorpusEvent, EventHandler } from "../types";
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from "../types";
+import { create_emitter, parse_snapshot_meta } from "../utils";
 import { ok, err } from "../types";
 import { corpus_snapshots } from "../schema";
+import { corpus_observations, type ObservationRow, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from "../observations";
 
 type D1Database = { prepare: (sql: string) => unknown };
 type R2Bucket = {
@@ -22,6 +24,145 @@ export type CloudflareBackendConfig = {
 	r2: R2Bucket;
 	on_event?: EventHandler;
 };
+
+function create_cloudflare_storage(
+	db: ReturnType<typeof drizzle>
+): ObservationsStorage {
+	return {
+		async put_row(row) {
+			try {
+				await db.insert(corpus_observations).values(row);
+				return ok(row);
+			} catch (cause) {
+				return err({
+					kind: "storage_error",
+					cause: cause as Error,
+					operation: "observations.put"
+				});
+			}
+		},
+
+		async get_row(id) {
+			try {
+				const rows = await db
+					.select()
+					.from(corpus_observations)
+					.where(eq(corpus_observations.id, id))
+					.limit(1);
+				return ok(rows[0] ?? null);
+			} catch (cause) {
+				return err({
+					kind: "storage_error",
+					cause: cause as Error,
+					operation: "observations.get"
+				});
+			}
+		},
+
+		async *query_rows(opts: StorageQueryOpts = {}) {
+			const conditions: ReturnType<typeof eq>[] = [];
+
+			if (opts.type) {
+				if (Array.isArray(opts.type)) {
+					conditions.push(inArray(corpus_observations.type, opts.type));
+				} else {
+					conditions.push(eq(corpus_observations.type, opts.type));
+				}
+			}
+			if (opts.source_store_id) {
+				conditions.push(eq(corpus_observations.source_store_id, opts.source_store_id));
+			}
+			if (opts.source_version) {
+				conditions.push(eq(corpus_observations.source_version, opts.source_version));
+			}
+			if (opts.source_prefix) {
+				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
+			}
+			if (opts.created_after) {
+				conditions.push(gt(corpus_observations.created_at, opts.created_after));
+			}
+			if (opts.created_before) {
+				conditions.push(lt(corpus_observations.created_at, opts.created_before));
+			}
+			if (opts.observed_after) {
+				conditions.push(gt(corpus_observations.observed_at, opts.observed_after));
+			}
+			if (opts.observed_before) {
+				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
+			}
+
+			let query = db
+				.select()
+				.from(corpus_observations)
+				.where(conditions.length > 0 ? and(...conditions) : undefined)
+				.orderBy(desc(corpus_observations.created_at));
+
+			if (opts.limit) {
+				query = query.limit(opts.limit) as typeof query;
+			}
+
+			const rows = await query;
+			for (const row of rows) {
+				yield row;
+			}
+		},
+
+		async delete_row(id) {
+			try {
+				const existing = await db
+					.select()
+					.from(corpus_observations)
+					.where(eq(corpus_observations.id, id))
+					.limit(1);
+
+				if (existing.length === 0) {
+					return ok(false);
+				}
+
+				await db.delete(corpus_observations).where(eq(corpus_observations.id, id));
+				return ok(true);
+			} catch (cause) {
+				return err({
+					kind: "storage_error",
+					cause: cause as Error,
+					operation: "observations.delete"
+				});
+			}
+		},
+
+		async delete_by_source(store_id, version, path) {
+			try {
+				const conditions = [
+					eq(corpus_observations.source_store_id, store_id),
+					eq(corpus_observations.source_version, version)
+				];
+
+				if (path !== undefined) {
+					conditions.push(eq(corpus_observations.source_path, path));
+				}
+
+				const toDelete = await db
+					.select()
+					.from(corpus_observations)
+					.where(and(...conditions));
+
+				const count = toDelete.length;
+
+				if (count > 0) {
+					await db.delete(corpus_observations).where(and(...conditions));
+				}
+
+				return ok(count);
+			} catch (cause) {
+				return err({
+					kind: "storage_error",
+					cause: cause as Error,
+					operation: "observations.delete_by_source"
+				});
+			}
+		}
+	};
+}
 
 /**
  * Creates a Cloudflare Workers storage backend using D1 and R2.
@@ -62,24 +203,10 @@ export type CloudflareBackendConfig = {
 export function create_cloudflare_backend(config: CloudflareBackendConfig): Backend {
 	const db = drizzle(config.d1);
 	const { r2, on_event } = config;
+	const emit = create_emitter(on_event);
 
-	function emit(event: CorpusEvent) {
-		on_event?.(event);
-	}
-
-	function row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
-		return {
-			store_id: row.store_id,
-			version: row.version,
-			parents: JSON.parse(row.parents),
-			created_at: new Date(row.created_at),
-			invoked_at: row.invoked_at ? new Date(row.invoked_at) : undefined,
-			content_hash: row.content_hash,
-			content_type: row.content_type,
-			size_bytes: row.size_bytes,
-			data_key: row.data_key,
-			tags: row.tags ? JSON.parse(row.tags) : undefined,
-		};
+	function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
+		return parse_snapshot_meta(row)
 	}
 
 	const metadata: MetadataClient = {
@@ -97,7 +224,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 				if (!row) {
 					return err({ kind: "not_found", store_id, version });
 				}
-				return ok(row_to_meta(row));
+				return ok(snapshot_row_to_meta(row));
 			} catch (cause) {
 				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.get" };
 				emit({ type: "error", error });
@@ -181,7 +308,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			let count = 0;
 
 			for (const row of rows) {
-				const meta = row_to_meta(row);
+				const meta = snapshot_row_to_meta(row);
 
 				if (opts?.tags?.length && !opts.tags.every(t => meta.tags?.includes(t))) {
 					continue;
@@ -202,7 +329,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 				if (!row) {
 					return err({ kind: "not_found", store_id, version: "latest" });
 				}
-				return ok(row_to_meta(row));
+				return ok(snapshot_row_to_meta(row));
 			} catch (cause) {
 				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.get_latest" };
 				emit({ type: "error", error });
@@ -223,7 +350,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 				);
 
 			for (const row of rows) {
-				yield row_to_meta(row);
+				yield snapshot_row_to_meta(row);
 			}
 		},
 
@@ -236,7 +363,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 					.limit(1);
 
 				const row = rows[0];
-				return row ? row_to_meta(row) : null;
+				return row ? snapshot_row_to_meta(row) : null;
 			} catch {
 				return null;
 			}
@@ -296,5 +423,8 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 	};
 
-	return { metadata, data, on_event };
+	const storage = create_cloudflare_storage(db);
+	const observations = create_observations_client(storage, metadata);
+
+	return { metadata, data, observations, on_event };
 }
