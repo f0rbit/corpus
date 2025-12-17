@@ -1,69 +1,73 @@
 {
-  "name": "@f0rbit/corpus",
-  "version": "0.1.6",
-  "description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
-  "module": "dist/index.js",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "type": "module",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./cloudflare": {
-      "import": "./dist/cloudflare.js",
-      "types": "./dist/cloudflare.d.ts"
-    },
-    "./types": {
-      "import": "./dist/types.js",
-      "types": "./dist/types.d.ts"
-    },
-    "./schema": {
-      "import": "./dist/schema.js",
-      "types": "./dist/schema.d.ts"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
-    "docs:dev": "cd docs && bun run dev",
-    "docs:build": "cd docs && bun run build",
-    "docs:preview": "cd docs && bun run preview"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/f0rbit/corpus.git"
-  },
-  "keywords": [
-    "snapshot",
-    "versioning",
-    "data-store",
-    "lineage",
-    "typescript"
-  ],
-  "author": "f0rbit",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/f0rbit/corpus/issues"
-  },
-  "homepage": "https://github.com/f0rbit/corpus#readme",
-  "publishConfig": {
-    "access": "public"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5",
-    "zod": "^3"
-  },
-  "dependencies": {
-    "drizzle-orm": "^0.44.7"
-  }
+	"name": "@f0rbit/corpus",
+	"version": "0.1.7",
+	"description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
+	"module": "dist/index.js",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.js"
+		},
+		"./cloudflare": {
+			"types": "./dist/cloudflare.d.ts",
+			"import": "./dist/cloudflare.js",
+			"require": "./dist/cloudflare.js"
+		},
+		"./types": {
+			"types": "./dist/types.d.ts",
+			"import": "./dist/types.js",
+			"require": "./dist/types.js"
+		},
+		"./schema": {
+			"types": "./dist/schema.d.ts",
+			"import": "./dist/schema.js",
+			"require": "./dist/schema.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"prepublishOnly": "npm run build",
+		"docs:dev": "cd docs && bun run dev",
+		"docs:build": "cd docs && bun run build",
+		"docs:preview": "cd docs && bun run preview"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/f0rbit/corpus.git"
+	},
+	"keywords": [
+		"snapshot",
+		"versioning",
+		"data-store",
+		"lineage",
+		"typescript"
+	],
+	"author": "f0rbit",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/f0rbit/corpus/issues"
+	},
+	"homepage": "https://github.com/f0rbit/corpus#readme",
+	"publishConfig": {
+		"access": "public"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5",
+		"zod": "^3"
+	},
+	"dependencies": {
+		"drizzle-orm": "^0.44.7"
+	}
 }
