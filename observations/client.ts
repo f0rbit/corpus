@@ -3,137 +3,148 @@
  * @description Centralized business logic for observations, built on storage adapters.
  */
 
-import type { Result, CorpusError, MetadataClient, ObservationsClient } from '../types'
-import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer } from './types'
-import type { ObservationsStorage, StorageQueryOpts } from './storage'
-import { row_to_observation, row_to_meta, create_observation_row } from './storage'
-import { generate_observation_id } from './utils'
-import { ok, err } from '../types'
+import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types";
+import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionResolver } from "./types";
+import type { ObservationsStorage, StorageQueryOpts } from "./storage";
+import { row_to_observation, row_to_meta, create_observation_row } from "./storage";
+import { generate_observation_id } from "./utils";
+import { ok, err } from "../types";
 
 /**
  * Convert client query opts to storage query opts.
  * Handles Date -> ISO string conversion.
  */
 function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
-  return {
-    type: opts.type,
-    source_store_id: opts.source_store,
-    source_version: opts.source_version,
-    source_prefix: opts.source_prefix,
-    created_after: opts.created_after?.toISOString(),
-    created_before: opts.created_before?.toISOString(),
-    observed_after: opts.after?.toISOString(),
-    observed_before: opts.before?.toISOString(),
-    limit: opts.limit
-  }
+	return {
+		type: opts.type,
+		source_store_id: opts.source_store,
+		source_version: opts.source_version,
+		source_prefix: opts.source_prefix,
+		created_after: opts.created_after?.toISOString(),
+		created_before: opts.created_before?.toISOString(),
+		observed_after: opts.after?.toISOString(),
+		observed_before: opts.before?.toISOString(),
+		limit: opts.limit,
+	};
 }
 
 /**
  * Creates an ObservationsClient from a storage adapter.
  * All business logic (validation, staleness, etc.) is centralized here.
  */
-export function create_observations_client(
-  storage: ObservationsStorage,
-  metadata: MetadataClient
-): ObservationsClient {
-  
-  async function get_latest_version(store_id: string): Promise<string | null> {
-    const result = await metadata.get_latest(store_id)
-    return result.ok ? result.value.version : null
-  }
+export function create_observations_client(storage: ObservationsStorage, metadata: MetadataClient): ObservationsClient {
+	async function get_latest_version(store_id: string): Promise<string | null> {
+		const result = await metadata.get_latest(store_id);
+		return result.ok ? result.value.version : null;
+	}
 
-  return {
-    async put<T>(
-      type: ObservationTypeDef<T>,
-      opts: ObservationPutOpts<T>
-    ): Promise<Result<Observation<T>, CorpusError>> {
-      const validation = type.schema.safeParse(opts.content)
-      if (!validation.success) {
-        return err({
-          kind: 'validation_error',
-          cause: validation.error,
-          message: validation.error.message
-        })
-      }
+	async function resolve_version(store_id: string, resolver?: VersionResolver): Promise<string | null> {
+		if (resolver) {
+			const resolved = await resolver(store_id);
+			if (resolved !== null) return resolved;
+		}
+		return get_latest_version(store_id);
+	}
 
-      const id = generate_observation_id()
-      const row = create_observation_row(id, type.name, opts.source, validation.data, {
-        confidence: opts.confidence,
-        observed_at: opts.observed_at,
-        derived_from: opts.derived_from
-      })
+	return {
+		async put<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
+			const validation = type.schema.safeParse(opts.content);
+			if (!validation.success) {
+				return err({
+					kind: "validation_error",
+					cause: validation.error,
+					message: validation.error.message,
+				});
+			}
 
-      const result = await storage.put_row(row)
-      if (!result.ok) return result
+			const id = generate_observation_id();
+			const row = create_observation_row(id, type.name, opts.source, validation.data, {
+				confidence: opts.confidence,
+				observed_at: opts.observed_at,
+				derived_from: opts.derived_from,
+			});
 
-      const observation: Observation<T> = {
-        id,
-        type: type.name,
-        source: opts.source,
-        content: validation.data,
-        ...(opts.confidence !== undefined && { confidence: opts.confidence }),
-        ...(opts.observed_at && { observed_at: opts.observed_at }),
-        created_at: new Date(row.created_at),
-        ...(opts.derived_from && { derived_from: opts.derived_from })
-      }
+			const result = await storage.put_row(row);
+			if (!result.ok) return result;
 
-      return ok(observation)
-    },
+			const observation: Observation<T> = {
+				id,
+				type: type.name,
+				source: opts.source,
+				content: validation.data,
+				...(opts.confidence !== undefined && { confidence: opts.confidence }),
+				...(opts.observed_at && { observed_at: opts.observed_at }),
+				created_at: new Date(row.created_at),
+				...(opts.derived_from && { derived_from: opts.derived_from }),
+			};
 
-    async get(id: string): Promise<Result<Observation, CorpusError>> {
-      const result = await storage.get_row(id)
-      if (!result.ok) return result
-      
-      if (!result.value) {
-        return err({ kind: 'observation_not_found', id })
-      }
-      
-      return ok(row_to_observation(result.value))
-    },
+			return ok(observation);
+		},
 
-    async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
-      const storageOpts = to_storage_opts(opts)
-      
-      for await (const row of storage.query_rows(storageOpts)) {
-        if (!opts.include_stale) {
-          const latest = await get_latest_version(row.source_store_id)
-          if (latest && row.source_version !== latest) continue
-        }
-        yield row_to_observation(row)
-      }
-    },
+		async get(id: string): Promise<Result<Observation, CorpusError>> {
+			const result = await storage.get_row(id);
+			if (!result.ok) return result;
 
-    async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
-      const storageOpts = to_storage_opts(opts)
-      
-      for await (const row of storage.query_rows(storageOpts)) {
-        if (!opts.include_stale) {
-          const latest = await get_latest_version(row.source_store_id)
-          if (latest && row.source_version !== latest) continue
-        }
-        yield row_to_meta(row)
-      }
-    },
+			if (!result.value) {
+				return err({ kind: "observation_not_found", id });
+			}
 
-    async delete(id: string): Promise<Result<void, CorpusError>> {
-      const result = await storage.delete_row(id)
-      if (!result.ok) return result
-      
-      if (!result.value) {
-        return err({ kind: 'observation_not_found', id })
-      }
-      
-      return ok(undefined)
-    },
+			return ok(row_to_observation(result.value));
+		},
 
-    async delete_by_source(source: SnapshotPointer): Promise<Result<number, CorpusError>> {
-      return storage.delete_by_source(source.store_id, source.version, source.path)
-    },
+		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
+			const storageOpts = to_storage_opts(opts);
+			const version_cache = new Map<string, string | null>();
 
-    async is_stale(pointer: SnapshotPointer): Promise<boolean> {
-      const latest = await get_latest_version(pointer.store_id)
-      if (!latest) return false
-      return pointer.version !== latest
-    }
-  }
+			for await (const row of storage.query_rows(storageOpts)) {
+				if (!opts.include_stale) {
+					let canonical_version = version_cache.get(row.source_store_id);
+					if (canonical_version === undefined) {
+						canonical_version = await resolve_version(row.source_store_id, opts.version_resolver);
+						version_cache.set(row.source_store_id, canonical_version);
+					}
+					if (canonical_version && row.source_version !== canonical_version) continue;
+				}
+				yield row_to_observation(row);
+			}
+		},
+
+		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
+			const storageOpts = to_storage_opts(opts);
+			const version_cache = new Map<string, string | null>();
+
+			for await (const row of storage.query_rows(storageOpts)) {
+				if (!opts.include_stale) {
+					let canonical_version = version_cache.get(row.source_store_id);
+					if (canonical_version === undefined) {
+						canonical_version = await resolve_version(row.source_store_id, opts.version_resolver);
+						version_cache.set(row.source_store_id, canonical_version);
+					}
+					if (canonical_version && row.source_version !== canonical_version) continue;
+				}
+				yield row_to_meta(row);
+			}
+		},
+
+		async delete(id: string): Promise<Result<void, CorpusError>> {
+			const result = await storage.delete_row(id);
+			if (!result.ok) return result;
+
+			if (!result.value) {
+				return err({ kind: "observation_not_found", id });
+			}
+
+			return ok(undefined);
+		},
+
+		async delete_by_source(source: SnapshotPointer): Promise<Result<number, CorpusError>> {
+			return storage.delete_by_source(source.store_id, source.version, source.path);
+		},
+
+		async is_stale(pointer: SnapshotPointer): Promise<boolean> {
+			const latest = await get_latest_version(pointer.store_id);
+			if (!latest) return false;
+			return pointer.version !== latest;
+		},
+	};
 }
