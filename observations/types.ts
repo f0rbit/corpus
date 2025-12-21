@@ -127,23 +127,31 @@ export type ObservationPutOpts<T> = {
 };
 
 /**
- * Function that resolves which version is "canonical" for a given store.
- * Return null to fall back to default behavior (most recent by created_at).
+ * Filter for version-based observation filtering.
+ * - Set<string> or string[]: Include if version is in the collection
+ * - Function: Called with (store_id, version), return true to include
  *
  * @category Types
  * @group Observation Types
  *
  * @example
  * ```ts
- * const resolver: VersionResolver = async (store_id) => {
+ * // Filter to specific versions
+ * const filter: VersionFilter = new Set(['v1', 'v2', 'v3'])
+ *
+ * // Or use an array
+ * const filter: VersionFilter = ['v1', 'v2', 'v3']
+ *
+ * // Or use a function for dynamic filtering
+ * const filter: VersionFilter = async (store_id, version) => {
  *   const published = await db.query.published_reports.findFirst({
- *     where: eq(published_reports.store_id, store_id)
+ *     where: eq(published_reports.version, version)
  *   });
- *   return published?.version ?? null;
+ *   return published !== null;
  * };
  * ```
  */
-export type VersionResolver = (store_id: string) => Promise<string | null>;
+export type VersionFilter = Set<string> | string[] | ((store_id: string, version: string) => boolean | Promise<boolean>);
 
 /**
  * Query options for filtering observations.
@@ -161,11 +169,10 @@ export type VersionResolver = (store_id: string) => Promise<string | null>;
  *   limit: 100
  * }
  *
- * // Find all observations for a specific version
+ * // Filter to only published versions
  * const versionOpts: ObservationQueryOpts = {
  *   source_store: 'hansard',
- *   source_version: 'AZJx4vM',
- *   include_stale: true
+ *   version_filter: new Set(['v1', 'v2'])
  * }
  * ```
  */
@@ -178,17 +185,16 @@ export type ObservationQueryOpts = {
 	before?: Date;
 	created_after?: Date;
 	created_before?: Date;
-	include_stale?: boolean;
 	limit?: number;
 	cursor?: string;
 	/**
-	 * Custom function to resolve which version is "current" for a given store.
-	 * When provided and include_stale is false, this takes precedence over
-	 * the default "most recent by created_at" staleness logic.
+	 * Filter observations by version.
+	 * When provided, only observations whose source version passes the filter are included.
 	 *
-	 * If the resolver returns null for a store_id, falls back to default behavior.
+	 * - Set<string> or string[]: Include if version is in the collection
+	 * - Function: Called with (store_id, version), return true to include
 	 */
-	version_resolver?: VersionResolver;
+	version_filter?: VersionFilter;
 };
 
 /**
