@@ -206,3 +206,40 @@ export type ObservationQueryOpts = {
  * ```
  */
 export type InferObservationContent<T> = T extends ObservationTypeDef<infer C> ? C : never;
+
+/**
+ * Defines a typed observation schema.
+ *
+ * Creates an ObservationTypeDef that provides:
+ * - Runtime validation via Zod schema
+ * - Compile-time type inference for content
+ * - Named type for querying and filtering
+ *
+ * @category Core
+ * @group Observation Helpers
+ * @param name - Unique identifier for this observation type
+ * @param schema - Zod schema for validating observation content
+ * @returns An ObservationTypeDef to pass to `observations.put()`
+ *
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ *
+ * const EntityMentionSchema = z.object({
+ *   entity: z.string(),
+ *   entity_type: z.enum(['person', 'organization', 'topic', 'location']),
+ *   context: z.string().optional()
+ * })
+ *
+ * const entity_mention = define_observation_type('entity_mention', EntityMentionSchema)
+ *
+ * // Type-safe usage
+ * await corpus.observations.put(entity_mention, {
+ *   source: { store_id: 'hansard', version: 'abc123' },
+ *   content: { entity: 'Parliament', entity_type: 'organization' }
+ * })
+ * ```
+ */
+export function define_observation_type<T>(name: string, schema: ZodType<T>): ObservationTypeDef<T> {
+	return { name, schema };
+}
