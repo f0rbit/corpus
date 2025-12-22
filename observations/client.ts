@@ -4,11 +4,17 @@
  */
 
 import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types";
-import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionResolver } from "./types";
+import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionFilter } from "./types";
 import type { ObservationsStorage, StorageQueryOpts } from "./storage";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage";
 import { generate_observation_id } from "./utils";
 import { ok, err } from "../types";
+
+async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
+	if (typeof filter === "function") return filter(store_id, version);
+	if (filter instanceof Set) return filter.has(version);
+	return filter.includes(version);
+}
 
 /**
  * Convert client query opts to storage query opts.
@@ -36,14 +42,6 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 	async function get_latest_version(store_id: string): Promise<string | null> {
 		const result = await metadata.get_latest(store_id);
 		return result.ok ? result.value.version : null;
-	}
-
-	async function resolve_version(store_id: string, resolver?: VersionResolver): Promise<string | null> {
-		if (resolver) {
-			const resolved = await resolver(store_id);
-			if (resolved !== null) return resolved;
-		}
-		return get_latest_version(store_id);
 	}
 
 	return {
@@ -94,16 +92,11 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 
 		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
 			const storageOpts = to_storage_opts(opts);
-			const version_cache = new Map<string, string | null>();
 
 			for await (const row of storage.query_rows(storageOpts)) {
-				if (!opts.include_stale) {
-					let canonical_version = version_cache.get(row.source_store_id);
-					if (canonical_version === undefined) {
-						canonical_version = await resolve_version(row.source_store_id, opts.version_resolver);
-						version_cache.set(row.source_store_id, canonical_version);
-					}
-					if (canonical_version && row.source_version !== canonical_version) continue;
+				if (opts.version_filter !== undefined) {
+					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
+					if (!included) continue;
 				}
 				yield row_to_observation(row);
 			}
@@ -111,16 +104,11 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 
 		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
 			const storageOpts = to_storage_opts(opts);
-			const version_cache = new Map<string, string | null>();
 
 			for await (const row of storage.query_rows(storageOpts)) {
-				if (!opts.include_stale) {
-					let canonical_version = version_cache.get(row.source_store_id);
-					if (canonical_version === undefined) {
-						canonical_version = await resolve_version(row.source_store_id, opts.version_resolver);
-						version_cache.set(row.source_store_id, canonical_version);
-					}
-					if (canonical_version && row.source_version !== canonical_version) continue;
+				if (opts.version_filter !== undefined) {
+					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
+					if (!included) continue;
 				}
 				yield row_to_meta(row);
 			}
