@@ -1,0 +1,579 @@
+---
+title: Utility Functions
+description: Extended utilities for Result types and concurrency control in Corpus.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+The corpus library provides extended utilities for working with `Result<T, E>` types and managing concurrent async operations. These utilities enable explicit error handling without exceptions and controlled parallelism.
+
+## Result Utilities
+
+All operations return a `Result<T, E>` type rather than throwing exceptions:
+
+```typescript
+type Result<T, E = CorpusError> =
+  | { ok: true; value: T }
+  | { ok: false; error: E }
+
+// Helper constructors
+const ok = <T>(value: T): Result<T, never>
+const err = <E>(error: E): Result<never, E>
+```
+
+### Basic Result Operations
+
+#### `match(result, on_ok, on_err)`
+
+Pattern match on a Result, extracting the value with the appropriate handler. Guarantees exhaustive handling of both cases.
+
+```typescript
+import { match } from '@f0rbit/corpus'
+
+const result = await fetchUser(id)
+
+const message = match(
+  result,
+  user => `Hello, ${user.name}!`,
+  error => `Failed: ${error.message}`
+)
+```
+
+**Signature:**
+```typescript
+function match<T, E, R>(
+  result: Result<T, E>,
+  on_ok: (value: T) => R,
+  on_err: (error: E) => R
+): R
+```
+
+---
+
+#### `unwrap_or(result, default_value)`
+
+Extract the success value, returning a default if the Result is an error. Useful for providing fallback values without branching.
+
+```typescript
+import { unwrap_or } from '@f0rbit/corpus'
+
+const users = unwrap_or(await fetchUsers(), [])
+const count = unwrap_or(await getCount(), 0)
+```
+
+**Signature:**
+```typescript
+function unwrap_or<T, E>(result: Result<T, E>, default_value: T): T
+```
+
+---
+
+#### `unwrap(result)` / `unwrap_err(result)`
+
+Forcefully extract the value or error, throwing if the Result is in the opposite state. Use only when you're certain of the Result's state, or in tests.
+
+```typescript
+import { unwrap, unwrap_err } from '@f0rbit/corpus'
+
+// In tests where you expect success
+const user = unwrap(await createUser(data))
+expect(user.name).toBe('Alice')
+
+// In tests where you expect failure
+const error = unwrap_err(await createUser(invalidData))
+expect(error.kind).toBe('validation_error')
+```
+
+<Aside type="caution">
+These functions throw if the Result is in the unexpected state. Prefer `match`, `unwrap_or`, or `pipe` for production code.
+</Aside>
+
+**Signatures:**
+```typescript
+function unwrap<T, E>(result: Result<T, E>): T      // throws if error
+function unwrap_err<T, E>(result: Result<T, E>): E  // throws if ok
+```
+
+---
+
+### Exception Handling
+
+#### `try_catch(fn, on_error)`
+
+Execute a synchronous function and convert any thrown exception to a Result. Bridges exception-throwing APIs into the Result world.
+
+```typescript
+import { try_catch } from '@f0rbit/corpus'
+
+const result = try_catch(
+  () => JSON.parse(input),
+  e => ({ kind: 'parse_error', message: format_error(e) })
+)
+
+if (result.ok) {
+  console.log(result.value)
+}
+```
+
+**Signature:**
+```typescript
+function try_catch<T, E>(
+  fn: () => T,
+  on_error: (e: unknown) => E
+): Result<T, E>
+```
+
+---
+
+#### `try_catch_async(fn, on_error)`
+
+Async version of `try_catch`. Wraps a Promise-returning function and converts rejections to a Result.
+
+```typescript
+import { try_catch_async } from '@f0rbit/corpus'
+
+const result = await try_catch_async(
+  () => db.query('SELECT * FROM users'),
+  e => ({ kind: 'database_error', cause: e })
+)
+```
+
+**Signature:**
+```typescript
+function try_catch_async<T, E>(
+  fn: () => Promise<T>,
+  on_error: (e: unknown) => E
+): Promise<Result<T, E>>
+```
+
+---
+
+### Fetch Wrapper
+
+#### `fetch_result(input, init, on_error, parse_body?)`
+
+A fetch wrapper that returns a Result instead of throwing. Handles both network errors and non-2xx HTTP responses.
+
+```typescript
+import { fetch_result, type FetchError } from '@f0rbit/corpus'
+
+const result = await fetch_result(
+  'https://api.example.com/users',
+  { headers: { Authorization: `Bearer ${token}` } },
+  e => e.type === 'http' ? `HTTP ${e.status}` : 'Network error'
+)
+
+if (result.ok) {
+  console.log(result.value) // Parsed JSON body
+}
+```
+
+**Error types:**
+
+```typescript
+type FetchError =
+  | { type: 'network'; cause: unknown }
+  | { type: 'http'; status: number; status_text: string }
+```
+
+**Custom body parsing:**
+
+```typescript
+// Parse as text instead of JSON
+const textResult = await fetch_result(
+  url,
+  undefined,
+  formatError,
+  response => response.text()
+)
+
+// Parse with Zod validation
+const validatedResult = await fetch_result(
+  url,
+  undefined,
+  formatError,
+  async response => UserSchema.parse(await response.json())
+)
+```
+
+**Signature:**
+```typescript
+function fetch_result<T, E>(
+  input: string | URL | Request,
+  init: RequestInit | undefined,
+  on_error: (e: FetchError) => E,
+  parse_body?: (response: Response) => Promise<T>
+): Promise<Result<T, E>>
+```
+
+---
+
+### Result Pipelines
+
+#### `pipe(initial)`
+
+Create a composable pipeline for chaining Result operations. All operations are lazy—nothing executes until you call `.result()` or `.unwrap_or()`.
+
+```typescript
+import { pipe, ok } from '@f0rbit/corpus'
+
+const avatar = await pipe(fetchUser(id))
+  .flat_map(user => fetchProfile(user.profile_id))
+  .map(profile => profile.avatar_url)
+  .unwrap_or('/default-avatar.png')
+```
+
+**Pipeline methods:**
+
+| Method | Description |
+|--------|-------------|
+| `.map(fn)` | Transform the success value |
+| `.map_async(fn)` | Transform with an async function |
+| `.flat_map(fn)` | Chain with another Result-returning operation |
+| `.map_err(fn)` | Transform the error value |
+| `.tap(fn)` | Execute side effect on success (logging, metrics) |
+| `.tap_err(fn)` | Execute side effect on error |
+| `.unwrap_or(default)` | Extract value with fallback (terminal) |
+| `.result()` | Get the underlying Result (terminal) |
+
+**Starting a pipeline:**
+
+<Tabs>
+  <TabItem label="From existing Result">
+    ```typescript
+    // From a sync Result
+    const doubled = await pipe(ok(21))
+      .map(n => n * 2)
+      .result()
+    // { ok: true, value: 42 }
+    ```
+  </TabItem>
+  <TabItem label="From async operation">
+    ```typescript
+    // From Promise<Result>
+    const user = await pipe(fetchUser(id))
+      .flat_map(u => fetchPermissions(u.id))
+      .result()
+    ```
+  </TabItem>
+  <TabItem label="From try block">
+    ```typescript
+    // Wrap throwing code
+    const data = await pipe.try(
+      () => riskyAsyncOperation(),
+      e => ({ kind: 'failed', cause: e })
+    )
+      .map(processData)
+      .result()
+    ```
+  </TabItem>
+  <TabItem label="From fetch">
+    ```typescript
+    // Wrap fetch call
+    const users = await pipe.fetch<User[], string>(
+      '/api/users',
+      { headers: { Authorization: token } },
+      e => e.type === 'http' ? `Error ${e.status}` : 'Network failure'
+    )
+      .map(users => users.filter(u => u.active))
+      .unwrap_or([])
+    ```
+  </TabItem>
+</Tabs>
+
+**Static constructors:**
+
+```typescript
+// Start with Ok value
+pipe.ok(42)                        // Pipe<number, never>
+
+// Start with Err value  
+pipe.err({ kind: 'not_found' })    // Pipe<never, { kind: string }>
+
+// Start by wrapping a throwing async function
+pipe.try(fn, on_error)             // Pipe<T, E>
+
+// Start with a fetch call
+pipe.fetch(url, init, on_error)    // Pipe<T, E>
+```
+
+**Chaining operations:**
+
+```typescript
+const result = await pipe(getConfig())
+  .map(config => config.apiUrl)
+  .flat_map(url => fetch_result(url, undefined, formatError))
+  .map(data => data.items)
+  .tap(items => console.log(`Fetched ${items.length} items`))
+  .tap_err(err => metrics.increment('api_error'))
+  .map_err(e => ({ kind: 'api_error', cause: e }))
+  .result()
+```
+
+---
+
+### Utility Converters
+
+#### `to_nullable(result)`
+
+Convert a Result to its value or `null`. Useful for "fetch single resource" patterns where not-found is expected.
+
+```typescript
+import { to_nullable } from '@f0rbit/corpus'
+
+const user = to_nullable(await store.get(userId))
+if (!user) {
+  return <NotFound />
+}
+return <Profile user={user} />
+```
+
+---
+
+#### `to_fallback(result, fallback)`
+
+Convert a Result to its value or a fallback. Useful for list endpoints where empty array is acceptable.
+
+```typescript
+import { to_fallback } from '@f0rbit/corpus'
+
+const items = to_fallback(await store.list(), [])
+```
+
+---
+
+#### `null_on(result, predicate)` / `fallback_on(result, predicate, fallback)`
+
+Return null/fallback only for expected errors (matching the predicate), otherwise rethrow the error. Use for 404-as-null patterns where other errors should propagate.
+
+```typescript
+import { null_on, fallback_on } from '@f0rbit/corpus'
+
+// Returns null for not_found, throws for other errors
+const user = null_on(
+  await store.get(id),
+  e => e.kind === 'not_found'
+)
+
+// Returns 0 for not_found, throws for storage_error
+const count = fallback_on(
+  await store.count(),
+  e => e.kind === 'not_found',
+  0
+)
+```
+
+<Aside type="tip">
+Use `to_nullable` / `to_fallback` when all errors should silently fall back.
+Use `null_on` / `fallback_on` when only specific errors should fall back.
+</Aside>
+
+---
+
+#### `format_error(e)`
+
+Format an unknown error to a string. Handles `Error` objects, strings, and anything else via `String(e)`.
+
+```typescript
+import { format_error } from '@f0rbit/corpus'
+
+const result = try_catch(
+  () => JSON.parse(input),
+  e => ({ kind: 'parse_error', message: format_error(e) })
+)
+```
+
+---
+
+## Concurrency Utilities
+
+### `Semaphore`
+
+A classic semaphore for controlling concurrent operations. Limits the number of concurrent async operations by requiring callers to acquire a permit before proceeding.
+
+```typescript
+import { Semaphore } from '@f0rbit/corpus'
+
+const semaphore = new Semaphore(3) // Allow 3 concurrent operations
+
+async function rateLimitedFetch(url: string) {
+  await semaphore.acquire()
+  try {
+    return await fetch(url)
+  } finally {
+    semaphore.release()
+  }
+}
+
+// Only 3 fetches will run concurrently
+await Promise.all(urls.map(rateLimitedFetch))
+```
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `acquire()` | Wait for a permit. Resolves immediately if available, otherwise waits. |
+| `release()` | Release a permit, allowing the next waiting operation to proceed. |
+
+---
+
+### `parallel_map(items, mapper, concurrency)`
+
+Map over an array with controlled concurrency. Unlike `Promise.all` which starts all operations at once, this limits concurrent operations while preserving result order.
+
+```typescript
+import { parallel_map } from '@f0rbit/corpus'
+
+// Process 100 items, but only 5 at a time
+const results = await parallel_map(
+  urls,
+  async (url, index) => {
+    console.log(`Fetching ${index + 1}/${urls.length}`)
+    return fetch(url).then(r => r.json())
+  },
+  5
+)
+```
+
+**Signature:**
+```typescript
+function parallel_map<T, R>(
+  items: T[],
+  mapper: (item: T, index: number) => Promise<R>,
+  concurrency: number
+): Promise<R[]>
+```
+
+**Key behaviors:**
+- Results are returned in the same order as inputs
+- If any mapper throws, the entire operation rejects
+- Uses `Semaphore` internally to limit concurrency
+
+---
+
+## Usage Examples
+
+### Example 1: API Client with Error Handling
+
+Combine `pipe`, `fetch_result`, and `try_catch` for a robust API client:
+
+```typescript
+import { pipe, fetch_result, try_catch, type FetchError } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email()
+})
+
+type User = z.infer<typeof UserSchema>
+type ApiError = 
+  | { kind: 'network' }
+  | { kind: 'http'; status: number }
+  | { kind: 'validation'; message: string }
+
+const toApiError = (e: FetchError): ApiError =>
+  e.type === 'network' 
+    ? { kind: 'network' } 
+    : { kind: 'http', status: e.status }
+
+async function getUser(id: string): Promise<User | null> {
+  return pipe.fetch<unknown, ApiError>(
+    `/api/users/${id}`,
+    undefined,
+    toApiError
+  )
+    .flat_map(data => {
+      const parsed = try_catch(
+        () => UserSchema.parse(data),
+        e => ({ kind: 'validation' as const, message: String(e) })
+      )
+      return Promise.resolve(parsed)
+    })
+    .tap(user => console.log(`Loaded user: ${user.name}`))
+    .tap_err(err => console.error(`Failed to load user ${id}:`, err.kind))
+    .unwrap_or(null as unknown as User)
+    .then(u => u ?? null)
+}
+```
+
+### Example 2: Rate-Limited Batch Processing
+
+Use `parallel_map` with AI APIs that have rate limits:
+
+```typescript
+import { parallel_map, try_catch_async, ok, err, type Result } from '@f0rbit/corpus'
+
+type SummaryError = { kind: 'ai_error'; cause: unknown }
+
+async function summarizeDocument(doc: string): Promise<Result<string, SummaryError>> {
+  return try_catch_async(
+    async () => {
+      const response = await ai.complete({
+        model: 'claude-3-opus',
+        messages: [{ role: 'user', content: `Summarize: ${doc}` }]
+      })
+      return response.content
+    },
+    cause => ({ kind: 'ai_error', cause })
+  )
+}
+
+async function summarizeBatch(documents: string[]): Promise<string[]> {
+  // Process 3 at a time to respect rate limits
+  const results = await parallel_map(
+    documents,
+    async (doc, index) => {
+      console.log(`Processing ${index + 1}/${documents.length}`)
+      const result = await summarizeDocument(doc)
+      if (!result.ok) {
+        console.warn(`Failed to summarize doc ${index}:`, result.error)
+        return '[Summary unavailable]'
+      }
+      return result.value
+    },
+    3
+  )
+  
+  return results
+}
+```
+
+### Example 3: Graceful Degradation
+
+Use `null_on` and `to_fallback` for graceful degradation:
+
+```typescript
+import { null_on, to_fallback, pipe } from '@f0rbit/corpus'
+
+async function renderDashboard(userId: string) {
+  // User must exist - other errors should propagate
+  const user = null_on(
+    await userStore.get(userId),
+    e => e.kind === 'not_found'
+  )
+  
+  if (!user) {
+    return <NotFound message="User not found" />
+  }
+  
+  // These can gracefully degrade to empty/defaults
+  const [posts, notifications, preferences] = await Promise.all([
+    to_fallback(postStore.listByUser(userId), []),
+    to_fallback(notificationStore.listUnread(userId), []),
+    pipe(preferencesStore.get(userId))
+      .unwrap_or({ theme: 'light', notifications: true })
+  ])
+  
+  return (
+    <Dashboard 
+      user={user}
+      posts={posts}
+      notifications={notifications}
+      preferences={preferences}
+    />
+  )
+}
+```

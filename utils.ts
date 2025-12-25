@@ -3,7 +3,7 @@
  * @description Utility functions for hashing, versioning, and codecs.
  */
 
-import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType } from "./types";
+import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from "./types";
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -83,9 +83,6 @@ export function generate_version(): string {
   return sequence > 0 ? `${base64}.${sequence}` : base64
 }
 
-// Use a structural type that matches both Zod 3.x and 4.x
-type ZodLike<T> = { parse: (data: unknown) => T };
-
 /**
  * Creates a JSON codec with schema validation.
  * 
@@ -118,7 +115,7 @@ type ZodLike<T> = { parse: (data: unknown) => T };
  * const user = codec.decode(bytes) // createdAt is now a Date object
  * ```
  */
-export function json_codec<T>(schema: ZodLike<T>): Codec<T> {
+export function json_codec<T>(schema: Parser<T>): Codec<T> {
 	return {
 		content_type: "application/json",
 		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
@@ -230,6 +227,69 @@ export function create_emitter(handler?: EventHandler): (event: CorpusEvent) => 
 }
 
 /**
+ * Configuration for a filter pipeline.
+ * @typeParam T - The type of items being filtered
+ * @typeParam Opts - The options type containing filter criteria
+ */
+export type FilterPipelineConfig<T, Opts> = {
+	filters: Array<{
+		key: keyof Opts
+		predicate: (item: T, optValue: NonNullable<Opts[keyof Opts]>) => boolean
+	}>
+	sort: (a: T, b: T) => number
+}
+
+/**
+ * Creates a reusable filter pipeline function.
+ * Applies filters based on options, sorts results, and applies optional limit.
+ * 
+ * @typeParam T - The type of items being filtered
+ * @typeParam Opts - The options type (must include optional limit)
+ * @param config - Filter definitions and sort function
+ * @returns A function that filters, sorts, and limits items
+ * 
+ * @example
+ * ```ts
+ * const filter_users = create_filter_pipeline<User, UserQueryOpts>({
+ *   filters: [
+ *     { key: 'role', predicate: (u, role) => u.role === role },
+ *     { key: 'active', predicate: (u, active) => u.active === active }
+ *   ],
+ *   sort: (a, b) => b.created_at.getTime() - a.created_at.getTime()
+ * })
+ * 
+ * const results = filter_users(users, { role: 'admin', limit: 10 })
+ * ```
+ */
+export function create_filter_pipeline<T, Opts extends { limit?: number }>(
+	config: FilterPipelineConfig<T, Opts>
+): (items: T[], opts: Opts) => T[] {
+	return (items, opts) => {
+		let filtered = items
+		for (const { key, predicate } of config.filters) {
+			const optValue = opts[key]
+			if (optValue !== undefined && optValue !== null) {
+				filtered = filtered.filter(item => predicate(item, optValue as NonNullable<Opts[keyof Opts]>))
+			}
+		}
+		filtered.sort(config.sort)
+		if (opts.limit) {
+			filtered = filtered.slice(0, opts.limit)
+		}
+		return filtered
+	}
+}
+
+const snapshot_filter_pipeline = create_filter_pipeline<SnapshotMeta, ListOpts>({
+	filters: [
+		{ key: 'before', predicate: (m, before) => m.created_at < (before as Date) },
+		{ key: 'after', predicate: (m, after) => m.created_at > (after as Date) },
+		{ key: 'tags', predicate: (m, tags) => (tags as string[]).length === 0 || (tags as string[]).every(tag => m.tags?.includes(tag)) }
+	],
+	sort: (a, b) => b.created_at.getTime() - a.created_at.getTime()
+})
+
+/**
  * Filter and sort snapshot metadata based on list options.
  * Used by in-memory storage implementations (memory backend, file backend).
  */
@@ -237,28 +297,7 @@ export function filter_snapshots(
 	metas: SnapshotMeta[],
 	opts: ListOpts = {}
 ): SnapshotMeta[] {
-	let filtered = metas
-
-	if (opts.before) {
-		filtered = filtered.filter(m => m.created_at < opts.before!)
-	}
-	if (opts.after) {
-		filtered = filtered.filter(m => m.created_at > opts.after!)
-	}
-
-	if (opts.tags && opts.tags.length > 0) {
-		filtered = filtered.filter(m =>
-			opts.tags!.every(tag => m.tags?.includes(tag))
-		)
-	}
-
-	filtered.sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
-
-	if (opts.limit) {
-		filtered = filtered.slice(0, opts.limit)
-	}
-
-	return filtered
+	return snapshot_filter_pipeline(metas, opts)
 }
 
 /**

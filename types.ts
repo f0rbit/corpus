@@ -177,11 +177,13 @@ export type Snapshot<T = unknown> = {
   data: T
 }
 
+/** @internal */
 export type DataHandle = {
   stream: () => ReadableStream<Uint8Array>
   bytes: () => Promise<Uint8Array>
 }
 
+/** @internal */
 export type MetadataClient = {
   get: (store_id: string, version: string) => Promise<Result<SnapshotMeta, CorpusError>>
   put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>
@@ -192,6 +194,7 @@ export type MetadataClient = {
   find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>
 }
 
+/** @internal */
 export type DataClient = {
   get: (data_key: string) => Promise<Result<DataHandle, CorpusError>>
   put: (data_key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<Result<void, CorpusError>>
@@ -271,6 +274,33 @@ export type Codec<T> = {
 }
 
 /**
+ * Structural type for schema validators (Zod, Valibot, or custom).
+ * 
+ * Any object with a `parse(data: unknown) => T` method satisfies this interface.
+ * Used by `json_codec()` to validate data on decode without importing a specific library.
+ * 
+ * @category Types
+ * @group Codec Types
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * // Zod schemas satisfy Parser<T>
+ * const UserSchema = z.object({ name: z.string() })
+ * const codec = json_codec(UserSchema) // works!
+ * 
+ * // Custom parsers work too
+ * const myParser: Parser<number> = {
+ *   parse: (data) => {
+ *     if (typeof data !== 'number') throw new Error('Expected number')
+ *     return data
+ *   }
+ * }
+ * ```
+ */
+export type Parser<T> = { parse: (data: unknown) => T }
+
+/**
  * A typed store for managing versioned data snapshots.
  * 
  * Stores provide the main API for reading and writing data:
@@ -306,6 +336,7 @@ export type PutOpts = {
 
 /**
  * Context passed to data_key_fn for generating custom storage paths.
+ * @internal
  */
 export type DataKeyContext = {
   store_id: string
@@ -382,6 +413,7 @@ export function define_store<Id extends string, T>(
   return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn }
 }
 
+/** @internal */
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
   with_backend: (backend: Backend) => CorpusBuilder<Stores>
   with_store: <Id extends string, T>(

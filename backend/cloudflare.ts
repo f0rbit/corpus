@@ -9,7 +9,7 @@ import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusE
 import { create_emitter, parse_snapshot_meta } from "../utils";
 import { ok, err } from "../types";
 import { corpus_snapshots } from "../schema";
-import { corpus_observations, type ObservationRow, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from "../observations";
+import { corpus_observations, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from "../observations";
 
 type D1Database = { prepare: (sql: string) => unknown };
 type R2Bucket = {

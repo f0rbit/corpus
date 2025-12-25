@@ -10,7 +10,7 @@ import {
   generate_observation_id,
   pointers_equal,
   pointer_to_snapshot
-} from '../observations'
+} from '../../observations'
 
 describe('define_observation_type', () => {
   it('creates type definition with name and schema', () => {
