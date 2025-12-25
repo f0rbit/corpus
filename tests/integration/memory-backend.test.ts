@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
-import { create_corpus, create_memory_backend, define_store, json_codec, type CorpusEvent, type Corpus, type Store } from "../index";
+import { create_corpus, create_memory_backend, define_store, json_codec, type CorpusEvent, type Corpus, type Store } from "../../index";
 
 const ItemSchema = z.object({
 	id: z.string(),

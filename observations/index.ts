@@ -7,7 +7,7 @@
 export * from './types'
 export type { ObservationRow, ObservationInsert } from './schema'
 export { corpus_observations } from './schema'
-export type { ObservationsStorage, StorageQueryOpts, ObservationsCRUD } from './storage'
+export type { ObservationsStorage, StorageQueryOpts, ObservationsCRUD, ObservationsAdapter, ObservationsCRUDBase, ObservationsCRUDOptimized } from './storage'
 
 // Functions
 export { row_to_observation, row_to_meta, create_observation_row, filter_observation_rows, create_observations_storage } from './storage'

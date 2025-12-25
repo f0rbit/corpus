@@ -3,13 +3,14 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from "../types";
+import type { Backend, SnapshotMeta, EventHandler } from "../types";
 import type { ObservationRow } from "../observations";
 import { create_observations_client, create_observations_storage } from "../observations";
-import { ok, err } from "../types";
-import { to_bytes, create_emitter, filter_snapshots, parse_snapshot_meta } from "../utils";
+import { create_emitter, parse_snapshot_meta } from "../utils";
 import { mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import { create_metadata_client, create_data_client } from "./base";
+import type { MetadataStorage, DataStorage } from "./base";
 
 export type FileBackendConfig = {
 	base_path: string;
@@ -80,77 +81,52 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		await Bun.write(path, JSON.stringify(entries));
 	}
 
-	const metadata: MetadataClient = {
-		async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
-			const store_meta = await read_store_meta(store_id);
-			const meta = store_meta.get(version);
-			emit({ type: "meta_get", store_id, version, found: !!meta });
-			if (!meta) {
-				return err({ kind: "not_found", store_id, version });
+	async function* list_all_stores(): AsyncIterable<string> {
+		try {
+			const entries = await readdir(base_path, { withFileTypes: true });
+			for (const entry of entries) {
+				if (entry.isDirectory() && !entry.name.startsWith("_")) {
+					yield entry.name;
+				}
 			}
-			return ok(meta);
+		} catch {}
+	}
+
+	const metadata_storage: MetadataStorage = {
+		async get(store_id, version) {
+			const store_meta = await read_store_meta(store_id);
+			return store_meta.get(version) ?? null;
 		},
 
-		async put(meta): Promise<Result<void, CorpusError>> {
+		async put(meta) {
 			const store_meta = await read_store_meta(meta.store_id);
 			store_meta.set(meta.version, meta);
 			await write_store_meta(meta.store_id, store_meta);
-			emit({ type: "meta_put", store_id: meta.store_id, version: meta.version });
-			return ok(undefined);
 		},
 
-		async delete(store_id, version): Promise<Result<void, CorpusError>> {
+		async delete(store_id, version) {
 			const store_meta = await read_store_meta(store_id);
 			store_meta.delete(version);
 			await write_store_meta(store_id, store_meta);
-			emit({ type: "meta_delete", store_id, version });
-			return ok(undefined);
 		},
 
-		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
-			const store_meta = await read_store_meta(store_id);
-
-			const filtered = filter_snapshots(Array.from(store_meta.values()), opts);
-			let count = 0;
-			for (const meta of filtered) {
-				yield meta;
-				count++;
-			}
-			emit({ type: "meta_list", store_id, count });
-		},
-
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
-			const store_meta = await read_store_meta(store_id);
-
-			let latest: SnapshotMeta | null = null;
-			for (const meta of store_meta.values()) {
-				if (!latest || meta.created_at > latest.created_at) {
-					latest = meta;
+		async *list(store_id) {
+			if (store_id) {
+				const store_meta = await read_store_meta(store_id);
+				for (const meta of store_meta.values()) {
+					yield meta;
 				}
-			}
-
-			if (!latest) {
-				return err({ kind: "not_found", store_id, version: "latest" });
-			}
-			return ok(latest);
-		},
-
-		async *get_children(parent_store_id, parent_version): AsyncIterable<SnapshotMeta> {
-			try {
-				const entries = await readdir(base_path, { withFileTypes: true });
-				for (const entry of entries) {
-					if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
-
-					const store_meta = await read_store_meta(entry.name);
+			} else {
+				for await (const sid of list_all_stores()) {
+					const store_meta = await read_store_meta(sid);
 					for (const meta of store_meta.values()) {
-						const is_child = meta.parents.some(p => p.store_id === parent_store_id && p.version === parent_version);
-						if (is_child) yield meta;
+						yield meta;
 					}
 				}
-			} catch {}
+			}
 		},
 
-		async find_by_hash(store_id, content_hash): Promise<SnapshotMeta | null> {
+		async find_by_hash(store_id, content_hash) {
 			const store_meta = await read_store_meta(store_id);
 			for (const meta of store_meta.values()) {
 				if (meta.content_hash === content_hash) {
@@ -161,56 +137,37 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		},
 	};
 
-	const data: DataClient = {
-		async get(data_key): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
+	const data_storage: DataStorage = {
+		async get(data_key) {
 			const path = data_path(data_key);
 			const file = Bun.file(path);
-
-			const found = await file.exists();
-			emit({ type: "data_get", store_id: data_key.split("/")[0] ?? data_key, version: data_key, found });
-
-			if (!found) {
-				return err({ kind: "not_found", store_id: data_key, version: "" });
-			}
-
-			return ok({
-				stream: () => file.stream(),
-				bytes: async () => new Uint8Array(await file.arrayBuffer()),
-			});
+			if (!(await file.exists())) return null;
+			return new Uint8Array(await file.arrayBuffer());
 		},
 
-		async put(data_key, input): Promise<Result<void, CorpusError>> {
+		async put(data_key, data) {
 			const path = data_path(data_key);
 			await mkdir(dirname(path), { recursive: true });
-
-			try {
-				const bytes = await to_bytes(input)
-				await Bun.write(path, bytes);
-				return ok(undefined);
-			} catch (cause) {
-				return err({ kind: "storage_error", cause: cause as Error, operation: "put" });
-			}
+			await Bun.write(path, data);
 		},
 
-		async delete(data_key): Promise<Result<void, CorpusError>> {
+		async delete(data_key) {
 			const path = data_path(data_key);
-			try {
-				const file = Bun.file(path);
-				if (await file.exists()) {
-					await file.delete();
-				}
-				return ok(undefined);
-			} catch (cause) {
-				return err({ kind: "storage_error", cause: cause as Error, operation: "delete" });
+			const file = Bun.file(path);
+			if (await file.exists()) {
+				await file.delete();
 			}
 		},
 
-		async exists(data_key): Promise<boolean> {
+		async exists(data_key) {
 			const path = data_path(data_key);
 			const file = Bun.file(path);
 			return file.exists();
 		},
 	};
+
+	const metadata = create_metadata_client(metadata_storage, emit);
+	const data = create_data_client(data_storage, emit);
 
 	const file_path = join(base_path, "_observations.json");
 
@@ -232,23 +189,23 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		get_all: read_observations,
 		set_all: write_observations,
 		get_one: async (id) => {
-			const rows = await read_observations()
-			return rows.find(r => r.id === id) ?? null
+			const rows = await read_observations();
+			return rows.find((r) => r.id === id) ?? null;
 		},
 		add_one: async (row) => {
-			const rows = await read_observations()
-			rows.push(row)
-			await write_observations(rows)
+			const rows = await read_observations();
+			rows.push(row);
+			await write_observations(rows);
 		},
 		remove_one: async (id) => {
-			const rows = await read_observations()
-			const idx = rows.findIndex(r => r.id === id)
-			if (idx === -1) return false
-			rows.splice(idx, 1)
-			await write_observations(rows)
-			return true
-		}
-	})
+			const rows = await read_observations();
+			const idx = rows.findIndex((r) => r.id === id);
+			if (idx === -1) return false;
+			rows.splice(idx, 1);
+			await write_observations(rows);
+			return true;
+		},
+	});
 	const observations = create_observations_client(storage, metadata);
 
 	return { metadata, data, observations, on_event };

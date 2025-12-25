@@ -378,5 +378,3 @@ export const fallback_on = <T, E>(result: Result<T, E>, predicate: (error: E) =>
  * ```
  */
 export const format_error = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-export { ok, err, type Result } from "./types";

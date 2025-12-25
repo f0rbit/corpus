@@ -20,6 +20,7 @@ export type {
 	ListOpts,
 	Backend,
 	Codec,
+	Parser,
 	Store,
 	StoreDefinition,
 	DefineStoreOpts,

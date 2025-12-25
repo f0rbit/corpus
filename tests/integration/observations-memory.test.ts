@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
-import { create_memory_backend } from "../backend/memory";
-import { define_observation_type, create_pointer } from "../observations";
-import type { ObservationsClient } from "../types";
+import { create_memory_backend } from "../../backend/memory";
+import { define_observation_type, create_pointer } from "../../observations";
+import type { ObservationsClient } from "../../types";
 
 const SentimentType = define_observation_type(
 	"sentiment",

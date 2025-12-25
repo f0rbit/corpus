@@ -10,7 +10,7 @@ import {
   type Store,
   type Backend,
   type SnapshotMeta,
-} from '../index'
+} from '../../index'
 
 const ItemSchema = z.object({
   id: z.string(),

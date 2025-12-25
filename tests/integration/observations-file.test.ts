@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { z } from "zod";
-import { create_file_backend } from "../backend/file";
-import { define_observation_type, create_pointer } from "../observations";
-import type { ObservationsClient } from "../types";
+import { create_file_backend } from "../../backend/file";
+import { define_observation_type, create_pointer } from "../../observations";
+import type { ObservationsClient } from "../../types";
 import { rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
