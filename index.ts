@@ -51,6 +51,11 @@ export {
 	null_on,
 	fallback_on,
 	format_error,
+	at,
+	first,
+	last,
+	merge_deep,
+	type DeepPartial,
 	type FetchError,
 	type Pipe,
 } from "./result";
