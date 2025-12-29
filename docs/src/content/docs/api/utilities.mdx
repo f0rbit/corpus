@@ -385,6 +385,134 @@ const result = try_catch(
 
 ---
 
+## Object Utilities
+
+### `DeepPartial<T>`
+
+A utility type that recursively makes all properties of `T` optional. Useful for configuration objects and partial updates.
+
+```typescript
+import { type DeepPartial } from '@f0rbit/corpus'
+
+type Config = {
+  api: { url: string; timeout: number }
+  debug: boolean
+}
+
+type PartialConfig = DeepPartial<Config>
+// { api?: { url?: string; timeout?: number }; debug?: boolean }
+```
+
+---
+
+### `merge_deep(base, overrides)`
+
+Deep merge two objects, with overrides taking precedence. Only merges plain objects—arrays and null values are replaced entirely.
+
+```typescript
+import { merge_deep } from '@f0rbit/corpus'
+
+const config = merge_deep(
+  { api: { url: 'http://localhost', timeout: 5000 }, debug: false },
+  { api: { timeout: 10000 } }
+)
+// { api: { url: 'http://localhost', timeout: 10000 }, debug: false }
+```
+
+**Signature:**
+```typescript
+function merge_deep<T extends Record<string, unknown>>(
+  base: T,
+  overrides: DeepPartial<T>
+): T
+```
+
+---
+
+## Array Utilities
+
+### `at(array, index)`
+
+Safely access an array element by index, returning a Result instead of potentially `undefined`. Provides explicit error information for out-of-bounds access.
+
+```typescript
+import { at } from '@f0rbit/corpus'
+
+const items = ['a', 'b', 'c']
+
+const second = at(items, 1)
+// { ok: true, value: 'b' }
+
+const tenth = at(items, 10)
+// { ok: false, error: { kind: 'index_out_of_bounds', index: 10, length: 3 } }
+```
+
+**Signature:**
+```typescript
+function at<T>(
+  array: readonly T[],
+  index: number
+): Result<T, { kind: 'index_out_of_bounds'; index: number; length: number }>
+```
+
+---
+
+### `first(array)`
+
+Safely get the first element of an array, returning a Result that indicates if the array was empty.
+
+```typescript
+import { first } from '@f0rbit/corpus'
+
+const head = first([1, 2, 3])
+// { ok: true, value: 1 }
+
+const empty = first([])
+// { ok: false, error: { kind: 'empty_array' } }
+```
+
+**Signature:**
+```typescript
+function first<T>(
+  array: readonly T[]
+): Result<T, { kind: 'empty_array' }>
+```
+
+---
+
+### `last(array)`
+
+Safely get the last element of an array, returning a Result that indicates if the array was empty.
+
+```typescript
+import { last } from '@f0rbit/corpus'
+
+const tail = last([1, 2, 3])
+// { ok: true, value: 3 }
+
+const empty = last([])
+// { ok: false, error: { kind: 'empty_array' } }
+```
+
+**Signature:**
+```typescript
+function last<T>(
+  array: readonly T[]
+): Result<T, { kind: 'empty_array' }>
+```
+
+<Aside type="tip">
+Use `first` and `last` with `pipe` for safe array operations:
+```typescript
+const name = await pipe(ok(users))
+  .flat_map(first)
+  .map(user => user.name)
+  .unwrap_or('No users')
+```
+</Aside>
+
+---
+
 ## Concurrency Utilities
 
 ### `Semaphore`
