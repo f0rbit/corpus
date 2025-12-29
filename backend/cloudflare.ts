@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from "../types";
 import { create_emitter, parse_snapshot_meta } from "../utils";
 import { ok, err } from "../types";
+import { first, to_nullable, to_fallback } from "../result";
 import { corpus_snapshots } from "../schema";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from "../observations";
 
@@ -49,7 +50,7 @@ function create_cloudflare_storage(
 					.from(corpus_observations)
 					.where(eq(corpus_observations.id, id))
 					.limit(1);
-				return ok(rows[0] ?? null);
+				return ok(to_nullable(first(rows)));
 			} catch (cause) {
 				return err({
 					kind: "storage_error",
@@ -218,7 +219,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 					.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)))
 					.limit(1);
 
-				const row = rows[0];
+				const row = to_nullable(first(rows));
 				emit({ type: "meta_get", store_id, version, found: !!row });
 
 				if (!row) {
@@ -325,7 +326,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			try {
 				const rows = await db.select().from(corpus_snapshots).where(eq(corpus_snapshots.store_id, store_id)).orderBy(desc(corpus_snapshots.created_at)).limit(1);
 
-				const row = rows[0];
+				const row = to_nullable(first(rows));
 				if (!row) {
 					return err({ kind: "not_found", store_id, version: "latest" });
 				}
@@ -362,7 +363,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 					.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.content_hash, content_hash)))
 					.limit(1);
 
-				const row = rows[0];
+				const row = to_nullable(first(rows));
 				return row ? snapshot_row_to_meta(row) : null;
 			} catch {
 				return null;
@@ -374,7 +375,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		async get(data_key): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
 			try {
 				const object = await r2.get(data_key);
-				emit({ type: "data_get", store_id: data_key.split("/")[0] ?? data_key, version: data_key, found: !!object });
+				emit({ type: "data_get", store_id: to_fallback(first(data_key.split("/")), data_key), version: data_key, found: !!object });
 
 				if (!object) {
 					return err({ kind: "not_found", store_id: data_key, version: "" });

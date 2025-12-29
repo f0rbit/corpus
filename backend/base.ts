@@ -15,6 +15,7 @@ import type {
 } from "../types";
 import { ok, err } from "../types";
 import { to_bytes, filter_snapshots } from "../utils";
+import { first, to_fallback } from "../result";
 
 export type MetadataStorage = {
   get: (store_id: string, version: string) => Promise<SnapshotMeta | null>;
@@ -112,7 +113,7 @@ export function create_data_client(storage: DataStorage, emit: Emit): DataClient
       const bytes = await storage.get(data_key);
       emit({
         type: "data_get",
-        store_id: data_key.split("/")[0] ?? data_key,
+        store_id: to_fallback(first(data_key.split("/")), data_key),
         version: data_key,
         found: !!bytes,
       });
