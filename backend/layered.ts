@@ -6,6 +6,7 @@
 import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types'
 import { ok, err } from '../types'
 import { to_bytes } from '../utils'
+import { first, to_nullable } from '../result'
 
 export type LayeredBackendOptions = {
   read: Backend[]
@@ -80,7 +81,9 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
       if (read.length === 0) return
 
       if (list_strategy === 'first') {
-        yield* read[0]!.metadata.list(store_id, opts)
+        const first_backend = to_nullable(first(read))
+        if (!first_backend) return
+        yield* first_backend.metadata.list(store_id, opts)
         return
       }
 

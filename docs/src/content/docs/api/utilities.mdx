@@ -385,6 +385,253 @@ const result = try_catch(
 
 ---
 
+## Object Utilities
+
+### `DeepPartial<T>`
+
+A utility type that recursively makes all properties of `T` optional. Useful for configuration objects and partial updates.
+
+```typescript
+import { type DeepPartial } from '@f0rbit/corpus'
+
+type Config = {
+  api: { url: string; timeout: number }
+  debug: boolean
+}
+
+type PartialConfig = DeepPartial<Config>
+// { api?: { url?: string; timeout?: number }; debug?: boolean }
+```
+
+---
+
+### `merge_deep(base, overrides)`
+
+Deep merge two objects, with overrides taking precedence. Only merges plain objects—arrays and null values are replaced entirely.
+
+```typescript
+import { merge_deep } from '@f0rbit/corpus'
+
+const config = merge_deep(
+  { api: { url: 'http://localhost', timeout: 5000 }, debug: false },
+  { api: { timeout: 10000 } }
+)
+// { api: { url: 'http://localhost', timeout: 10000 }, debug: false }
+```
+
+**Signature:**
+```typescript
+function merge_deep<T extends Record<string, unknown>>(
+  base: T,
+  overrides: DeepPartial<T>
+): T
+```
+
+---
+
+## Array Utilities
+
+### `at(array, index)`
+
+Safely access an array element by index, returning a Result instead of potentially `undefined`. Provides explicit error information for out-of-bounds access.
+
+```typescript
+import { at } from '@f0rbit/corpus'
+
+const items = ['a', 'b', 'c']
+
+const second = at(items, 1)
+// { ok: true, value: 'b' }
+
+const tenth = at(items, 10)
+// { ok: false, error: { kind: 'index_out_of_bounds', index: 10, length: 3 } }
+```
+
+**Signature:**
+```typescript
+function at<T>(
+  array: readonly T[],
+  index: number
+): Result<T, { kind: 'index_out_of_bounds'; index: number; length: number }>
+```
+
+---
+
+### `first(array)`
+
+Safely get the first element of an array, returning a Result that indicates if the array was empty.
+
+```typescript
+import { first } from '@f0rbit/corpus'
+
+const head = first([1, 2, 3])
+// { ok: true, value: 1 }
+
+const empty = first([])
+// { ok: false, error: { kind: 'empty_array' } }
+```
+
+**Signature:**
+```typescript
+function first<T>(
+  array: readonly T[]
+): Result<T, { kind: 'empty_array' }>
+```
+
+---
+
+### `last(array)`
+
+Safely get the last element of an array, returning a Result that indicates if the array was empty.
+
+```typescript
+import { last } from '@f0rbit/corpus'
+
+const tail = last([1, 2, 3])
+// { ok: true, value: 3 }
+
+const empty = last([])
+// { ok: false, error: { kind: 'empty_array' } }
+```
+
+**Signature:**
+```typescript
+function last<T>(
+  array: readonly T[]
+): Result<T, { kind: 'empty_array' }>
+```
+
+<Aside type="tip">
+Use `first` and `last` with `pipe` for safe array operations:
+```typescript
+const name = await pipe(ok(users))
+  .flat_map(first)
+  .map(user => user.name)
+  .unwrap_or('No users')
+```
+</Aside>
+
+---
+
+## Composable Patterns
+
+The real power of these utilities emerges when you compose them together. The Result-returning array functions (`first`, `last`, `at`) combine elegantly with the converter utilities (`to_nullable`, `to_fallback`) to eliminate verbose `.ok` checks and ternaries.
+
+### Converting Empty Arrays to Null
+
+The most common pattern: get the first/last element, or `null` if the array is empty.
+
+<Tabs>
+  <TabItem label="Composable">
+    ```typescript
+    import { first, last, to_nullable } from '@f0rbit/corpus'
+
+    const head = to_nullable(first(items))     // T | null
+    const tail = to_nullable(last(items))      // T | null
+    ```
+  </TabItem>
+  <TabItem label="Verbose Alternative">
+    ```typescript
+    // Without composition - manual .ok checks everywhere
+    const result = first(items)
+    const head = result.ok ? result.value : null
+
+    const result2 = last(items)
+    const tail = result2.ok ? result2.value : null
+    ```
+  </TabItem>
+</Tabs>
+
+### Providing Fallback Values
+
+When you want a default value instead of `null`:
+
+<Tabs>
+  <TabItem label="Composable">
+    ```typescript
+    import { first, last, to_fallback } from '@f0rbit/corpus'
+
+    const primary = to_fallback(first(colors), 'gray')
+    const latest = to_fallback(last(events), defaultEvent)
+    ```
+  </TabItem>
+  <TabItem label="Verbose Alternative">
+    ```typescript
+    // Without composition
+    const result = first(colors)
+    const primary = result.ok ? result.value : 'gray'
+
+    const result2 = last(events)
+    const latest = result2.ok ? result2.value : defaultEvent
+    ```
+  </TabItem>
+</Tabs>
+
+### Real-World Parsing Patterns
+
+These patterns shine in string parsing scenarios:
+
+```typescript
+import { first, to_fallback } from '@f0rbit/corpus'
+
+// Extract username from "user/repo" format, fallback to original string
+const username = to_fallback(first(input.split('/')), input)
+
+// Get file extension, default to empty string
+const extension = to_fallback(last(filename.split('.')), '')
+
+// Extract first path segment
+const basePath = to_fallback(first(path.split('/').filter(Boolean)), '/')
+```
+
+### Index Access with Fallbacks
+
+```typescript
+import { at, to_nullable, to_fallback } from '@f0rbit/corpus'
+
+// Get specific element or null
+const third = to_nullable(at(items, 2))
+
+// Get element with default
+const selected = to_fallback(at(options, selectedIndex), options[0])
+```
+
+### Combining with Pipe
+
+For more complex transformations, combine with `pipe`:
+
+```typescript
+import { pipe, first, ok } from '@f0rbit/corpus'
+
+// Transform the first element, or use a default
+const firstName = await pipe(ok(users))
+  .flat_map(first)
+  .map(user => user.name.toUpperCase())
+  .unwrap_or('ANONYMOUS')
+
+// Chain multiple operations
+const primaryEmail = await pipe(ok(contacts))
+  .flat_map(first)
+  .map(contact => contact.emails)
+  .flat_map(first)
+  .unwrap_or('no-email@example.com')
+```
+
+### Why This Matters
+
+This functional composition approach:
+
+- **Eliminates boilerplate**: No manual `.ok` checks or ternary expressions
+- **Reads naturally**: `to_nullable(first(arr))` clearly expresses "first element or null"
+- **Composes freely**: Each utility does one thing, combining into powerful patterns
+- **Type-safe**: TypeScript infers the correct types through the composition
+
+<Aside type="tip">
+Think of `to_nullable` and `to_fallback` as the "extractors" that bridge from the `Result` world back to plain values. Use them at the boundaries of your functions, after composing your Result operations.
+</Aside>
+
+---
+
 ## Concurrency Utilities
 
 ### `Semaphore`

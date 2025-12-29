@@ -51,6 +51,10 @@ export default defineConfig({
           label: 'Codecs',
           slug: 'api/codecs',
         },
+        {
+          label: 'Utilities',
+          slug: 'api/utilities',
+        },
       ],
     }),
   ],

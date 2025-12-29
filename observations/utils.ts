@@ -6,6 +6,7 @@
 import type { SnapshotPointer } from './types'
 import type { Result, CorpusError } from '../types'
 import { ok, err } from '../types'
+import { last, to_nullable } from '../result'
 
 /**
  * Creates a SnapshotPointer to a location in a snapshot.
@@ -104,8 +105,9 @@ export function key_to_pointer(key: string): SnapshotPointer | null {
 
   if (rest.length === 0) return pointer
 
-  const last = rest[rest.length - 1]!
-  const span_match = /^(\d+)-(\d+)$/.exec(last)
+  const last_part = to_nullable(last(rest))
+  if (!last_part) return pointer
+  const span_match = /^(\d+)-(\d+)$/.exec(last_part)
 
   if (span_match) {
     const [, start_str, end_str] = span_match

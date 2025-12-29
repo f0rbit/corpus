@@ -378,3 +378,110 @@ export const fallback_on = <T, E>(result: Result<T, E>, predicate: (error: E) =>
  * ```
  */
 export const format_error = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Recursively makes all properties of T optional.
+ *
+ * @example
+ * ```ts
+ * type Config = { api: { url: string; timeout: number } }
+ * type PartialConfig = DeepPartial<Config>
+ * // { api?: { url?: string; timeout?: number } }
+ * ```
+ */
+export type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+
+/**
+ * Deep merge two objects, with overrides taking precedence.
+ * Only merges plain objects; arrays and null are replaced entirely.
+ *
+ * @param base - The base object to merge into
+ * @param overrides - Partial object with values to override
+ * @returns A new object with merged values
+ *
+ * @example
+ * ```ts
+ * const config = merge_deep(
+ *   { api: { url: 'http://localhost', timeout: 5000 }, debug: false },
+ *   { api: { timeout: 10000 } }
+ * )
+ * // { api: { url: 'http://localhost', timeout: 10000 }, debug: false }
+ * ```
+ */
+export const merge_deep = <T extends Record<string, unknown>>(base: T, overrides: DeepPartial<T>): T => {
+	const result = { ...base };
+	for (const key in overrides) {
+		const value = overrides[key as keyof typeof overrides];
+		if (value !== undefined && typeof value === "object" && !Array.isArray(value) && value !== null) {
+			(result as Record<string, unknown>)[key] = merge_deep(result[key] as Record<string, unknown>, value as DeepPartial<Record<string, unknown>>);
+		} else if (value !== undefined) {
+			(result as Record<string, unknown>)[key] = value;
+		}
+	}
+	return result;
+};
+
+/**
+ * Safely access an array element by index, returning a Result.
+ * Unlike bracket notation, this never returns undefined for out-of-bounds access.
+ *
+ * @param array - The array to access
+ * @param index - The index to retrieve (must be non-negative)
+ * @returns Result containing the element or an index_out_of_bounds error
+ *
+ * @example
+ * ```ts
+ * const items = ['a', 'b', 'c']
+ * const second = at(items, 1)   // { ok: true, value: 'b' }
+ * const tenth = at(items, 10)   // { ok: false, error: { kind: 'index_out_of_bounds', index: 10, length: 3 } }
+ * ```
+ */
+export const at = <T>(array: readonly T[], index: number): Result<T, { kind: "index_out_of_bounds"; index: number; length: number }> => {
+	if (index < 0 || index >= array.length) {
+		return err({ kind: "index_out_of_bounds", index, length: array.length });
+	}
+	const element = array[index];
+	if (element === undefined) {
+		return err({ kind: "index_out_of_bounds", index, length: array.length });
+	}
+	return ok(element);
+};
+
+/**
+ * Safely get the first element of an array.
+ *
+ * @param array - The array to access
+ * @returns Result containing the first element or an empty_array error
+ *
+ * @example
+ * ```ts
+ * const head = first([1, 2, 3])  // { ok: true, value: 1 }
+ * const empty = first([])        // { ok: false, error: { kind: 'empty_array' } }
+ * ```
+ */
+export const first = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }> => {
+	if (array.length === 0) {
+		return err({ kind: "empty_array" });
+	}
+	return ok(array[0] as T);
+};
+
+/**
+ * Safely get the last element of an array.
+ *
+ * @param array - The array to access
+ * @returns Result containing the last element or an empty_array error
+ *
+ * @example
+ * ```ts
+ * const tail = last([1, 2, 3])  // { ok: true, value: 3 }
+ * const empty = last([])        // { ok: false, error: { kind: 'empty_array' } }
+ * ```
+ */
+export const last = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }> => {
+	if (array.length === 0) {
+		return err({ kind: "empty_array" });
+	}
+	return ok(array[array.length - 1] as T);
+};
+
