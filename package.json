@@ -12,6 +12,11 @@
 			"import": "./dist/index.js",
 			"require": "./dist/index.js"
 		},
+		"./file": {
+			"types": "./dist/file.d.ts",
+			"import": "./dist/file.js",
+			"require": "./dist/file.js"
+		},
 		"./cloudflare": {
 			"types": "./dist/cloudflare.d.ts",
 			"import": "./dist/cloudflare.js",
