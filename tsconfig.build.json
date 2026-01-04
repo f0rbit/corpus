@@ -19,6 +19,7 @@
   "include": [
     "index.ts",
     "cloudflare.ts",
+    "file.ts",
     "core.ts",
     "backends.ts",
     "codecs.ts",
