@@ -3,10 +3,10 @@
  * @description Utility functions for working with SnapshotPointers and observations.
  */
 
-import type { SnapshotPointer } from './types'
-import type { Result, CorpusError } from '../types'
-import { ok, err } from '../types'
-import { last, to_nullable } from '../result'
+import type { SnapshotPointer } from './types.js';
+import type { Result, CorpusError } from '../types.js';
+import { ok, err } from '../types.js';
+import { last, to_nullable } from '../result.js';
 
 /**
  * Creates a SnapshotPointer to a location in a snapshot.

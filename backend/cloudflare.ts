@@ -5,12 +5,12 @@
 
 import { eq, and, desc, lt, gt, like, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from "../types";
-import { create_emitter, parse_snapshot_meta } from "../utils";
-import { ok, err } from "../types";
-import { first, to_nullable, to_fallback } from "../result";
-import { corpus_snapshots } from "../schema";
-import { corpus_observations, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from "../observations";
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from '../types.js';
+import { create_emitter, parse_snapshot_meta } from '../utils.js';
+import { ok, err } from '../types.js';
+import { first, to_nullable, to_fallback } from '../result.js';
+import { corpus_snapshots } from '../schema.js';
+import { corpus_observations, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from '../observations/index.js';
 
 type D1Database = { prepare: (sql: string) => unknown };
 type R2Bucket = {

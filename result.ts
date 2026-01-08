@@ -10,7 +10,7 @@
  * - Composable pipelines with `pipe`
  */
 
-import { ok, err, type Result } from "./types";
+import { ok, err, type Result } from './types.js';
 
 /**
  * Pattern match on a Result, extracting the value with appropriate handler.

@@ -3,10 +3,10 @@
  * @description Layered backend for caching and replication strategies.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types'
-import { ok, err } from '../types'
-import { to_bytes } from '../utils'
-import { first, to_nullable } from '../result'
+import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types.js';
+import { ok, err } from '../types.js';
+import { to_bytes } from '../utils.js';
+import { first, to_nullable } from '../result.js';
 
 export type LayeredBackendOptions = {
   read: Backend[]

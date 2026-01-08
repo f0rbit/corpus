@@ -3,7 +3,7 @@
  * @description Utility functions for hashing, versioning, and codecs.
  */
 
-import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from "./types";
+import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
 
 /**
  * Computes the SHA-256 hash of binary data.

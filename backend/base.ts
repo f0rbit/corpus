@@ -12,10 +12,10 @@ import type {
   CorpusEvent,
   ListOpts,
   DataHandle,
-} from "../types";
-import { ok, err } from "../types";
-import { to_bytes, filter_snapshots } from "../utils";
-import { first, to_fallback } from "../result";
+} from '../types.js';
+import { ok, err } from '../types.js';
+import { to_bytes, filter_snapshots } from '../utils.js';
+import { first, to_fallback } from '../result.js';
 
 export type MetadataStorage = {
   get: (store_id: string, version: string) => Promise<SnapshotMeta | null>;

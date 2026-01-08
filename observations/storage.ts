@@ -3,11 +3,11 @@
  * @description Raw storage interface and row conversion utilities for observations.
  */
 
-import type { Result, CorpusError } from '../types'
-import { ok } from '../types'
-import { create_filter_pipeline } from '../utils'
-import type { ObservationRow } from './schema'
-import type { Observation, ObservationMeta, SnapshotPointer } from './types'
+import type { Result, CorpusError } from '../types.js';
+import { ok } from '../types.js';
+import { create_filter_pipeline } from '../utils.js';
+import type { ObservationRow } from './schema.js';
+import type { Observation, ObservationMeta, SnapshotPointer } from './types.js';
 
 /**
  * Query options for raw storage operations.

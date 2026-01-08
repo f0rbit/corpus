@@ -1,6 +1,6 @@
 {
 	"name": "@f0rbit/corpus",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
 	"module": "dist/index.js",
 	"main": "dist/index.js",
@@ -33,9 +33,7 @@
 			"require": "./dist/schema.js"
 		}
 	},
-	"files": [
-		"dist"
-	],
+	"files": ["dist"],
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
 		"test": "bun test",
@@ -49,13 +47,7 @@
 		"type": "git",
 		"url": "git+https://github.com/f0rbit/corpus.git"
 	},
-	"keywords": [
-		"snapshot",
-		"versioning",
-		"data-store",
-		"lineage",
-		"typescript"
-	],
+	"keywords": ["snapshot", "versioning", "data-store", "lineage", "typescript"],
 	"author": "f0rbit",
 	"license": "MIT",
 	"bugs": {

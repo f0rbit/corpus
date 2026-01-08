@@ -3,14 +3,14 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, SnapshotMeta, EventHandler } from "../types";
-import type { ObservationRow } from "../observations";
-import { create_observations_client, create_observations_storage } from "../observations";
-import { create_emitter, parse_snapshot_meta } from "../utils";
+import type { Backend, SnapshotMeta, EventHandler } from '../types.js';
+import type { ObservationRow } from '../observations/index.js';
+import { create_observations_client, create_observations_storage } from '../observations/index.js';
+import { create_emitter, parse_snapshot_meta } from '../utils.js';
 import { mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { create_metadata_client, create_data_client } from "./base";
-import type { MetadataStorage, DataStorage } from "./base";
+import { create_metadata_client, create_data_client } from './base.js';
+import type { MetadataStorage, DataStorage } from './base.js';
 
 export type FileBackendConfig = {
 	base_path: string;
