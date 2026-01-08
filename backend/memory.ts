@@ -3,13 +3,13 @@
  * @description In-memory storage backend for testing and development.
  */
 
-import type { Backend, SnapshotMeta } from "../types";
-import type { ObservationRow } from "../observations";
-import { create_observations_client, create_observations_storage } from "../observations";
-import { create_emitter } from "../utils";
-import type { EventHandler } from "../types";
-import { create_metadata_client, create_data_client } from "./base";
-import type { MetadataStorage, DataStorage } from "./base";
+import type { Backend, SnapshotMeta } from '../types.js';
+import type { ObservationRow } from '../observations/index.js';
+import { create_observations_client, create_observations_storage } from '../observations/index.js';
+import { create_emitter } from '../utils.js';
+import type { EventHandler } from '../types.js';
+import { create_metadata_client, create_data_client } from './base.js';
+import type { MetadataStorage, DataStorage } from './base.js';
 
 export type MemoryBackendOptions = {
 	on_event?: EventHandler;

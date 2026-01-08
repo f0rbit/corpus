@@ -3,11 +3,11 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types'
-import type { ObservationTypeDef, SnapshotPointer } from './observations/types'
-import { ok, err } from './types'
-import { compute_hash, generate_version } from './utils'
-import { create_pointer, resolve_path, apply_span } from './observations/utils'
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types.js';
+import type { ObservationTypeDef, SnapshotPointer } from './observations/types.js';
+import { ok, err } from './types.js';
+import { compute_hash, generate_version } from './utils.js';
+import { create_pointer, resolve_path, apply_span } from './observations/utils.js';
 
 /**
  * Creates a typed Store instance bound to a Backend.

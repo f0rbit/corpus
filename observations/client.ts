@@ -3,12 +3,12 @@
  * @description Centralized business logic for observations, built on storage adapters.
  */
 
-import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types";
-import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionFilter } from "./types";
-import type { ObservationsStorage, StorageQueryOpts } from "./storage";
-import { row_to_observation, row_to_meta, create_observation_row } from "./storage";
-import { generate_observation_id } from "./utils";
-import { ok, err } from "../types";
+import type { Result, CorpusError, MetadataClient, ObservationsClient } from '../types.js';
+import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionFilter } from './types.js';
+import type { ObservationsStorage, StorageQueryOpts } from './storage.js';
+import { row_to_observation, row_to_meta, create_observation_row } from './storage.js';
+import { generate_observation_id } from './utils.js';
+import { ok, err } from '../types.js';
 
 async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
 	if (typeof filter === "function") return filter(store_id, version);

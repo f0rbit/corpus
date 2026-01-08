@@ -10,7 +10,7 @@ import type {
   ObservationTypeDef,
   ObservationPutOpts,
   ObservationQueryOpts
-} from './observations/types'
+} from './observations/types.js';
 
 /**
  * Error types that can occur during Corpus operations.

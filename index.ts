@@ -1,12 +1,12 @@
-export { create_corpus, create_store } from "./corpus";
+export { create_corpus, create_store } from './corpus.js';
 
-export { create_memory_backend, type MemoryBackendOptions } from "./backend/memory";
-export { create_cloudflare_backend, type CloudflareBackendConfig } from "./backend/cloudflare";
-export { create_layered_backend, type LayeredBackendOptions } from "./backend/layered";
+export { create_memory_backend, type MemoryBackendOptions } from './backend/memory.js';
+export { create_cloudflare_backend, type CloudflareBackendConfig } from './backend/cloudflare.js';
+export { create_layered_backend, type LayeredBackendOptions } from './backend/layered.js';
 
-export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from "./utils";
+export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from './utils.js';
 
-export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from "./schema";
+export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
 export type {
 	ContentType,
@@ -32,9 +32,9 @@ export type {
 	CorpusEvent,
 	EventHandler,
 	ObservationsClient,
-} from "./types";
+} from './types.js';
 
-export { ok, err, define_store } from "./types";
+export { ok, err, define_store } from './types.js';
 
 export {
 	match,
@@ -57,10 +57,10 @@ export {
 	type DeepPartial,
 	type FetchError,
 	type Pipe,
-} from "./result";
+} from './result.js';
 
-export { Semaphore, parallel_map } from "./concurrency";
+export { Semaphore, parallel_map } from './concurrency.js';
 
-export * from "./observations";
+export * from './observations/index.js';
 
-export { createCorpusInfra, CORPUS_MIGRATION_SQL, type CorpusInfra, type CorpusInfraConfig } from "./sst";
+export { createCorpusInfra, CORPUS_MIGRATION_SQL, type CorpusInfra, type CorpusInfraConfig } from './sst.js';
