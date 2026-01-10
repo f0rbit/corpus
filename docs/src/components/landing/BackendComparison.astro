@@ -1,0 +1,115 @@
+---
+import Section from "./Section.astro";
+
+const backends = [
+  {
+    name: "Memory",
+    storage: "In-memory",
+    bestFor: "Testing, prototyping",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><path d="M8 11V9"/><path d="M16 11V9"/><path d="M12 11V9"/><path d="M2 15h20"/><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.8V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.8Z"/></svg>`,
+  },
+  {
+    name: "File",
+    storage: "Local disk",
+    bestFor: "Development, desktop apps",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`,
+  },
+  {
+    name: "Cloudflare",
+    storage: "D1 + R2",
+    bestFor: "Production, global distribution",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`,
+  },
+  {
+    name: "Layered",
+    storage: "Composite",
+    bestFor: "Caching, replication, migration",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>`,
+  },
+];
+---
+
+<Section title="Backend Comparison" subtitle="Choose the right backend for your use case" bordered>
+  <div class="backend-grid">
+    {backends.map((backend) => (
+      <div class="card card-flat backend-card">
+        <div class="backend-header">
+          <div class="card-icon" set:html={backend.icon} />
+          <h3 class="card-title">{backend.name}</h3>
+        </div>
+        <div class="backend-details">
+          <div class="backend-row">
+            <span class="backend-label">Storage</span>
+            <span class="backend-value">{backend.storage}</span>
+          </div>
+          <div class="backend-row">
+            <span class="backend-label">Best for</span>
+            <span class="backend-value">{backend.bestFor}</span>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+</Section>
+
+<style>
+  .backend-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-md);
+  }
+
+  .backend-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .backend-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .backend-header .card-icon {
+    margin: 0;
+  }
+
+  .backend-header .card-title {
+    margin: 0;
+  }
+
+  .backend-details {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+
+  .backend-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .backend-label {
+    font-size: var(--text-xs);
+    color: var(--fg-faint);
+  }
+
+  .backend-value {
+    font-size: var(--text-sm);
+    color: var(--fg-muted);
+  }
+
+  @media (max-width: 800px) {
+    .backend-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 500px) {
+    .backend-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

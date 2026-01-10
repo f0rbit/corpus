@@ -1,0 +1,55 @@
+---
+interface Props {
+  title?: string;
+  subtitle?: string;
+  bordered?: boolean;
+}
+
+const { title, subtitle, bordered = false } = Astro.props;
+---
+
+<section class:list={["landing-section", { bordered }]}>
+  {title && (
+    <div class="section-header">
+      <h2 class="section-title">{title}</h2>
+      {subtitle && <p class="section-subtitle">{subtitle}</p>}
+    </div>
+  )}
+  <div class="section-content">
+    <slot />
+  </div>
+</section>
+
+<style>
+  .landing-section {
+    padding: var(--space-xl) 0;
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .landing-section.bordered {
+    border-top: 1px solid var(--border);
+  }
+
+  .section-header {
+    margin-bottom: var(--space-lg);
+  }
+
+  .section-title {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0;
+  }
+
+  .section-subtitle {
+    font-size: var(--text-base);
+    color: var(--fg-muted);
+    margin: var(--space-xs) 0 0 0;
+  }
+
+  .section-content {
+    width: 100%;
+  }
+</style>
