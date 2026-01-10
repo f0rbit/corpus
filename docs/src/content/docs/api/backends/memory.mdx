@@ -3,18 +3,34 @@ title: Memory
 description: In-memory storage backend for testing and development
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
 ```ts
 function create_memory_backend(options?: MemoryBackendOptions): Backend
 ```
 
-The memory backend stores all data in JavaScript Maps, making it the fastest backend option. Since data exists only in memory, it's lost when the process ends - perfect for testing where you want isolated, ephemeral storage.
+The memory backend stores all data in JavaScript Maps, making it the fastest backend option. Since data exists only in memory, it's lost when the process ends — perfect for testing where you want isolated, ephemeral storage.
 
 ## Why Use Memory Backend?
 
-- **Speed**: No I/O overhead, instant reads and writes
-- **Isolation**: Each instance is completely independent
-- **Simplicity**: No setup, no cleanup, no external dependencies
-- **Predictability**: Deterministic behavior for testing
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Speed</div>
+    <div class="card-description">No I/O overhead, instant reads and writes</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Isolation</div>
+    <div class="card-description">Each instance is completely independent</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Simplicity</div>
+    <div class="card-description">No setup, no cleanup, no external dependencies</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Predictability</div>
+    <div class="card-description">Deterministic behavior for testing</div>
+  </div>
+</div>
 
 ## Basic Usage
 

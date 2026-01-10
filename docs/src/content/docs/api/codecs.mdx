@@ -3,7 +3,24 @@ title: Codecs
 description: Serialize and deserialize data with JSON, text, and binary codecs
 ---
 
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
 Codecs define how data is serialized for storage and deserialized on retrieval. Each codec specifies an encoding format and content type.
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">json_codec</div>
+    <div class="card-description">Structured data with Zod validation</div>
+  </div>
+  <div class="card">
+    <div class="card-title">text_codec</div>
+    <div class="card-description">Plain UTF-8 text strings</div>
+  </div>
+  <div class="card">
+    <div class="card-title">binary_codec</div>
+    <div class="card-description">Raw bytes for files and blobs</div>
+  </div>
+</div>
 
 ## json_codec
 
@@ -133,12 +150,12 @@ if (result.ok) {
 }
 ```
 
-### Use Cases
-
-- Images (PNG, JPEG, WebP)
-- PDFs and documents
-- Pre-serialized data (Protocol Buffers, MessagePack)
-- Any binary file format
+<Aside type="tip" title="Use Cases">
+  - Images (PNG, JPEG, WebP)
+  - PDFs and documents
+  - Pre-serialized data (Protocol Buffers, MessagePack)
+  - Any binary file format
+</Aside>
 
 ### Content Type
 

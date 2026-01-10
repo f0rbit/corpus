@@ -3,140 +3,183 @@ title: Cloudflare Deployment
 description: Deploy Corpus to Cloudflare Workers with D1 database and R2 object storage.
 ---
 
-import { Steps, Aside, Code, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Code, Tabs, TabItem } from '@astrojs/starlight/components';
 
 This guide covers deploying Corpus to Cloudflare Workers using D1 for metadata and R2 for data storage.
 
 ## Prerequisites
 
-- A Cloudflare account with Workers enabled
-- [wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed
-- A project initialized with `wrangler init`
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Cloudflare Account</div>
+    <div class="card-description">Workers enabled on your account</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Wrangler CLI</div>
+    <div class="card-description">Install with `npm install -g wrangler`</div>
+  </div>
+</div>
+
+<Aside type="note">
+  Initialize your project with `wrangler init` before proceeding.
+</Aside>
 
 ## Setup
 
-<Steps>
+<div class="stepper stepper-vertical">
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">1</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Create D1 database and R2 bucket</div>
+      <div class="step-body">
+```bash
+wrangler d1 create corpus-db
+wrangler r2 bucket create corpus-bucket
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-1. ### Create D1 database and R2 bucket
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">2</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Run the migration</div>
+      <div class="step-body">
+Create `migrations/0001_init.sql`:
 
-   ```bash
-   wrangler d1 create corpus-db
-   wrangler r2 bucket create corpus-bucket
-   ```
+```sql
+CREATE TABLE IF NOT EXISTS corpus_snapshots (
+  store_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  parents TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  invoked_at TEXT,
+  content_hash TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  data_key TEXT NOT NULL,
+  tags TEXT,
+  PRIMARY KEY (store_id, version)
+);
 
-2. ### Run the migration
+CREATE INDEX IF NOT EXISTS idx_store_created 
+  ON corpus_snapshots(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_content_hash 
+  ON corpus_snapshots(store_id, content_hash);
+CREATE INDEX IF NOT EXISTS idx_data_key 
+  ON corpus_snapshots(data_key);
+```
 
-   Create `migrations/0001_init.sql`:
+Apply it:
 
-   ```sql
-   CREATE TABLE IF NOT EXISTS corpus_snapshots (
-     store_id TEXT NOT NULL,
-     version TEXT NOT NULL,
-     parents TEXT NOT NULL,
-     created_at TEXT NOT NULL,
-     invoked_at TEXT,
-     content_hash TEXT NOT NULL,
-     content_type TEXT NOT NULL,
-     size_bytes INTEGER NOT NULL,
-     data_key TEXT NOT NULL,
-     tags TEXT,
-     PRIMARY KEY (store_id, version)
-   );
+```bash
+wrangler d1 execute corpus-db --file=migrations/0001_init.sql
+```
 
-   CREATE INDEX IF NOT EXISTS idx_store_created 
-     ON corpus_snapshots(store_id, created_at);
-   CREATE INDEX IF NOT EXISTS idx_content_hash 
-     ON corpus_snapshots(store_id, content_hash);
-   CREATE INDEX IF NOT EXISTS idx_data_key 
-     ON corpus_snapshots(data_key);
-   ```
+<Aside type="tip">
+  You can also run the migration programmatically using `CORPUS_MIGRATION_SQL` exported from `@f0rbit/corpus`.
+</Aside>
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-   Apply it:
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">3</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Configure wrangler.toml</div>
+      <div class="step-body">
+```toml
+name = "my-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
 
-   ```bash
-   wrangler d1 execute corpus-db --file=migrations/0001_init.sql
-   ```
+[[d1_databases]]
+binding = "CORPUS_DB"
+database_name = "corpus-db"
+database_id = "<your-database-id>"
 
-   <Aside type="tip">
-     You can also run the migration programmatically using `CORPUS_MIGRATION_SQL` exported from `@f0rbit/corpus`.
-   </Aside>
+[[r2_buckets]]
+binding = "CORPUS_BUCKET"
+bucket_name = "corpus-bucket"
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-3. ### Configure wrangler.toml
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">4</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Create your Worker</div>
+      <div class="step-body">
+```typescript
+import { z } from 'zod'
+import { 
+  create_corpus, 
+  create_cloudflare_backend, 
+  define_store, 
+  json_codec 
+} from '@f0rbit/corpus/cloudflare'
 
-   ```toml
-   name = "my-worker"
-   main = "src/index.ts"
-   compatibility_date = "2024-01-01"
+const CacheSchema = z.object({
+  key: z.string(),
+  value: z.unknown(),
+  ttl: z.number().optional(),
+})
 
-   [[d1_databases]]
-   binding = "CORPUS_DB"
-   database_name = "corpus-db"
-   database_id = "<your-database-id>"
+interface Env {
+  CORPUS_DB: D1Database
+  CORPUS_BUCKET: R2Bucket
+}
 
-   [[r2_buckets]]
-   binding = "CORPUS_BUCKET"
-   bucket_name = "corpus-bucket"
-   ```
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const backend = create_cloudflare_backend({
+      d1: env.CORPUS_DB,
+      r2: env.CORPUS_BUCKET,
+    })
 
-4. ### Create your Worker
+    const corpus = create_corpus()
+      .with_backend(backend)
+      .with_store(define_store('cache', json_codec(CacheSchema)))
+      .build()
 
-   ```typescript
-   import { z } from 'zod'
-   import { 
-     create_corpus, 
-     create_cloudflare_backend, 
-     define_store, 
-     json_codec 
-   } from '@f0rbit/corpus/cloudflare'
+    // Example: Store a cache entry
+    const result = await corpus.stores.cache.put({
+      key: 'greeting',
+      value: 'Hello from Cloudflare!',
+    })
 
-   const CacheSchema = z.object({
-     key: z.string(),
-     value: z.unknown(),
-     ttl: z.number().optional(),
-   })
+    if (!result.ok) {
+      return new Response(JSON.stringify(result.error), { status: 500 })
+    }
 
-   interface Env {
-     CORPUS_DB: D1Database
-     CORPUS_BUCKET: R2Bucket
-   }
+    return new Response(JSON.stringify({
+      version: result.value.version,
+      hash: result.value.content_hash,
+    }))
+  },
+}
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-   export default {
-     async fetch(request: Request, env: Env): Promise<Response> {
-       const backend = create_cloudflare_backend({
-         d1: env.CORPUS_DB,
-         r2: env.CORPUS_BUCKET,
-       })
-
-       const corpus = create_corpus()
-         .with_backend(backend)
-         .with_store(define_store('cache', json_codec(CacheSchema)))
-         .build()
-
-       // Example: Store a cache entry
-       const result = await corpus.stores.cache.put({
-         key: 'greeting',
-         value: 'Hello from Cloudflare!',
-       })
-
-       if (!result.ok) {
-         return new Response(JSON.stringify(result.error), { status: 500 })
-       }
-
-       return new Response(JSON.stringify({
-         version: result.value.version,
-         hash: result.value.content_hash,
-       }))
-     },
-   }
-   ```
-
-5. ### Deploy
-
-   ```bash
-   wrangler deploy
-   ```
-
-</Steps>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">5</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Deploy</div>
+      <div class="step-body">
+```bash
+wrangler deploy
+```
+      </div>
+    </div>
+  </div>
+</div>
 
 ## SST Integration
 
@@ -174,6 +217,12 @@ The `@f0rbit/corpus/cloudflare` entry point excludes the file backend (which req
 </Tabs>
 
 ## Performance Tips
+
+<Aside type="tip" title="Key optimizations">
+  - Use layered backends for caching
+  - Content is automatically deduplicated by hash
+  - Reuse corpus instances across requests
+</Aside>
 
 ### Batch Operations
 
@@ -241,3 +290,16 @@ if (!result.ok) {
 
 return new Response(JSON.stringify(result.value.data))
 ```
+
+## See Also
+
+<div class="grid">
+  <a href="/corpus/guides/backends/" class="card card-interactive">
+    <div class="card-title">Storage Backends</div>
+    <div class="card-description">Learn about all available backends including memory and file.</div>
+  </a>
+  <a href="/corpus/guides/testing/" class="card card-interactive">
+    <div class="card-title">Testing Patterns</div>
+    <div class="card-description">Use the memory backend for fast, isolated tests.</div>
+  </a>
+</div>

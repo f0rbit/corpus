@@ -3,18 +3,36 @@ title: Observations
 description: Extract and query structured facts from your versioned documents with automatic staleness detection.
 ---
 
-import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 Observations let you extract **structured facts** from your versioned documents and query them efficiently, while automatically tracking which document version each fact came from.
+
+<Aside type="tip">
+  Observations are ideal for AI-extracted data, annotations, and any derived facts that need provenance tracking.
+</Aside>
 
 ## Why Observations?
 
 When building applications on top of versioned documents, you often need to extract structured data:
 
-- **Sentiment analysis** from articles
-- **Named entities** from transcripts
-- **Key facts** from research papers
-- **Annotations** from user reviews
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Sentiment Analysis</div>
+    <div class="card-description">Extract emotional tone from articles</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Named Entities</div>
+    <div class="card-description">Identify people, places, organizations</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Key Facts</div>
+    <div class="card-description">Surface important data points</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Annotations</div>
+    <div class="card-description">User-added notes and highlights</div>
+  </div>
+</div>
 
 Without observations, you have two bad options:
 
@@ -23,10 +41,10 @@ Without observations, you have two bad options:
 
 Observations solve this by making extracted facts a **first-class concept** with:
 
-- **Source pointers** - Every fact knows exactly where it came from (document, version, even JSONPath)
-- **Automatic staleness** - When a source document is updated, observations from the old version are automatically filtered out
-- **Type-safe schemas** - Define observation types with Zod, get full TypeScript inference
-- **Efficient queries** - Filter by type, source, date range, and more
+- **Source pointers** — Every fact knows exactly where it came from (document, version, even JSONPath)
+- **Automatic staleness** — When a source document is updated, observations from the old version are automatically filtered out
+- **Type-safe schemas** — Define observation types with Zod, get full TypeScript inference
+- **Efficient queries** — Filter by type, source, date range, and more
 
 ## Architecture Overview
 
@@ -59,127 +77,155 @@ Each observation contains:
 
 Imagine you're building a news aggregator that analyzes sentiment in articles:
 
-<Steps>
+<div class="stepper stepper-vertical">
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">1</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Define your observation type</div>
+      <div class="step-body">
+```typescript
+import { z } from 'zod'
+import { define_observation_type } from '@f0rbit/corpus'
 
-1. ### Define your observation type
+const SentimentObservation = define_observation_type(
+  'sentiment',
+  z.object({
+    subject: z.string(),
+    score: z.number().min(-1).max(1),
+    keywords: z.array(z.string()),
+  })
+)
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">2</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Create a corpus with observations</div>
+      <div class="step-body">
+```typescript
+import { 
+  create_corpus, 
+  create_memory_backend, 
+  define_store, 
+  json_codec 
+} from '@f0rbit/corpus'
 
-   ```typescript
-   import { z } from 'zod'
-   import { define_observation_type } from '@f0rbit/corpus'
+const ArticleSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  published_at: z.string(),
+})
 
-   const SentimentObservation = define_observation_type(
-     'sentiment',
-     z.object({
-       subject: z.string(),
-       score: z.number().min(-1).max(1),
-       keywords: z.array(z.string()),
-     })
-   )
-   ```
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('articles', json_codec(ArticleSchema)))
+  .with_observations([SentimentObservation])
+  .build()
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">3</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Store an article and extract observations</div>
+      <div class="step-body">
+```typescript
+// Store the article
+const article = {
+  title: 'Tech Giants Report Strong Earnings',
+  body: 'Apple and Microsoft both exceeded expectations...',
+  published_at: '2024-07-15T10:00:00Z',
+}
 
-2. ### Create a corpus with observations
+const result = await corpus.stores.articles.put(article)
+if (!result.ok) throw new Error('Failed to store article')
 
-   ```typescript
-   import { 
-     create_corpus, 
-     create_memory_backend, 
-     define_store, 
-     json_codec 
-   } from '@f0rbit/corpus'
+const version = result.value.version
 
-   const ArticleSchema = z.object({
-     title: z.string(),
-     body: z.string(),
-     published_at: z.string(),
-   })
+// Run your sentiment analysis
+const sentiments = analyzeSentiment(article) // Your ML model
 
-   const corpus = create_corpus()
-     .with_backend(create_memory_backend())
-     .with_store(define_store('articles', json_codec(ArticleSchema)))
-     .with_observations([SentimentObservation])
-     .build()
-   ```
+// Store observations pointing back to the article
+for (const s of sentiments) {
+  await corpus.observations.put(SentimentObservation, {
+    source: {
+      store_id: 'articles',
+      version: version,
+    },
+    content: {
+      subject: s.subject,
+      score: s.score,
+      keywords: s.keywords,
+    },
+    confidence: s.confidence,
+    observed_at: new Date(article.published_at),
+  })
+}
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">4</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Query observations across all articles</div>
+      <div class="step-body">
+```typescript
+// Get all positive sentiment observations from the last week
+for await (const obs of corpus.observations.query({
+  type: 'sentiment',
+  after: new Date('2024-07-08'),
+})) {
+  if (obs.content.score > 0.5) {
+    console.log(`Positive sentiment about ${obs.content.subject}`)
+    console.log(`  Score: ${obs.content.score}`)
+    console.log(`  Keywords: ${obs.content.keywords.join(', ')}`)
+    console.log(`  Source: ${obs.source.store_id}:${obs.source.version}`)
+  }
+}
+```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">5</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Handle article updates automatically</div>
+      <div class="step-body">
+```typescript
+// Article gets updated with corrections
+const updatedArticle = {
+  ...article,
+  body: 'Apple exceeded expectations, Microsoft met expectations...',
+}
 
-3. ### Store an article and extract observations
+await corpus.stores.articles.put(updatedArticle)
 
-   ```typescript
-   // Store the article
-   const article = {
-     title: 'Tech Giants Report Strong Earnings',
-     body: 'Apple and Microsoft both exceeded expectations...',
-     published_at: '2024-07-15T10:00:00Z',
-   }
+// Old observations are automatically marked stale!
+// This query only returns observations from the LATEST version:
+for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
+  // Only observations from the new version appear here
+}
 
-   const result = await corpus.stores.articles.put(article)
-   if (!result.ok) throw new Error('Failed to store article')
-   
-   const version = result.value.version
-
-   // Run your sentiment analysis
-   const sentiments = analyzeSentiment(article) // Your ML model
-
-   // Store observations pointing back to the article
-   for (const s of sentiments) {
-     await corpus.observations.put(SentimentObservation, {
-       source: {
-         store_id: 'articles',
-         version: version,
-       },
-       content: {
-         subject: s.subject,
-         score: s.score,
-         keywords: s.keywords,
-       },
-       confidence: s.confidence,
-       observed_at: new Date(article.published_at),
-     })
-   }
-   ```
-
-4. ### Query observations across all articles
-
-   ```typescript
-   // Get all positive sentiment observations from the last week
-   for await (const obs of corpus.observations.query({
-     type: 'sentiment',
-     after: new Date('2024-07-08'),
-   })) {
-     if (obs.content.score > 0.5) {
-       console.log(`Positive sentiment about ${obs.content.subject}`)
-       console.log(`  Score: ${obs.content.score}`)
-       console.log(`  Keywords: ${obs.content.keywords.join(', ')}`)
-       console.log(`  Source: ${obs.source.store_id}:${obs.source.version}`)
-     }
-   }
-   ```
-
-5. ### Handle article updates automatically
-
-   ```typescript
-   // Article gets updated with corrections
-   const updatedArticle = {
-     ...article,
-     body: 'Apple exceeded expectations, Microsoft met expectations...',
-   }
-
-   await corpus.stores.articles.put(updatedArticle)
-
-   // Old observations are automatically marked stale!
-   // This query only returns observations from the LATEST version:
-   for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
-     // Only observations from the new version appear here
-   }
-
-   // To include historical observations:
-   for await (const obs of corpus.observations.query({ 
-     type: 'sentiment',
-     include_stale: true 
-   })) {
-     // All observations, including from old versions
-   }
-   ```
-
-</Steps>
+// To include historical observations:
+for await (const obs of corpus.observations.query({ 
+  type: 'sentiment',
+  include_stale: true 
+})) {
+  // All observations, including from old versions
+}
+```
+      </div>
+    </div>
+  </div>
+</div>
 
 ## Core Concepts
 
@@ -478,3 +524,16 @@ describe('sentiment analysis', () => {
   })
 })
 ```
+
+## See Also
+
+<div class="grid">
+  <a href="/corpus/api/core/observations/" class="card card-interactive">
+    <div class="card-title">API Reference</div>
+    <div class="card-description">Full ObservationsClient API</div>
+  </a>
+  <a href="/corpus/guides/testing/" class="card card-interactive">
+    <div class="card-title">Testing Patterns</div>
+    <div class="card-description">Test observation workflows</div>
+  </a>
+</div>

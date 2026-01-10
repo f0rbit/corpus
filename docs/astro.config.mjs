@@ -1,10 +1,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import solidJs from '@astrojs/solid-js';
 
 export default defineConfig({
   integrations: [
+    solidJs(),
     starlight({
-      title: 'Corpus',
+      title: '@f0rbit/corpus',
       description: 'Functional snapshotting library for TypeScript',
       logo: {
         src: './src/assets/logo.svg',

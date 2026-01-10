@@ -3,6 +3,8 @@ title: Core Types
 description: Type definitions for Corpus, Store, Result, and errors
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
 ## Corpus
 
 The main corpus instance returned by `create_corpus().build()`.
@@ -54,7 +56,7 @@ type Store<T> = {
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions.
 
 ```ts
 type Result<T, E = CorpusError> =
@@ -65,6 +67,10 @@ type Result<T, E = CorpusError> =
 const ok = <T>(value: T): Result<T, never>
 const err = <E>(error: E): Result<never, E>
 ```
+
+<Aside type="tip">
+  See [Utility Functions](/corpus/api/utilities/) for `pipe()`, `match()`, and other Result helpers.
+</Aside>
 
 ### Usage
 
