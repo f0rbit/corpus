@@ -3,7 +3,8 @@ title: Cloudflare Deployment
 description: Deploy Corpus to Cloudflare Workers with D1 database and R2 object storage.
 ---
 
-import { Aside, Code, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
 
 This guide covers deploying Corpus to Cloudflare Workers using D1 for metadata and R2 for data storage.
 
@@ -201,19 +202,23 @@ const bucket = new sst.cloudflare.R2(corpus.bucket.name)
 
 The `@f0rbit/corpus/cloudflare` entry point excludes the file backend (which requires Node.js APIs) for smaller bundle sizes in Workers:
 
-<Tabs>
-  <TabItem label="Cloudflare Workers">
-    ```typescript
-    // Smaller bundle, Workers-compatible
-    import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
-    ```
-  </TabItem>
-  <TabItem label="Node.js / Bun">
-    ```typescript
-    // Full package with all backends
-    import { create_cloudflare_backend } from '@f0rbit/corpus'
-    ```
-  </TabItem>
+<Tabs defaultValue="cloudflare" client:load>
+<TabList client:load>
+<Tab value="cloudflare" client:load>Cloudflare Workers</Tab>
+<Tab value="node" client:load>Node.js / Bun</Tab>
+</TabList>
+<TabPanel value="cloudflare" client:load>
+```typescript
+// Smaller bundle, Workers-compatible
+import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+```
+</TabPanel>
+<TabPanel value="node" client:load>
+```typescript
+// Full package with all backends
+import { create_cloudflare_backend } from '@f0rbit/corpus'
+```
+</TabPanel>
 </Tabs>
 
 ## Performance Tips

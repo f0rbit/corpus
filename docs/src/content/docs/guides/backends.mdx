@@ -3,7 +3,8 @@ title: Storage Backends
 description: Learn about the different storage backends available in Corpus and when to use each one.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
 
 Corpus separates storage concerns into **backends** that implement the `Backend` interface. Each backend provides two clients:
 
@@ -135,34 +136,39 @@ const backend = create_layered_backend({
 
 **Use cases:**
 
-<Tabs>
-  <TabItem label="Caching">
-    ```typescript
-    // Fast reads from memory, persisted to disk
-    const backend = create_layered_backend({
-      read: [memoryBackend, fileBackend],
-      write: [memoryBackend, fileBackend],
-    })
-    ```
-  </TabItem>
-  <TabItem label="Migration">
-    ```typescript
-    // Read from old and new, write only to new
-    const backend = create_layered_backend({
-      read: [newBackend, oldBackend],
-      write: [newBackend],
-    })
-    ```
-  </TabItem>
-  <TabItem label="Replication">
-    ```typescript
-    // Write to multiple backends for redundancy
-    const backend = create_layered_backend({
-      read: [primary],
-      write: [primary, replica],
-    })
-    ```
-  </TabItem>
+<Tabs defaultValue="caching" client:load>
+<TabList client:load>
+<Tab value="caching" client:load>Caching</Tab>
+<Tab value="migration" client:load>Migration</Tab>
+<Tab value="replication" client:load>Replication</Tab>
+</TabList>
+<TabPanel value="caching" client:load>
+```typescript
+// Fast reads from memory, persisted to disk
+const backend = create_layered_backend({
+  read: [memoryBackend, fileBackend],
+  write: [memoryBackend, fileBackend],
+})
+```
+</TabPanel>
+<TabPanel value="migration" client:load>
+```typescript
+// Read from old and new, write only to new
+const backend = create_layered_backend({
+  read: [newBackend, oldBackend],
+  write: [newBackend],
+})
+```
+</TabPanel>
+<TabPanel value="replication" client:load>
+```typescript
+// Write to multiple backends for redundancy
+const backend = create_layered_backend({
+  read: [primary],
+  write: [primary, replica],
+})
+```
+</TabPanel>
 </Tabs>
 
 ## Backend Comparison

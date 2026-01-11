@@ -3,7 +3,8 @@ title: Observations
 description: Extract and query structured facts from your versioned documents with automatic staleness detection.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
 
 Observations let you extract **structured facts** from your versioned documents and query them efficiently, while automatically tracking which document version each fact came from.
 
@@ -397,45 +398,49 @@ type Observation<T = unknown> = {
 
 When you need to re-analyze documents (e.g., with an improved model), you have two options:
 
-<Tabs>
-  <TabItem label="Option A: Delete and re-create">
-    ```typescript
-    // Delete old observations before re-processing
-    await corpus.observations.delete_by_source({
-      store_id: 'articles',
-      version: old_version,
-    })
+<Tabs defaultValue="delete" client:load>
+<TabList client:load>
+<Tab value="delete" client:load>Option A: Delete and re-create</Tab>
+<Tab value="stale" client:load>Option B: Let staleness handle it</Tab>
+</TabList>
+<TabPanel value="delete" client:load>
+```typescript
+// Delete old observations before re-processing
+await corpus.observations.delete_by_source({
+  store_id: 'articles',
+  version: old_version,
+})
 
-    // Store updated document
-    const result = await corpus.stores.articles.put(updated_data)
-    const new_version = result.value.version
+// Store updated document
+const result = await corpus.stores.articles.put(updated_data)
+const new_version = result.value.version
 
-    // Create new observations
-    for (const fact of extract_facts(updated_data)) {
-      await corpus.observations.put(MyType, {
-        source: { store_id: 'articles', version: new_version },
-        content: fact,
-      })
-    }
-    ```
-  </TabItem>
-  <TabItem label="Option B: Let staleness handle it">
-    ```typescript
-    // Just store updated document and create new observations
-    const result = await corpus.stores.articles.put(updated_data)
-    const new_version = result.value.version
+// Create new observations
+for (const fact of extract_facts(updated_data)) {
+  await corpus.observations.put(MyType, {
+    source: { store_id: 'articles', version: new_version },
+    content: fact,
+  })
+}
+```
+</TabPanel>
+<TabPanel value="stale" client:load>
+```typescript
+// Just store updated document and create new observations
+const result = await corpus.stores.articles.put(updated_data)
+const new_version = result.value.version
 
-    for (const fact of extract_facts(updated_data)) {
-      await corpus.observations.put(MyType, {
-        source: { store_id: 'articles', version: new_version },
-        content: fact,
-      })
-    }
+for (const fact of extract_facts(updated_data)) {
+  await corpus.observations.put(MyType, {
+    source: { store_id: 'articles', version: new_version },
+    content: fact,
+  })
+}
 
-    // Old observations remain but are filtered out by default
-    // Use include_stale: true for historical analysis
-    ```
-  </TabItem>
+// Old observations remain but are filtered out by default
+// Use include_stale: true for historical analysis
+```
+</TabPanel>
 </Tabs>
 
 **When to use each:**

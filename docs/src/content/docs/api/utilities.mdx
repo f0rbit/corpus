@@ -3,7 +3,8 @@ title: Utility Functions
 description: Extended utilities for Result types and concurrency control in Corpus.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
 
 The corpus library provides extended utilities for working with `Result<T, E>` types and managing concurrent async operations. These utilities enable explicit error handling without exceptions and controlled parallelism.
 
@@ -238,47 +239,53 @@ const avatar = await pipe(fetchUser(id))
 
 **Starting a pipeline:**
 
-<Tabs>
-  <TabItem label="From existing Result">
-    ```typescript
-    // From a sync Result
-    const doubled = await pipe(ok(21))
-      .map(n => n * 2)
-      .result()
-    // { ok: true, value: 42 }
-    ```
-  </TabItem>
-  <TabItem label="From async operation">
-    ```typescript
-    // From Promise<Result>
-    const user = await pipe(fetchUser(id))
-      .flat_map(u => fetchPermissions(u.id))
-      .result()
-    ```
-  </TabItem>
-  <TabItem label="From try block">
-    ```typescript
-    // Wrap throwing code
-    const data = await pipe.try(
-      () => riskyAsyncOperation(),
-      e => ({ kind: 'failed', cause: e })
-    )
-      .map(processData)
-      .result()
-    ```
-  </TabItem>
-  <TabItem label="From fetch">
-    ```typescript
-    // Wrap fetch call
-    const users = await pipe.fetch<User[], string>(
-      '/api/users',
-      { headers: { Authorization: token } },
-      e => e.type === 'http' ? `Error ${e.status}` : 'Network failure'
-    )
-      .map(users => users.filter(u => u.active))
-      .unwrap_or([])
-    ```
-  </TabItem>
+<Tabs defaultValue="existing" client:load>
+<TabList client:load>
+<Tab value="existing" client:load>From existing Result</Tab>
+<Tab value="async" client:load>From async operation</Tab>
+<Tab value="try" client:load>From try block</Tab>
+<Tab value="fetch" client:load>From fetch</Tab>
+</TabList>
+<TabPanel value="existing" client:load>
+```typescript
+// From a sync Result
+const doubled = await pipe(ok(21))
+  .map(n => n * 2)
+  .result()
+// { ok: true, value: 42 }
+```
+</TabPanel>
+<TabPanel value="async" client:load>
+```typescript
+// From Promise<Result>
+const user = await pipe(fetchUser(id))
+  .flat_map(u => fetchPermissions(u.id))
+  .result()
+```
+</TabPanel>
+<TabPanel value="try" client:load>
+```typescript
+// Wrap throwing code
+const data = await pipe.try(
+  () => riskyAsyncOperation(),
+  e => ({ kind: 'failed', cause: e })
+)
+  .map(processData)
+  .result()
+```
+</TabPanel>
+<TabPanel value="fetch" client:load>
+```typescript
+// Wrap fetch call
+const users = await pipe.fetch<User[], string>(
+  '/api/users',
+  { headers: { Authorization: token } },
+  e => e.type === 'http' ? `Error ${e.status}` : 'Network failure'
+)
+  .map(users => users.filter(u => u.active))
+  .unwrap_or([])
+```
+</TabPanel>
 </Tabs>
 
 **Static constructors:**
@@ -521,50 +528,58 @@ The real power of these utilities emerges when you compose them together. The Re
 
 The most common pattern: get the first/last element, or `null` if the array is empty.
 
-<Tabs>
-  <TabItem label="Composable">
-    ```typescript
-    import { first, last, to_nullable } from '@f0rbit/corpus'
+<Tabs defaultValue="composable" client:load>
+<TabList client:load>
+<Tab value="composable" client:load>Composable</Tab>
+<Tab value="verbose" client:load>Verbose Alternative</Tab>
+</TabList>
+<TabPanel value="composable" client:load>
+```typescript
+import { first, last, to_nullable } from '@f0rbit/corpus'
 
-    const head = to_nullable(first(items))     // T | null
-    const tail = to_nullable(last(items))      // T | null
-    ```
-  </TabItem>
-  <TabItem label="Verbose Alternative">
-    ```typescript
-    // Without composition - manual .ok checks everywhere
-    const result = first(items)
-    const head = result.ok ? result.value : null
+const head = to_nullable(first(items))     // T | null
+const tail = to_nullable(last(items))      // T | null
+```
+</TabPanel>
+<TabPanel value="verbose" client:load>
+```typescript
+// Without composition - manual .ok checks everywhere
+const result = first(items)
+const head = result.ok ? result.value : null
 
-    const result2 = last(items)
-    const tail = result2.ok ? result2.value : null
-    ```
-  </TabItem>
+const result2 = last(items)
+const tail = result2.ok ? result2.value : null
+```
+</TabPanel>
 </Tabs>
 
 ### Providing Fallback Values
 
 When you want a default value instead of `null`:
 
-<Tabs>
-  <TabItem label="Composable">
-    ```typescript
-    import { first, last, to_fallback } from '@f0rbit/corpus'
+<Tabs defaultValue="composable2" client:load>
+<TabList client:load>
+<Tab value="composable2" client:load>Composable</Tab>
+<Tab value="verbose2" client:load>Verbose Alternative</Tab>
+</TabList>
+<TabPanel value="composable2" client:load>
+```typescript
+import { first, last, to_fallback } from '@f0rbit/corpus'
 
-    const primary = to_fallback(first(colors), 'gray')
-    const latest = to_fallback(last(events), defaultEvent)
-    ```
-  </TabItem>
-  <TabItem label="Verbose Alternative">
-    ```typescript
-    // Without composition
-    const result = first(colors)
-    const primary = result.ok ? result.value : 'gray'
+const primary = to_fallback(first(colors), 'gray')
+const latest = to_fallback(last(events), defaultEvent)
+```
+</TabPanel>
+<TabPanel value="verbose2" client:load>
+```typescript
+// Without composition
+const result = first(colors)
+const primary = result.ok ? result.value : 'gray'
 
-    const result2 = last(events)
-    const latest = result2.ok ? result2.value : defaultEvent
-    ```
-  </TabItem>
+const result2 = last(events)
+const latest = result2.ok ? result2.value : defaultEvent
+```
+</TabPanel>
 </Tabs>
 
 ### Real-World Parsing Patterns
