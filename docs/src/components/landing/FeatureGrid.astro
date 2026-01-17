@@ -1,0 +1,66 @@
+---
+import Section from "./Section.astro";
+
+const features = [
+  {
+    title: "Type-Safe Stores",
+    description:
+      "Define stores with Zod schemas. Full TypeScript inference with validation on encode and decode.",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></svg>`,
+  },
+  {
+    title: "Content Deduplication",
+    description:
+      "Automatic SHA-256 hashing. Store the same data twice, pay for one copy.",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>`,
+  },
+  {
+    title: "Lineage Tracking",
+    description:
+      "Link snapshots with parent references. Build complete data provenance graphs.",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/></svg>`,
+  },
+  {
+    title: "Observations",
+    description:
+      "Extract structured facts from documents with automatic staleness detection and provenance tracking.",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  },
+];
+---
+
+<Section title="Core Features" bordered>
+  <div class="feature-grid">
+    {features.map((feature) => (
+      <div class="card card-flat">
+        <div class="row">
+          <div class="card-icon" set:html={feature.icon} />
+          <h3 class="card-title">{feature.title}</h3>
+        </div>
+        <p class="card-description">{feature.description}</p>
+      </div>
+    ))}
+  </div>
+</Section>
+
+<style>
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-md);
+  }
+
+  .card-icon {
+    margin-bottom: var(--space-sm);
+  }
+
+  .card-title {
+    margin-bottom: var(--space-xs);
+  }
+
+  @media (max-width: 600px) {
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

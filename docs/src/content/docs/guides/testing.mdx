@@ -3,108 +3,64 @@ title: Testing Patterns
 description: Write effective tests for Corpus-backed applications using the memory backend.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 
-The memory backend makes testing Corpus applications straightforward. No mocking required - just use a real in-memory backend.
+The memory backend makes testing Corpus applications straightforward. No mocking required — just use a real in-memory backend.
+
+<Aside type="tip" title="No mocks needed">
+  Test with real Corpus behavior. The memory backend is fast enough for large test suites while giving you confidence your code works with real backends.
+</Aside>
 
 ## Basic Test Setup
 
 Create a fresh corpus for each test to ensure isolation:
 
-<Tabs>
-  <TabItem label="Bun">
-    ```typescript
-    import { describe, test, expect, beforeEach } from 'bun:test'
-    import { z } from 'zod'
-    import { 
-      create_corpus, 
-      create_memory_backend, 
-      define_store, 
-      json_codec,
-      type Corpus 
-    } from '@f0rbit/corpus'
+```typescript
+import { describe, test, expect, beforeEach } from 'bun:test'
+import { z } from 'zod'
+import { 
+  create_corpus, 
+  create_memory_backend, 
+  define_store, 
+  json_codec,
+  type Corpus 
+} from '@f0rbit/corpus'
 
-    const UserSchema = z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string().email(),
-    })
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+})
 
-    const users = define_store('users', json_codec(UserSchema))
+const users = define_store('users', json_codec(UserSchema))
 
-    describe('UserStore', () => {
-      let corpus: Corpus<{ users: Store<z.infer<typeof UserSchema>> }>
+describe('UserStore', () => {
+  let corpus: Corpus<{ users: Store<z.infer<typeof UserSchema>> }>
 
-      beforeEach(() => {
-        corpus = create_corpus()
-          .with_backend(create_memory_backend())
-          .with_store(users)
-          .build()
-      })
+  beforeEach(() => {
+    corpus = create_corpus()
+      .with_backend(create_memory_backend())
+      .with_store(users)
+      .build()
+  })
 
-      test('stores and retrieves user', async () => {
-        const user = { id: '1', name: 'Alice', email: 'alice@example.com' }
-        
-        const put = await corpus.stores.users.put(user)
-        expect(put.ok).toBe(true)
-        if (!put.ok) return
+  test('stores and retrieves user', async () => {
+    const user = { id: '1', name: 'Alice', email: 'alice@example.com' }
+    
+    const put = await corpus.stores.users.put(user)
+    expect(put.ok).toBe(true)
+    if (!put.ok) return
 
-        const get = await corpus.stores.users.get(put.value.version)
-        expect(get.ok).toBe(true)
-        if (!get.ok) return
+    const get = await corpus.stores.users.get(put.value.version)
+    expect(get.ok).toBe(true)
+    if (!get.ok) return
 
-        expect(get.value.data).toEqual(user)
-      })
-    })
-    ```
-  </TabItem>
-  <TabItem label="Vitest">
-    ```typescript
-    import { describe, test, expect, beforeEach } from 'vitest'
-    import { z } from 'zod'
-    import { 
-      create_corpus, 
-      create_memory_backend, 
-      define_store, 
-      json_codec 
-    } from '@f0rbit/corpus'
+    expect(get.value.data).toEqual(user)
+  })
+})
+```
 
-    const UserSchema = z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string().email(),
-    })
-
-    const users = define_store('users', json_codec(UserSchema))
-
-    describe('UserStore', () => {
-      let corpus: ReturnType<typeof createTestCorpus>
-
-      function createTestCorpus() {
-        return create_corpus()
-          .with_backend(create_memory_backend())
-          .with_store(users)
-          .build()
-      }
-
-      beforeEach(() => {
-        corpus = createTestCorpus()
-      })
-
-      test('stores and retrieves user', async () => {
-        const user = { id: '1', name: 'Alice', email: 'alice@example.com' }
-        
-        const put = await corpus.stores.users.put(user)
-        expect(put.ok).toBe(true)
-
-        const get = await corpus.stores.users.get(put.value.version)
-        expect(get.ok).toBe(true)
-        expect(get.value.data).toEqual(user)
-      })
-    })
-    ```
-  </TabItem>
-</Tabs>
+---
 
 ## Testing Lineage
 
@@ -135,6 +91,8 @@ test('tracks parent-child lineage', async () => {
 })
 ```
 
+---
+
 ## Testing Deduplication
 
 Verify that identical content shares storage:
@@ -159,6 +117,8 @@ test('deduplicates identical content', async () => {
   expect(first.value.data_key).toBe(second.value.data_key)
 })
 ```
+
+---
 
 ## Testing Event Handlers
 
@@ -185,7 +145,13 @@ test('emits events on operations', async () => {
 })
 ```
 
+---
+
 ## Testing Error Cases
+
+<Aside type="note">
+  Corpus returns `Result<T, E>` types instead of throwing. Test both success and error paths.
+</Aside>
 
 Test that errors are properly returned:
 
@@ -221,6 +187,8 @@ test('returns decode_error for invalid data', async () => {
   expect(result.error.kind).toBe('decode_error')
 })
 ```
+
+---
 
 ## Testing Listing and Filtering
 
@@ -258,6 +226,8 @@ test('lists snapshots with filters', async () => {
   expect(limited).toHaveLength(1)
 })
 ```
+
+---
 
 ## Test Factory Pattern
 
@@ -303,5 +273,18 @@ test('complex scenario with seeded data', async () => {
 ```
 
 <Aside type="tip">
-  The memory backend is fast enough for large test suites. No need to mock - testing with real backends gives you confidence your code works.
+  The memory backend is fast enough for large test suites. No need to mock — testing with real backends gives you confidence your code works.
 </Aside>
+
+## See Also
+
+<div class="grid">
+  <a href="/corpus/api/backends/memory/" class="card card-interactive">
+    <div class="card-title">Memory Backend API</div>
+    <div class="card-description">Full API reference</div>
+  </a>
+  <a href="/corpus/guides/backends/" class="card card-interactive">
+    <div class="card-title">Storage Backends</div>
+    <div class="card-description">Compare all backend options</div>
+  </a>
+</div>

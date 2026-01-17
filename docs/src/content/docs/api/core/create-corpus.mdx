@@ -3,6 +3,8 @@ title: create_corpus
 description: Create a new Corpus instance using the builder pattern
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
 ```ts
 function create_corpus(): CorpusBuilder<{}>
 ```
@@ -13,9 +15,28 @@ Creates a new Corpus instance using the builder pattern. A Corpus is a collectio
 
 Chain the builder methods to configure your corpus:
 
-1. `with_backend(backend)` - Set the storage backend
-2. `with_store(definition)` - Add a typed store (can be called multiple times)
-3. `build()` - Create the final Corpus instance
+<div class="stepper stepper-vertical">
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">1</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">`with_backend(backend)` — Set the storage backend</div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">2</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">`with_store(definition)` — Add a typed store (can be called multiple times)</div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">3</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">`build()` — Create the final Corpus instance</div>
+    </div>
+  </div>
+</div>
 
 ```ts
 import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'

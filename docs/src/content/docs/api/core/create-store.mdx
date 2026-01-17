@@ -3,6 +3,8 @@ title: create_store
 description: Create a typed Store instance bound to a backend
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
 ```ts
 function create_store<T>(
   backend: Backend, 
@@ -12,9 +14,9 @@ function create_store<T>(
 
 Creates a typed Store instance bound to a specific backend. This is primarily used internally by `create_corpus().build()`, but can be used directly for advanced use cases.
 
-:::note
+<Aside type="note">
 In most cases, you should use `create_corpus()` instead, which handles store creation automatically and provides better type inference for multiple stores.
-:::
+</Aside>
 
 ## Usage
 

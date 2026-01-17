@@ -3,117 +3,152 @@ title: Getting Started
 description: Install Corpus and store your first versioned snapshot in under 5 minutes.
 ---
 
-import { Steps, Tabs, TabItem, Code } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 
-Get up and running with Corpus in minutes.
+Get up and running with Corpus in minutes. You'll define a schema, create a corpus, and store your first versioned snapshot.
 
-<Steps>
+<div class="stepper stepper-vertical">
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">1</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Install the package</div>
+      <div class="step-body">
+        ```bash
+        bun add @f0rbit/corpus zod
+        ```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-1. ### Install the package
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">2</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Define a schema</div>
+      <div class="step-body">
+        Corpus uses [Zod](https://zod.dev) for type-safe serialization. Define a schema for your data:
 
-   <Tabs>
-     <TabItem label="bun">
-       ```bash
-       bun add @f0rbit/corpus zod
-       ```
-     </TabItem>
-     <TabItem label="npm">
-       ```bash
-       npm install @f0rbit/corpus zod
-       ```
-     </TabItem>
-     <TabItem label="pnpm">
-       ```bash
-       pnpm add @f0rbit/corpus zod
-       ```
-     </TabItem>
-   </Tabs>
+        ```typescript
+        import { z } from 'zod'
 
-2. ### Define a schema
+        const PostSchema = z.object({
+          title: z.string(),
+          body: z.string(),
+          published: z.boolean(),
+          tags: z.array(z.string()).optional(),
+        })
 
-   Corpus uses Zod for type-safe serialization. Define a schema for your data:
+        type Post = z.infer<typeof PostSchema>
+        ```
 
-   ```typescript
-   import { z } from 'zod'
+        <Aside type="tip">
+          Zod schemas serve as the single source of truth - they define both validation rules and TypeScript types.
+        </Aside>
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-   const PostSchema = z.object({
-     title: z.string(),
-     body: z.string(),
-     published: z.boolean(),
-     tags: z.array(z.string()).optional(),
-   })
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">3</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Create a corpus</div>
+      <div class="step-body">
+        Use the builder pattern to configure your corpus with a backend and stores:
 
-   type Post = z.infer<typeof PostSchema>
-   ```
+        ```typescript
+        import { 
+          create_corpus, 
+          create_memory_backend, 
+          define_store, 
+          json_codec 
+        } from '@f0rbit/corpus'
 
-3. ### Create a corpus
+        const corpus = create_corpus()
+          .with_backend(create_memory_backend())
+          .with_store(define_store('posts', json_codec(PostSchema)))
+          .build()
+        ```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-   Use the builder pattern to configure your corpus with a backend and stores:
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">4</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Store and retrieve data</div>
+      <div class="step-body">
+        Use the typed store to save and load snapshots:
 
-   ```typescript
-   import { 
-     create_corpus, 
-     create_memory_backend, 
-     define_store, 
-     json_codec 
-   } from '@f0rbit/corpus'
+        ```typescript
+        const post: Post = {
+          title: 'Hello World',
+          body: 'My first post using Corpus.',
+          published: true,
+        }
 
-   const corpus = create_corpus()
-     .with_backend(create_memory_backend())
-     .with_store(define_store('posts', json_codec(PostSchema)))
-     .build()
-   ```
+        const result = await corpus.stores.posts.put(post)
 
-4. ### Store and retrieve data
+        if (result.ok) {
+          const { version, content_hash } = result.value
+          console.log(`Saved version ${version} with hash ${content_hash}`)
+        }
+        ```
+      </div>
+    </div>
+    <div class="step-connector vertical-connector" />
+  </div>
 
-   Use the typed store to save and load snapshots:
+  <div class="step vertical-connector-item">
+    <div class="step-indicator vertical-indicator">5</div>
+    <div class="step-content vertical-content">
+      <div class="step-title">Handle errors with pattern matching</div>
+      <div class="step-body">
+        Corpus uses `Result<T, E>` types instead of throwing exceptions:
 
-   ```typescript
-   const post: Post = {
-     title: 'Hello World',
-     body: 'My first post using Corpus.',
-     published: true,
-   }
+        ```typescript
+        const snapshot = await corpus.stores.posts.get('nonexistent-version')
 
-   const result = await corpus.stores.posts.put(post)
+        if (!snapshot.ok) {
+          switch (snapshot.error.kind) {
+            case 'not_found':
+              console.log(`Version ${snapshot.error.version} does not exist`)
+              break
+            case 'decode_error':
+              console.log('Data corruption detected:', snapshot.error.cause)
+              break
+            case 'storage_error':
+              console.log('Backend failed:', snapshot.error.operation)
+              break
+          }
+          return
+        }
 
-   if (result.ok) {
-     const { version, content_hash } = result.value
-     console.log(`Saved version ${version} with hash ${content_hash}`)
-   }
-   ```
-
-5. ### Handle errors with pattern matching
-
-   Corpus uses `Result<T, E>` types instead of throwing exceptions:
-
-   ```typescript
-   const snapshot = await corpus.stores.posts.get('nonexistent-version')
-
-   if (!snapshot.ok) {
-     switch (snapshot.error.kind) {
-       case 'not_found':
-         console.log(`Version ${snapshot.error.version} does not exist`)
-         break
-       case 'decode_error':
-         console.log('Data corruption detected:', snapshot.error.cause)
-         break
-       case 'storage_error':
-         console.log('Backend failed:', snapshot.error.operation)
-         break
-     }
-     return
-   }
-
-   console.log('Post title:', snapshot.value.data.title)
-   ```
-
-</Steps>
+        console.log('Post title:', snapshot.value.data.title)
+        ```
+      </div>
+    </div>
+  </div>
+</div>
 
 ## Next Steps
 
-- **[Storage Backends](/corpus/guides/backends/)** - Learn about memory, file, and Cloudflare backends
-- **[Cloudflare Deployment](/corpus/guides/cloudflare/)** - Deploy to Cloudflare Workers with D1 and R2
-- **[Observations](/corpus/guides/observations/)** - Extract structured facts from documents with provenance tracking
-- **[Testing Patterns](/corpus/guides/testing/)** - Write tests using the memory backend
-- **[API Reference](/corpus/api/)** - Full API documentation
+<div class="grid">
+  <a href="/corpus/guides/backends/" class="card card-interactive">
+    <div class="card-title">Storage Backends</div>
+    <div class="card-description">Learn about memory, file, and Cloudflare backends</div>
+  </a>
+  <a href="/corpus/guides/cloudflare/" class="card card-interactive">
+    <div class="card-title">Cloudflare Deployment</div>
+    <div class="card-description">Deploy to Cloudflare Workers with D1 and R2</div>
+  </a>
+  <a href="/corpus/guides/observations/" class="card card-interactive">
+    <div class="card-title">Observations</div>
+    <div class="card-description">Extract structured facts with provenance tracking</div>
+  </a>
+  <a href="/corpus/guides/testing/" class="card card-interactive">
+    <div class="card-title">Testing Patterns</div>
+    <div class="card-description">Write tests using the memory backend</div>
+  </a>
+</div>

@@ -3,7 +3,8 @@ title: Storage Backends
 description: Learn about the different storage backends available in Corpus and when to use each one.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
 
 Corpus separates storage concerns into **backends** that implement the `Backend` interface. Each backend provides two clients:
 
@@ -11,6 +12,25 @@ Corpus separates storage concerns into **backends** that implement the `Backend`
 - **DataClient** - Stores the actual binary content
 
 ## Available Backends
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Memory</div>
+    <div class="card-description">Fast in-memory storage for testing and prototyping</div>
+  </div>
+  <div class="card">
+    <div class="card-title">File</div>
+    <div class="card-description">Local filesystem storage using Bun's file APIs</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cloudflare</div>
+    <div class="card-description">Production-ready D1 + R2 for global distribution</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Layered</div>
+    <div class="card-description">Combine backends for caching and replication</div>
+  </div>
+</div>
 
 ### Memory Backend
 
@@ -22,10 +42,11 @@ import { create_memory_backend } from '@f0rbit/corpus'
 const backend = create_memory_backend()
 ```
 
-**Best for:**
-- Unit and integration tests
-- Prototyping and development
-- Ephemeral data that doesn't need persistence
+<Aside type="tip" title="Best for">
+  - Unit and integration tests
+  - Prototyping and development
+  - Ephemeral data that doesn't need persistence
+</Aside>
 
 **Options:**
 
@@ -47,10 +68,11 @@ const backend = create_file_backend({
 })
 ```
 
-**Best for:**
-- Local development with persistence
-- Desktop applications
-- Single-machine deployments
+<Aside type="tip" title="Best for">
+  - Local development with persistence
+  - Desktop applications
+  - Single-machine deployments
+</Aside>
 
 **Directory structure:**
 
@@ -60,7 +82,7 @@ base_path/
   _data/<store_id>_<hash>.bin  # Binary data files
 ```
 
-<Aside type="note">
+<Aside type="caution">
 The file backend uses `Bun.file()` and `Bun.write()` - it requires the Bun runtime.
 </Aside>
 
@@ -77,12 +99,16 @@ const backend = create_cloudflare_backend({
 })
 ```
 
-**Best for:**
-- Production deployments on Cloudflare Workers
-- Globally distributed applications
-- High availability requirements
+<Aside type="tip" title="Best for">
+  - Production deployments on Cloudflare Workers
+  - Globally distributed applications
+  - High availability requirements
+</Aside>
 
-See the [Cloudflare Deployment](/corpus/guides/cloudflare/) guide for setup instructions.
+<a href="/corpus/guides/cloudflare/" class="card card-interactive">
+  <div class="card-title">Cloudflare Deployment Guide</div>
+  <div class="card-description">Step-by-step setup instructions for D1 and R2</div>
+</a>
 
 ### Layered Backend
 
@@ -110,34 +136,39 @@ const backend = create_layered_backend({
 
 **Use cases:**
 
-<Tabs>
-  <TabItem label="Caching">
-    ```typescript
-    // Fast reads from memory, persisted to disk
-    const backend = create_layered_backend({
-      read: [memoryBackend, fileBackend],
-      write: [memoryBackend, fileBackend],
-    })
-    ```
-  </TabItem>
-  <TabItem label="Migration">
-    ```typescript
-    // Read from old and new, write only to new
-    const backend = create_layered_backend({
-      read: [newBackend, oldBackend],
-      write: [newBackend],
-    })
-    ```
-  </TabItem>
-  <TabItem label="Replication">
-    ```typescript
-    // Write to multiple backends for redundancy
-    const backend = create_layered_backend({
-      read: [primary],
-      write: [primary, replica],
-    })
-    ```
-  </TabItem>
+<Tabs defaultValue="caching" client:load>
+<TabList client:load>
+<Tab value="caching" client:load>Caching</Tab>
+<Tab value="migration" client:load>Migration</Tab>
+<Tab value="replication" client:load>Replication</Tab>
+</TabList>
+<TabPanel value="caching" client:load>
+```typescript
+// Fast reads from memory, persisted to disk
+const backend = create_layered_backend({
+  read: [memoryBackend, fileBackend],
+  write: [memoryBackend, fileBackend],
+})
+```
+</TabPanel>
+<TabPanel value="migration" client:load>
+```typescript
+// Read from old and new, write only to new
+const backend = create_layered_backend({
+  read: [newBackend, oldBackend],
+  write: [newBackend],
+})
+```
+</TabPanel>
+<TabPanel value="replication" client:load>
+```typescript
+// Write to multiple backends for redundancy
+const backend = create_layered_backend({
+  read: [primary],
+  write: [primary, replica],
+})
+```
+</TabPanel>
 </Tabs>
 
 ## Backend Comparison
@@ -177,3 +208,20 @@ const customBackend: Backend = {
 ```
 
 All methods should return `Result<T, CorpusError>` types for consistent error handling.
+
+## See Also
+
+<div class="grid">
+  <a href="/corpus/api/backends/memory/" class="card card-interactive">
+    <div class="card-title">API: Memory Backend</div>
+  </a>
+  <a href="/corpus/api/backends/file/" class="card card-interactive">
+    <div class="card-title">API: File Backend</div>
+  </a>
+  <a href="/corpus/api/backends/cloudflare/" class="card card-interactive">
+    <div class="card-title">API: Cloudflare Backend</div>
+  </a>
+  <a href="/corpus/api/backends/layered/" class="card card-interactive">
+    <div class="card-title">API: Layered Backend</div>
+  </a>
+</div>

@@ -1,129 +1,38 @@
 ---
-title: Corpus
+title: ""
 description: A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support.
 template: splash
-hero:
-  tagline: The versioned data store for TypeScript. Track lineage, deduplicate content, extract structured observations.
-  actions:
-    - text: Get Started
-      link: /corpus/getting-started/
-      icon: right-arrow
-      variant: primary
-    - text: View on GitHub
-      link: https://github.com/f0rbit/corpus
-      icon: external
+tableOfContents: false
+head:
+  - tag: title
+    content: "Corpus | Versioned Data Store for TypeScript"
 ---
 
-import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import Hero from '../../components/landing/Hero.astro';
+import FeatureGrid from '../../components/landing/FeatureGrid.astro';
+import QuickStart from '../../components/landing/QuickStart.astro';
+import WhyCorpus from '../../components/landing/WhyCorpus.astro';
+import BackendComparison from '../../components/landing/BackendComparison.astro';
+import NextSteps from '../../components/landing/NextSteps.astro';
+import ScrollProgress from '../../components/landing/ScrollProgress.astro';
 
-## Core Features
-
-<div class="feature-grid">
-  <Card title="Type-Safe Stores" icon="seti:typescript">
-    Define stores with Zod schemas. Full TypeScript inference with validation on encode and decode.
-  </Card>
-  <Card title="Content Deduplication" icon="seti:db">
-    Automatic SHA-256 hashing. Store the same data twice, pay for one copy.
-  </Card>
-  <Card title="Lineage Tracking" icon="seti:git">
-    Link snapshots with parent references. Build complete data provenance graphs.
-  </Card>
-  <Card title="Observations" icon="seti:json">
-    Extract structured facts from documents with automatic staleness detection.
-  </Card>
+<ScrollProgress />
+<div class="landing-page">
+  <Hero />
+  <FeatureGrid />
+  <QuickStart />
+  <WhyCorpus />
+  <BackendComparison />
+  <NextSteps />
 </div>
 
-## Quick Start
-
-```typescript
-import { z } from 'zod'
-import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
-
-const ArticleSchema = z.object({
-  title: z.string(),
-  body: z.string(),
-  tags: z.array(z.string()),
-})
-
-const corpus = create_corpus()
-  .with_backend(create_memory_backend())
-  .with_store(define_store('articles', json_codec(ArticleSchema)))
-  .build()
-
-// Store a versioned snapshot
-const result = await corpus.stores.articles.put({
-  title: 'Hello World',
-  body: 'My first article.',
-  tags: ['intro', 'getting-started'],
-})
-
-if (result.ok) {
-  console.log(`Version: ${result.value.version}`)
-  console.log(`Hash: ${result.value.content_hash}`)
-}
-```
-
-## Why Corpus?
-
-<div class="benefits-grid">
-  <div class="benefit">
-    <h3>Errors as Values</h3>
-    <p>No thrown exceptions. Every operation returns a <code>Result&lt;T, CorpusError&gt;</code> that you can pattern match on. Predictable, type-safe error handling.</p>
-  </div>
-  <div class="benefit">
-    <h3>Functional Composition</h3>
-    <p>Builder pattern for setup, pure functions for operations. No hidden state, no surprises. Compose backends, stores, and observations.</p>
-  </div>
-  <div class="benefit">
-    <h3>Local-First Ready</h3>
-    <p>Start with the memory backend for development, file backend for persistence, then deploy to Cloudflare D1+R2 for production. Same API everywhere.</p>
-  </div>
-  <div class="benefit">
-    <h3>Pluggable Backends</h3>
-    <p>Memory for testing, filesystem for local dev, Cloudflare for production. Combine them with the layered backend for caching and replication.</p>
-  </div>
-</div>
-
-## Extract Structured Facts with Observations
-
-When you need to extract structured data from your documents - sentiment analysis, named entities, key facts - Observations provide first-class support with automatic provenance tracking.
-
-```typescript
-import { define_observation_type } from '@f0rbit/corpus'
-
-const SentimentObservation = define_observation_type('sentiment', z.object({
-  subject: z.string(),
-  score: z.number().min(-1).max(1),
-}))
-
-const corpus = create_corpus()
-  .with_backend(backend)
-  .with_store(define_store('articles', json_codec(ArticleSchema)))
-  .with_observations([SentimentObservation])
-  .build()
-
-// Store observation pointing back to source document
-await corpus.observations.put(SentimentObservation, {
-  source: { store_id: 'articles', version: article.version },
-  content: { subject: 'product launch', score: 0.8 },
-})
-
-// Query observations - stale ones automatically filtered
-for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
-  console.log(obs.content.subject, obs.content.score)
-}
-```
-
-## Backend Comparison
-
-| Backend | Storage | Best For |
-|---------|---------|----------|
-| **Memory** | In-memory | Testing, prototyping |
-| **File** | Local disk | Development, desktop apps |
-| **Cloudflare** | D1 + R2 | Production, global distribution |
-| **Layered** | Composite | Caching, replication, migration |
-
-<div class="cta-buttons">
-  <a href="/corpus/getting-started/" class="cta-primary">Get Started</a>
-  <a href="https://github.com/f0rbit/corpus" class="cta-secondary">View on GitHub</a>
-</div>
+<style>{`
+  .landing-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+`}</style>
