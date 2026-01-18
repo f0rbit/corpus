@@ -1,4 +1,4 @@
-# @f0rbit/corpus v0.3.3
+# @f0rbit/corpus v0.3.4
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
