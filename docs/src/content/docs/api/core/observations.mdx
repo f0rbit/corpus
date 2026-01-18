@@ -127,6 +127,70 @@ type ObservationTypeDef<T> = {
 }
 ```
 
+### VersionFilter
+
+Filter for selecting which versions to include in observation queries. Accepts three forms:
+
+```ts
+type VersionFilter = 
+  | Set<string>                                                      // Set-based lookup
+  | string[]                                                         // Array-based lookup
+  | ((store_id: string, version: string) => boolean | Promise<boolean>)  // Dynamic filter
+```
+
+| Form | Description | Use Case |
+|------|-------------|----------|
+| `Set<string>` | O(1) lookup for version membership | Known list of versions, performance-critical |
+| `string[]` | Array includes check | Simple lists, convenient syntax |
+| `Function` | Dynamic filtering with async support | Database lookups, external validation |
+
+#### Examples
+
+**Set-based filtering** - fastest for large version lists:
+
+```ts
+const publishedVersions = new Set(['v1.0', 'v2.0', 'v2.1'])
+
+for await (const obs of corpus.observations.query({
+  source_store: 'documents',
+  version_filter: publishedVersions
+})) {
+  // Only observations from v1.0, v2.0, or v2.1
+}
+```
+
+**Array-based filtering** - convenient for small lists:
+
+```ts
+for await (const obs of corpus.observations.query({
+  version_filter: ['draft', 'review', 'published']
+})) {
+  // Only observations from these workflow stages
+}
+```
+
+**Async function filtering** - for dynamic version validation:
+
+```ts
+const version_filter: VersionFilter = async (store_id, version) => {
+  const published = await db.query.published_reports.findFirst({
+    where: and(
+      eq(published_reports.store_id, store_id),
+      eq(published_reports.version, version)
+    )
+  })
+  return published !== null
+}
+
+for await (const obs of corpus.observations.query({ version_filter })) {
+  // Only observations from versions that exist in published_reports table
+}
+```
+
+<Aside type="tip">
+Use `Set<string>` for best performance when filtering against a known list of versions. The async function form is useful when version validity depends on external state (e.g., database records, API calls).
+</Aside>
+
 ### ObservationQueryOpts
 
 Query options for filtering observations.
@@ -137,6 +201,7 @@ type ObservationQueryOpts = {
   source_store?: string        // Filter by source store
   source_version?: string      // Filter by exact source version
   source_prefix?: string       // Filter by source version prefix
+  version_filter?: VersionFilter  // Filter by version (see above)
   after?: Date                 // observed_at after this date
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date

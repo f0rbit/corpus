@@ -99,14 +99,21 @@ type CorpusError =
   | { kind: 'encode_error'; cause: Error }
   | { kind: 'hash_mismatch'; expected: string; actual: string }
   | { kind: 'invalid_config'; message: string }
+  | { kind: 'validation_error'; cause: Error; message: string }
+  | { kind: 'observation_not_found'; id: string }
 ```
 
 | Kind | Description |
 |------|-------------|
-| `not_found` | Requested version doesn't exist |
-| `storage_error` | Backend I/O failure |
-| `decode_error` | Codec failed to parse data |
+| `not_found` | Requested snapshot version doesn't exist |
+| `already_exists` | Snapshot with this version already exists |
+| `storage_error` | Backend I/O operation failed |
+| `decode_error` | Codec failed to parse stored data |
 | `encode_error` | Codec failed to serialize data |
+| `hash_mismatch` | Content hash verification failed |
+| `invalid_config` | Corpus configuration is invalid |
+| `validation_error` | Schema validation failed (for observations) |
+| `observation_not_found` | Requested observation ID doesn't exist |
 
 ---
 

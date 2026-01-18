@@ -85,42 +85,41 @@ wrangler d1 create corpus-db
 wrangler r2 bucket create corpus-bucket
 ```
 
-### 3. Run Database Migration
+### 3. Set Up Database Migrations
 
-Before first use, create the required table:
-
-```ts
-import { CORPUS_MIGRATION_SQL } from '@f0rbit/corpus'
-
-// In a setup script or migration worker
-await env.CORPUS_DB.exec(CORPUS_MIGRATION_SQL)
-```
-
-Or create a migration file and run with Wrangler:
-
-```sql
--- migrations/0001_init.sql
-CREATE TABLE IF NOT EXISTS corpus_snapshots (
-  store_id TEXT NOT NULL,
-  version TEXT NOT NULL,
-  parents TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  invoked_at TEXT,
-  content_hash TEXT NOT NULL,
-  content_type TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  data_key TEXT NOT NULL,
-  tags TEXT,
-  PRIMARY KEY (store_id, version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_store_created ON corpus_snapshots(store_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_content_hash ON corpus_snapshots(store_id, content_hash);
-```
+Corpus uses Drizzle ORM for schema management. Install Drizzle Kit and generate migrations from the exported schemas:
 
 ```bash
+bun add -D drizzle-kit
+```
+
+Create `drizzle.config.ts`:
+
+```ts
+import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  dialect: 'sqlite',
+  driver: 'd1-http',
+  schema: [
+    './node_modules/@f0rbit/corpus/schema.js',
+    './node_modules/@f0rbit/corpus/observations/schema.js',
+  ],
+  out: './migrations',
+})
+```
+
+Generate and apply migrations:
+
+```bash
+# Generate migration files from corpus schemas
+bunx drizzle-kit generate
+
+# Apply migrations to your D1 database
 wrangler d1 migrations apply corpus-db
 ```
+
+This creates the `corpus_snapshots` and `corpus_observations` tables with all required indexes. See the [Schema API](/corpus/api/schema) for full schema details.
 
 ### 4. Configure wrangler.toml
 

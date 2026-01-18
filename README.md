@@ -5,14 +5,14 @@ a functional snapshotting library for typescript. store versioned data with line
 ## install
 
 ```bash
-bun add corpus
+bun add @f0rbit/corpus
 ```
 
 ## usage
 
 ```typescript
 import { z } from 'zod'
-import { create_corpus, create_memory_backend, define_store, json_codec } from 'corpus'
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
 
 const TimelineSchema = z.object({
   items: z.array(z.object({ id: z.string(), text: z.string() })),

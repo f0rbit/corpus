@@ -171,7 +171,8 @@ function create_cloudflare_storage(
  * @group Storage Backends
  *
  * Uses D1 (SQLite) for metadata storage and R2 (object storage) for binary data.
- * Requires running `CORPUS_MIGRATION_SQL` on the D1 database before first use.
+ * Database migrations should be managed via Drizzle Kit using the exported
+ * `corpus_snapshots` and `corpus_observations` schemas.
  *
  * This backend is designed for production use in Cloudflare Workers environments,
  * providing durable, globally distributed storage.
@@ -199,7 +200,8 @@ function create_cloudflare_storage(
  * }
  * ```
  *
- * @see CORPUS_MIGRATION_SQL for required database setup
+ * @see corpus_snapshots - Drizzle schema for snapshot metadata
+ * @see corpus_observations - Drizzle schema for observations
  */
 export function create_cloudflare_backend(config: CloudflareBackendConfig): Backend {
 	const db = drizzle(config.d1);

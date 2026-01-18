@@ -1,6 +1,6 @@
 {
 	"name": "@f0rbit/corpus",
-	"version": "0.3.3",
+	"version": "0.3.4",
 	"description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
 	"module": "dist/index.js",
 	"main": "dist/index.js",
@@ -36,11 +36,12 @@
 	"files": ["dist"],
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
+		"build:llm": "node scripts/generate-llm-docs.js",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"prepublishOnly": "npm run build",
 		"docs:dev": "cd docs && bun run dev",
-		"docs:build": "cd docs && bun run build",
+		"docs:build": "npm run build:llm && cd docs && bun run build",
 		"docs:preview": "cd docs && bun run preview"
 	},
 	"repository": {

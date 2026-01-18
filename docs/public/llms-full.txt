@@ -1,0 +1,2880 @@
+# @f0rbit/corpus v0.3.4 - Full Documentation
+
+> A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
+
+This document contains the complete source code and documentation for LLM consumption.
+
+# @f0rbit/corpus v0.3.4
+
+> A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
+
+## Installation
+
+```bash
+bun add @f0rbit/corpus zod
+# or
+npm install @f0rbit/corpus zod
+```
+
+## Import Paths
+
+```typescript
+// Main entry - core, memory backend, result utilities
+import { create_corpus, define_store, json_codec, ok, err, pipe } from '@f0rbit/corpus'
+
+// File backend (Node.js/Bun)
+import { create_file_backend } from '@f0rbit/corpus/file'
+
+// Cloudflare backend (Workers)
+import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+
+// Types only (no runtime)
+import type { Result, Snapshot, CorpusError, Store } from '@f0rbit/corpus/types'
+
+// Drizzle schema
+import { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+## Core Concepts
+
+- **Snapshot**: Immutable versioned data with metadata (version, content_hash, parents, tags)
+- **Store**: Typed container managing snapshots with automatic deduplication
+- **Corpus**: Collection of stores bound to a backend
+- **Observation**: Structured fact pointing to content location (store_id + version + path + span)
+- **Lineage**: Parent refs link snapshots to sources for provenance tracking
+
+## Builder Pattern
+
+```typescript
+import { z } from 'zod'
+import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+
+const UserSchema = z.object({ name: z.string(), email: z.string() })
+const users = define_store('users', json_codec(UserSchema))
+
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(users)
+  .build()
+
+// Type-safe store access via corpus.stores.<id>
+await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
+```
+
+## Result<T, E> Pattern
+
+All operations return `Result<T, CorpusError>` - never throw exceptions.
+
+```typescript
+import { ok, err, unwrap, unwrap_or, match, pipe, to_nullable } from '@f0rbit/corpus'
+
+// Check .ok property
+const result = await store.put(data)
+if (!result.ok) return console.error('Failed:', result.error.kind)
+console.log('Version:', result.value.version)
+
+// Pattern matching
+const message = match(result, meta => `Stored ${meta.version}`, error => `Failed: ${error.kind}`)
+
+// Pipeline composition
+const user = await pipe(store.get(version))
+  .map(snapshot => snapshot.data)
+  .flat_map(data => validateUser(data))
+  .unwrap_or(defaultUser)
+
+// Convert to nullable for not-found patterns
+const snapshot = to_nullable(await store.get(version))
+```
+
+## CorpusError Types
+
+Discriminated union with `kind` field:
+- `not_found` - Snapshot doesn't exist (store_id, version)
+- `storage_error` - Backend failure (cause, operation)
+- `decode_error` / `encode_error` - Codec failed (cause)
+- `hash_mismatch` - Content corruption (expected, actual)
+- `validation_error` - Schema validation failed (cause, message)
+- `observation_not_found` - Observation doesn't exist (id)
+
+```typescript
+if (!result.ok && result.error.kind === 'not_found') {
+  return `Version ${result.error.version} not found in ${result.error.store_id}`
+}
+```
+
+## Store Operations
+
+```typescript
+// Put - returns SnapshotMeta with generated version
+const result = await store.put(data, {
+  parents: [{ store_id: 'source', version: 'abc123' }],
+  tags: ['draft'],
+  invoked_at: new Date()
+})
+
+// Get specific version - returns Snapshot<T> = { meta, data }
+const snapshot = await store.get('AZJx4vM')
+
+// Get latest version
+const latest = await store.get_latest()
+
+// Get metadata only (no data fetch)
+const meta = await store.get_meta('AZJx4vM')
+
+// List with filtering - returns AsyncIterable<SnapshotMeta>
+for await (const meta of store.list({ limit: 10, tags: ['published'] })) {
+  console.log(meta.version)
+}
+```
+
+## Codecs
+
+```typescript
+const jsonCodec = json_codec(z.object({ name: z.string() }))  // JSON with Zod validation
+const textCodec = text_codec()    // Plain UTF-8 text
+const binaryCodec = binary_codec() // Raw binary pass-through
+
+// Custom codec
+type Codec<T> = { content_type: ContentType; encode: (v: T) => Uint8Array; decode: (b: Uint8Array) => T }
+```
+
+## Observations
+
+```typescript
+import { define_observation_type } from '@f0rbit/corpus'
+
+const entity_mention = define_observation_type('entity_mention', z.object({
+  entity: z.string(),
+  entity_type: z.enum(['person', 'organization', 'topic'])
+}))
+
+const corpus = create_corpus()
+  .with_backend(backend)
+  .with_store(documents)
+  .with_observations([entity_mention])
+  .build()
+
+await corpus.observations.put(entity_mention, {
+  source: { store_id: 'documents', version: 'AZJx4vM', path: '$.text', span: { start: 100, end: 150 } },
+  content: { entity: 'Climate Policy', entity_type: 'topic' },
+  confidence: 0.95
+})
+
+for await (const obs of corpus.observations.query({ type: 'entity_mention' })) {
+  console.log(obs.content)
+}
+```
+
+## Backends
+
+```typescript
+import { create_memory_backend, create_layered_backend } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+
+const memory = create_memory_backend()  // In-memory (testing)
+const file = create_file_backend({ base_path: './data' })  // File system
+const cf = create_cloudflare_backend({ db: env.DB, bucket: env.BUCKET })  // Cloudflare D1+R2
+const layered = create_layered_backend({ primary: file, cache: memory })  // Cache layer
+```
+
+## Concurrency Utilities
+
+```typescript
+import { Semaphore, parallel_map } from '@f0rbit/corpus'
+
+const sem = new Semaphore(5)
+await sem.acquire()
+try {
+  await doWork()
+} finally {
+  sem.release()
+}
+
+// Or use parallel_map for controlled concurrency
+const results = await parallel_map(items, item => process(item), 5)
+```
+
+## SST Infrastructure Helper
+
+```typescript
+import { createCorpusInfra } from '@f0rbit/corpus'
+
+// In sst.config.ts
+const corpus = createCorpusInfra('myapp')
+const db = new sst.cloudflare.D1(corpus.database.name)      // 'myappDb'
+const bucket = new sst.cloudflare.R2(corpus.bucket.name)    // 'myappBucket'
+```
+
+## Exports by Category
+
+### Core
+- `create_corpus`
+- `create_store`
+- `define_store`
+
+### Backends
+- `create_memory_backend`
+- `create_file_backend`
+- `create_cloudflare_backend`
+- `create_layered_backend`
+
+### Codecs
+- `json_codec`
+- `text_codec`
+- `binary_codec`
+
+### Result Utilities
+- `ok`
+- `err`
+- `match`
+- `unwrap`
+- `unwrap_or`
+- `unwrap_err`
+- `try_catch`
+- `try_catch_async`
+- `fetch_result`
+- `pipe`
+- `to_nullable`
+- `to_fallback`
+- `null_on`
+- `fallback_on`
+- `format_error`
+- `at`
+- `first`
+- `last`
+- `merge_deep`
+
+### Observations
+- `define_observation_type`
+- `create_pointer`
+- `pointer_to_key`
+- `key_to_pointer`
+- `resolve_path`
+- `apply_span`
+- `pointers_equal`
+- `pointer_to_snapshot`
+- `generate_observation_id`
+- `create_observations_client`
+- `create_observations_storage`
+
+### Concurrency
+- `Semaphore`
+- `parallel_map`
+
+### Utilities
+- `compute_hash`
+- `generate_version`
+- `concat_bytes`
+- `stream_to_bytes`
+- `to_bytes`
+- `create_filter_pipeline`
+- `filter_snapshots`
+- `parse_snapshot_meta`
+
+### Schema (Drizzle)
+- `corpus_snapshots`
+- `corpus_observations`
+
+### SST
+- `createCorpusInfra`
+
+## Key Types
+
+```typescript
+type SnapshotMeta = {
+  store_id: string; version: string; content_hash: string; content_type: ContentType
+  size_bytes: number; data_key: string; created_at: Date; invoked_at?: Date
+  parents: ParentRef[]; tags?: string[]
+}
+
+type Snapshot<T> = { meta: SnapshotMeta; data: T }
+
+type SnapshotPointer = {
+  store_id: string; version: string
+  path?: string           // JSONPath expression
+  span?: { start: number; end: number }
+}
+
+type Observation<T> = {
+  id: string; type: string; source: SnapshotPointer; content: T
+  confidence?: number; observed_at?: Date; created_at: Date
+  derived_from?: SnapshotPointer[]
+}
+
+type Result<T, E> = { ok: true; value: T } | { ok: false; error: E }
+
+type Pipe<T, E> = {
+  map: <U>(fn: (value: T) => U) => Pipe<U, E>
+  map_async: <U>(fn: (value: T) => Promise<U>) => Pipe<U, E>
+  flat_map: <U>(fn: (value: T) => Result<U, E> | Promise<Result<U, E>>) => Pipe<U, E>
+  map_err: <F>(fn: (error: E) => F) => Pipe<T, F>
+  tap: (fn: (value: T) => void | Promise<void>) => Pipe<T, E>
+  tap_err: (fn: (error: E) => void | Promise<void>) => Pipe<T, E>
+  unwrap_or: (default_value: T) => Promise<T>
+  result: () => Promise<Result<T, E>>
+}
+
+type CorpusError =
+  | { kind: 'not_found'; store_id: string; version: string }
+  | { kind: 'already_exists'; store_id: string; version: string }
+  | { kind: 'storage_error'; cause: Error; operation: string }
+  | { kind: 'decode_error'; cause: Error }
+  | { kind: 'encode_error'; cause: Error }
+  | { kind: 'hash_mismatch'; expected: string; actual: string }
+  | { kind: 'invalid_config'; message: string }
+  | { kind: 'validation_error'; cause: Error; message: string }
+  | { kind: 'observation_not_found'; id: string }
+```
+
+## Common Patterns
+
+```typescript
+// Deduplication is automatic - same content shares storage
+const r1 = await store.put({ name: 'Alice' })
+const r2 = await store.put({ name: 'Alice' })
+// r1.value.data_key === r2.value.data_key (same hash)
+
+// Lineage tracking
+await derived.put(processedData, { parents: [{ store_id: 'raw', version: src }] })
+
+// Async iteration
+for await (const meta of store.list({ limit: 100 })) versions.push(meta.version)
+
+// Error handling with pattern matching
+const message = match(
+  await store.get(version),
+  snapshot => `Found: ${snapshot.data.title}`,
+  error => error.kind === 'not_found' ? 'Not found' : `Error: ${error.kind}`
+)
+
+// Pipeline with early exit on error
+const processed = await pipe(store.get(version))
+  .map(s => s.data)
+  .flat_map(data => transform(data))
+  .tap(result => console.log('Transformed:', result))
+  .result()
+```
+
+## Links
+
+- Documentation: https://f0rbit.github.io/corpus
+- Repository: git+https://github.com/f0rbit/corpus.git
+
+
+---
+
+## Full Source Code
+
+### index.ts (Main Entry Point)
+
+```typescript
+export { create_corpus, create_store } from './corpus.js';
+
+export { create_memory_backend, type MemoryBackendOptions } from './backend/memory.js';
+export { create_cloudflare_backend, type CloudflareBackendConfig } from './backend/cloudflare.js';
+export { create_layered_backend, type LayeredBackendOptions } from './backend/layered.js';
+
+export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from './utils.js';
+
+export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
+
+export type {
+	ContentType,
+	ParentRef,
+	SnapshotMeta,
+	Snapshot,
+	DataHandle,
+	MetadataClient,
+	DataClient,
+	ListOpts,
+	Backend,
+	Codec,
+	Parser,
+	Store,
+	StoreDefinition,
+	DefineStoreOpts,
+	DataKeyContext,
+	PutOpts,
+	CorpusBuilder,
+	Corpus,
+	CorpusError,
+	Result,
+	CorpusEvent,
+	EventHandler,
+	ObservationsClient,
+} from './types.js';
+
+export { ok, err, define_store } from './types.js';
+
+export {
+	match,
+	unwrap_or,
+	unwrap,
+	unwrap_err,
+	try_catch,
+	try_catch_async,
+	fetch_result,
+	pipe,
+	to_nullable,
+	to_fallback,
+	null_on,
+	fallback_on,
+	format_error,
+	at,
+	first,
+	last,
+	merge_deep,
+	type DeepPartial,
+	type FetchError,
+	type Pipe,
+} from './result.js';
+
+export { Semaphore, parallel_map } from './concurrency.js';
+
+export * from './observations/index.js';
+
+export { createCorpusInfra, type CorpusInfra, type CorpusInfraConfig } from './sst.js';
+
+```
+
+---
+
+### types.ts (Type Definitions)
+
+```typescript
+/**
+ * @module Types
+ * @description Type definitions for the corpus library.
+ */
+
+import type {
+  SnapshotPointer,
+  Observation,
+  ObservationMeta,
+  ObservationTypeDef,
+  ObservationPutOpts,
+  ObservationQueryOpts
+} from './observations/types.js';
+
+/**
+ * Error types that can occur during Corpus operations.
+ * @category Types
+ * @group Error Types
+ * 
+ * Uses discriminated unions for type-safe error handling via the `kind` field:
+ * - `not_found` - Requested snapshot or data does not exist
+ * - `already_exists` - Attempted to create a snapshot that already exists
+ * - `storage_error` - Backend storage operation failed (includes cause and operation name)
+ * - `decode_error` - Failed to decode data using the store's codec
+ * - `encode_error` - Failed to encode data using the store's codec
+ * - `hash_mismatch` - Content hash verification failed (data corruption)
+ * - `invalid_config` - Configuration error during setup
+ * 
+ * @example
+ * ```ts
+ * const result = await store.get('nonexistent')
+ * if (!result.ok) {
+ *   switch (result.error.kind) {
+ *     case 'not_found':
+ *       console.log(`Version ${result.error.version} not found`)
+ *       break
+ *     case 'storage_error':
+ *       console.log(`Storage failed during ${result.error.operation}:`, result.error.cause)
+ *       break
+ *   }
+ * }
+ * ```
+ */
+export type CorpusError =
+  | { kind: 'not_found'; store_id: string; version: string }
+  | { kind: 'already_exists'; store_id: string; version: string }
+  | { kind: 'storage_error'; cause: Error; operation: string }
+  | { kind: 'decode_error'; cause: Error }
+  | { kind: 'encode_error'; cause: Error }
+  | { kind: 'hash_mismatch'; expected: string; actual: string }
+  | { kind: 'invalid_config'; message: string }
+  | { kind: 'validation_error'; cause: Error; message: string }
+  | { kind: 'observation_not_found'; id: string }
+
+/**
+ * A discriminated union representing either success or failure.
+ * @category Types
+ * @group Result Types
+ */
+export type Result<T, E = CorpusError> =
+  | { ok: true; value: T }
+  | { ok: false; error: E }
+
+/**
+ * Creates a successful Result containing a value.
+ * 
+ * @category Core
+ * @group Result Helpers
+ * @param value - The success value to wrap
+ * @returns A Result with `ok: true` and the value
+ * 
+ * @example
+ * ```ts
+ * function divide(a: number, b: number): Result<number, string> {
+ *   if (b === 0) return err('Division by zero')
+ *   return ok(a / b)
+ * }
+ * 
+ * const result = divide(10, 2)
+ * if (result.ok) {
+ *   console.log(result.value) // 5
+ * }
+ * ```
+ */
+export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
+
+/**
+ * Creates a failed Result containing an error.
+ * 
+ * @category Core
+ * @group Result Helpers
+ * @param error - The error to wrap
+ * @returns A Result with `ok: false` and the error
+ * 
+ * @example
+ * ```ts
+ * function parsePositive(s: string): Result<number, string> {
+ *   const n = parseInt(s, 10)
+ *   if (isNaN(n)) return err('Not a number')
+ *   if (n <= 0) return err('Must be positive')
+ *   return ok(n)
+ * }
+ * ```
+ */
+export const err = <E>(error: E): Result<never, E> => ({ ok: false, error })
+
+export type CorpusEvent =
+  | { type: 'meta_get'; store_id: string; version: string; found: boolean }
+  | { type: 'meta_put'; store_id: string; version: string }
+  | { type: 'meta_delete'; store_id: string; version: string }
+  | { type: 'meta_list'; store_id: string; count: number }
+  | { type: 'data_get'; store_id: string; version: string; found: boolean }
+  | { type: 'data_put'; store_id: string; version: string; size_bytes: number; deduplicated: boolean }
+  | { type: 'data_delete'; store_id: string; version: string }
+  | { type: 'snapshot_put'; store_id: string; version: string; content_hash: string; deduplicated: boolean }
+  | { type: 'snapshot_get'; store_id: string; version: string; found: boolean }
+  | { type: 'error'; error: CorpusError }
+
+export type EventHandler = (event: CorpusEvent) => void
+
+export type ContentType =
+  | "application/json"
+  | "text/plain"
+  | "text/xml"
+  | "image/png"
+  | "image/jpeg"
+  | "application/octet-stream"
+  | (string & {})
+
+export type ParentRef = {
+  store_id: string
+  version: string
+  role?: string
+}
+
+/**
+ * Metadata about a stored snapshot (without the actual data).
+ * 
+ * Key fields:
+ * - `store_id` - Which store this snapshot belongs to
+ * - `version` - Unique, time-sortable identifier for this snapshot
+ * - `content_hash` - SHA-256 hash of the encoded data (enables deduplication)
+ * - `data_key` - Key to retrieve the actual data from the backend
+ * - `parents` - Links to parent snapshots for building data lineage graphs
+ * - `tags` - Optional labels for filtering and organization
+ * 
+ * @category Types
+ * @group Snapshot Types
+ * @example
+ * ```ts
+ * const result = await store.put(data, {
+ *   parents: [{ store_id: 'source', version: 'abc123' }],
+ *   tags: ['draft', 'reviewed']
+ * })
+ * 
+ * if (result.ok) {
+ *   const meta = result.value
+ *   console.log(`Stored ${meta.size_bytes} bytes as version ${meta.version}`)
+ * }
+ * ```
+ */
+export type SnapshotMeta = {
+  store_id: string
+  version: string
+  parents: ParentRef[]
+  created_at: Date
+  invoked_at?: Date
+  content_hash: string
+  content_type: ContentType
+  size_bytes: number
+  data_key: string
+  tags?: string[]
+}
+
+export type Snapshot<T = unknown> = {
+  meta: SnapshotMeta
+  data: T
+}
+
+/** @internal */
+export type DataHandle = {
+  stream: () => ReadableStream<Uint8Array>
+  bytes: () => Promise<Uint8Array>
+}
+
+/** @internal */
+export type MetadataClient = {
+  get: (store_id: string, version: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>
+  delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>
+  list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>
+  get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>
+  find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>
+}
+
+/** @internal */
+export type DataClient = {
+  get: (data_key: string) => Promise<Result<DataHandle, CorpusError>>
+  put: (data_key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<Result<void, CorpusError>>
+  delete: (data_key: string) => Promise<Result<void, CorpusError>>
+  exists: (data_key: string) => Promise<boolean>
+}
+
+export type ListOpts = {
+  limit?: number
+  cursor?: string
+  before?: Date
+  after?: Date
+  tags?: string[]
+}
+
+/**
+ * Interface that storage backends implement.
+ * 
+ * A Backend provides two clients:
+ * - `metadata` - For storing/retrieving snapshot metadata (versions, hashes, etc.)
+ * - `data` - For storing/retrieving the actual binary content
+ * 
+ * Built-in backends:
+ * - `create_memory_backend()` - In-memory, ephemeral storage
+ * - `create_file_backend()` - Local filesystem persistence
+ * - `create_cloudflare_backend()` - Cloudflare D1 + R2
+ * - `create_layered_backend()` - Combines multiple backends
+ * 
+ * @category Types
+ * @group Backend Types
+ * @example
+ * ```ts
+ * // Custom backend implementation
+ * const myBackend: Backend = {
+ *   metadata: { get, put, delete, list, get_latest, get_children, find_by_hash },
+ *   data: { get, put, delete, exists },
+ *   on_event: (event) => console.log('Event:', event.type)
+ * }
+ * ```
+ */
+export type Backend = {
+  metadata: MetadataClient
+  data: DataClient
+  observations?: ObservationsClient
+  on_event?: EventHandler
+}
+
+/**
+ * Serialization interface for encoding/decoding store data.
+ * 
+ * A Codec converts between typed values and binary data:
+ * - `encode` - Converts a value to bytes for storage
+ * - `decode` - Converts bytes back to a typed value
+ * - `content_type` - MIME type stored in metadata
+ * 
+ * Built-in codecs:
+ * - `json_codec(schema)` - JSON with Zod validation on decode
+ * - `text_codec()` - Plain UTF-8 text
+ * - `binary_codec()` - Raw binary pass-through
+ * 
+ * @category Types
+ * @group Codec Types
+ * @example
+ * ```ts
+ * // Custom codec for MessagePack
+ * const msgpack_codec = <T>(schema: ZodSchema<T>): Codec<T> => ({
+ *   content_type: 'application/msgpack',
+ *   encode: (value) => encode(value),
+ *   decode: (bytes) => schema.parse(decode(bytes))
+ * })
+ * ```
+ */
+export type Codec<T> = {
+  content_type: ContentType
+  encode: (value: T) => Uint8Array
+  decode: (bytes: Uint8Array) => T
+}
+
+/**
+ * Structural type for schema validators (Zod, Valibot, or custom).
+ * 
+ * Any object with a `parse(data: unknown) => T` method satisfies this interface.
+ * Used by `json_codec()` to validate data on decode without importing a specific library.
+ * 
+ * @category Types
+ * @group Codec Types
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * // Zod schemas satisfy Parser<T>
+ * const UserSchema = z.object({ name: z.string() })
+ * const codec = json_codec(UserSchema) // works!
+ * 
+ * // Custom parsers work too
+ * const myParser: Parser<number> = {
+ *   parse: (data) => {
+ *     if (typeof data !== 'number') throw new Error('Expected number')
+ *     return data
+ *   }
+ * }
+ * ```
+ */
+export type Parser<T> = { parse: (data: unknown) => T }
+
+/**
+ * A typed store for managing versioned data snapshots.
+ * 
+ * Stores provide the main API for reading and writing data:
+ * - `put(data, opts?)` - Store a new snapshot, returns metadata with version
+ * - `get(version)` - Retrieve a specific snapshot by version
+ * - `get_latest()` - Get the most recent snapshot
+ * - `get_meta(version)` - Get just the metadata (without data)
+ * - `list(opts?)` - Iterate over snapshot metadata with filtering
+ * - `delete(version)` - Remove a snapshot's metadata
+ * 
+ * Stores automatically deduplicate: storing the same content twice creates
+ * two metadata entries pointing to the same underlying data.
+ * 
+ * @category Types
+ * @group Store Types
+ */
+export type Store<T> = {
+  readonly id: string
+  readonly codec: Codec<T>
+  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
+  get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
+  get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>
+  list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>
+  delete: (version: string) => Promise<Result<void, CorpusError>>
+}
+
+export type PutOpts = {
+  parents?: ParentRef[]
+  invoked_at?: Date
+  tags?: string[]
+}
+
+/**
+ * Context passed to data_key_fn for generating custom storage paths.
+ * @internal
+ */
+export type DataKeyContext = {
+  store_id: string
+  version: string
+  content_hash: string
+  tags?: string[]
+}
+
+export type StoreDefinition<Id extends string, T> = {
+  id: Id
+  codec: Codec<T>
+  description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
+}
+
+export type DefineStoreOpts = {
+  description?: string
+  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+  data_key_fn?: (ctx: DataKeyContext) => string
+}
+
+/**
+ * Helper to define a type-safe store definition.
+ * 
+ * The `id` becomes the key in `corpus.stores`, providing type-safe access
+ * to the store after building the corpus.
+ * 
+ * @category Core
+ * @group Helpers
+ * @param id - Unique identifier for the store (becomes the key in corpus.stores)
+ * @param codec - Serialization codec for the store's data type
+ * @param opts - Optional configuration (description, custom data_key_fn)
+ * @returns A StoreDefinition to pass to `create_corpus().with_store()`
+ * 
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * const PostSchema = z.object({
+ *   title: z.string(),
+ *   body: z.string(),
+ *   published: z.boolean()
+ * })
+ * 
+ * const posts = define_store('posts', json_codec(PostSchema), { description: 'Blog posts' })
+ * 
+ * // With custom path generation based on tags
+ * const hansard = define_store('hansard', text_codec(), {
+ *   data_key_fn: (ctx) => {
+ *     const date = ctx.tags?.find(t => t.startsWith('date:'))?.slice(5) ?? 'unknown'
+ *     return `australia-house/raw/${date}/${ctx.version}`
+ *   }
+ * })
+ * 
+ * const corpus = create_corpus()
+ *   .with_backend(backend)
+ *   .with_store(posts)
+ *   .build()
+ * 
+ * // Type-safe: corpus.stores.posts expects Post type
+ * await corpus.stores.posts.put({ title: 'Hello', body: '...', published: true })
+ * ```
+ */
+export function define_store<Id extends string, T>(
+  id: Id,
+  codec: Codec<T>,
+  opts?: DefineStoreOpts | string
+): StoreDefinition<Id, T> {
+  // Support old signature: define_store(id, codec, description)
+  if (typeof opts === 'string') {
+    return { id, codec, description: opts }
+  }
+  return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn }
+}
+
+/** @internal */
+export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
+  with_backend: (backend: Backend) => CorpusBuilder<Stores>
+  with_store: <Id extends string, T>(
+    definition: StoreDefinition<Id, T>
+  ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>
+  build: () => Corpus<Stores>
+}
+
+export type Corpus<Stores extends Record<string, Store<any>> = Record<string, Store<any>>> = {
+  stores: Stores
+  metadata: MetadataClient
+  data: DataClient
+  observations?: ObservationsClient
+  create_pointer: (store_id: string, version: string, path?: string, span?: { start: number; end: number }) => SnapshotPointer
+  resolve_pointer: <T>(pointer: SnapshotPointer) => Promise<Result<T, CorpusError>>
+  is_superseded: (pointer: SnapshotPointer) => Promise<boolean>
+}
+
+/**
+ * Client interface for managing observations.
+ * 
+ * Observations are structured facts that point back to specific locations
+ * in versioned content. The ObservationsClient provides CRUD operations
+ * with type-safe validation via ObservationTypeDef schemas.
+ * 
+ * Key operations:
+ * - `put` - Create a new observation with validated content
+ * - `get` - Retrieve a single observation by ID
+ * - `query` / `query_meta` - Filter observations with various criteria
+ * - `delete` / `delete_by_source` - Remove observations
+ * - `is_stale` - Check if source content has been superseded
+ * 
+ * @category Types
+ * @group Observation Types
+ * 
+ * @example
+ * ```ts
+ * // Define observation type
+ * const entity_mention = define_observation_type('entity_mention', EntitySchema)
+ * 
+ * // Create observation
+ * const result = await observations.put(entity_mention, {
+ *   source: { store_id: 'hansard', version: 'abc123', path: '$.speeches[0]' },
+ *   content: { entity: 'Climate Change', entity_type: 'topic' },
+ *   confidence: 0.95
+ * })
+ * 
+ * // Query observations
+ * for await (const obs of observations.query({ type: 'entity_mention' })) {
+ *   console.log(obs.content)
+ * }
+ * ```
+ */
+export type ObservationsClient = {
+  put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
+  get: (id: string) => Promise<Result<Observation, CorpusError>>
+  query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>
+  query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>
+  delete: (id: string) => Promise<Result<void, CorpusError>>
+  delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>
+  is_stale: (pointer: SnapshotPointer) => Promise<boolean>
+}
+
+```
+
+---
+
+### corpus.ts (Core Implementation)
+
+```typescript
+/**
+ * @module Core
+ * @description Core corpus and store creation functions.
+ */
+
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types.js';
+import type { ObservationTypeDef, SnapshotPointer } from './observations/types.js';
+import { ok, err } from './types.js';
+import { compute_hash, generate_version } from './utils.js';
+import { create_pointer, resolve_path, apply_span } from './observations/utils.js';
+
+/**
+ * Creates a typed Store instance bound to a Backend.
+ * @category Core
+ * @group Builders
+ * 
+ * Each store manages versioned snapshots of data with automatic deduplication:
+ * when the same content is stored twice, only one copy of the data is kept
+ * (identified by content hash), though separate metadata entries are created.
+ * 
+ * Stores are typically created via `create_corpus().with_store()` rather than
+ * directly, which provides type-safe access through `corpus.stores.<id>`.
+ * 
+ * @param backend - The storage backend for persistence
+ * @param definition - Store configuration including id and codec
+ * @returns A Store instance for the specified type
+ * 
+ * @example
+ * ```ts
+ * const backend = create_memory_backend()
+ * const users = define_store('users', json_codec(UserSchema))
+ * const store = create_store(backend, users)
+ * 
+ * // Store a snapshot
+ * const result = await store.put({ name: 'Alice', email: 'alice@example.com' })
+ * if (result.ok) {
+ *   console.log('Stored version:', result.value.version)
+ * }
+ * 
+ * // Storing identical content reuses the same data_key (deduplication)
+ * const result2 = await store.put({ name: 'Alice', email: 'alice@example.com' })
+ * // result.value.data_key === result2.value.data_key (same content hash)
+ * ```
+ */
+export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
+  const { id, codec, data_key_fn } = definition
+  
+  function emit(event: Parameters<NonNullable<Backend['on_event']>>[0]) {
+    backend.on_event?.(event)
+  }
+
+  function make_data_key(ctx: DataKeyContext): string {
+    if (data_key_fn) {
+      return data_key_fn(ctx)
+    }
+    return `${ctx.store_id}/${ctx.content_hash}`
+  }
+
+  return {
+    id,
+    codec,
+
+    async put(data, opts): Promise<Result<SnapshotMeta, CorpusError>> {
+      const version = generate_version()
+      
+      let bytes: Uint8Array
+      try {
+        bytes = codec.encode(data)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+        emit({ type: 'error', error })
+        return err(error)
+      }
+
+      const content_hash = await compute_hash(bytes)
+      const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
+      
+      // deduplication: reuse existing data_key if content already exists
+      const existing = await backend.metadata.find_by_hash(id, content_hash)
+      const deduplicated = existing !== null
+      const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
+
+      if (!deduplicated) {
+        const data_result = await backend.data.put(data_key, bytes)
+        if (!data_result.ok) {
+          emit({ type: 'error', error: data_result.error })
+          return data_result
+        }
+      }
+
+      emit({ type: 'data_put', store_id: id, version, size_bytes: bytes.length, deduplicated })
+
+      const meta: SnapshotMeta = {
+        store_id: id,
+        version,
+        parents: opts?.parents ?? [],
+        created_at: new Date(),
+        invoked_at: opts?.invoked_at,
+        content_hash,
+        content_type: codec.content_type,
+        size_bytes: bytes.length,
+        data_key,
+        tags: opts?.tags,
+      }
+
+      const meta_result = await backend.metadata.put(meta)
+      if (!meta_result.ok) {
+        emit({ type: 'error', error: meta_result.error })
+        return meta_result
+      }
+
+      emit({ type: 'snapshot_put', store_id: id, version, content_hash, deduplicated })
+      return ok(meta)
+    },
+
+    async get(version): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+      const meta_result = await backend.metadata.get(id, version)
+      if (!meta_result.ok) {
+        emit({ type: 'snapshot_get', store_id: id, version, found: false })
+        return meta_result
+      }
+
+      const meta = meta_result.value
+      const data_result = await backend.data.get(meta.data_key)
+      if (!data_result.ok) {
+        emit({ type: 'error', error: data_result.error })
+        return data_result
+      }
+
+      const bytes = await data_result.value.bytes()
+      let data: T
+      try {
+        data = codec.decode(bytes)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+        emit({ type: 'error', error })
+        return err(error)
+      }
+
+      emit({ type: 'snapshot_get', store_id: id, version, found: true })
+      return ok({ meta, data })
+    },
+
+    async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+      const meta_result = await backend.metadata.get_latest(id)
+      if (!meta_result.ok) {
+        return meta_result
+      }
+
+      const meta = meta_result.value
+      const data_result = await backend.data.get(meta.data_key)
+      if (!data_result.ok) {
+        return data_result
+      }
+
+      const bytes = await data_result.value.bytes()
+      let data: T
+      try {
+        data = codec.decode(bytes)
+      } catch (cause) {
+        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+        emit({ type: 'error', error })
+        return err(error)
+      }
+
+      return ok({ meta, data })
+    },
+
+    async get_meta(version): Promise<Result<SnapshotMeta, CorpusError>> {
+      return backend.metadata.get(id, version)
+    },
+
+    list(opts) {
+      return backend.metadata.list(id, opts)
+    },
+
+    async delete(version): Promise<Result<void, CorpusError>> {
+      const meta_result = await backend.metadata.get(id, version)
+      if (!meta_result.ok) {
+        return meta_result
+      }
+
+      const delete_meta_result = await backend.metadata.delete(id, version)
+      if (!delete_meta_result.ok) {
+        return delete_meta_result
+      }
+
+      emit({ type: 'meta_delete', store_id: id, version })
+      return ok(undefined)
+    },
+  }
+}
+
+/**
+ * Creates a new Corpus instance using the builder pattern.
+ * 
+ * A Corpus is a collection of typed stores backed by a storage backend.
+ * Use the builder chain to configure: `with_backend()` → `with_store()` → `build()`.
+ * 
+ * @category Core
+ * @group Builders
+ * @returns A CorpusBuilder to configure and build the Corpus
+ * 
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * const UserSchema = z.object({ name: z.string(), email: z.string() })
+ * const users = define_store('users', json_codec(UserSchema))
+ * const notes = define_store('notes', text_codec())
+ * 
+ * const corpus = create_corpus()
+ *   .with_backend(create_memory_backend())
+ *   .with_store(users)
+ *   .with_store(notes)
+ *   .build()
+ * 
+ * // Type-safe access to stores
+ * await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
+ * await corpus.stores.notes.put('Hello, world!')
+ * 
+ * // With observations
+ * const corpus_with_obs = create_corpus()
+ *   .with_backend(create_memory_backend())
+ *   .with_store(users)
+ *   .with_observations([EntityType, SentimentType])
+ *   .build()
+ * 
+ * // Pointer utilities
+ * const pointer = corpus_with_obs.create_pointer('users', 'v123', '$.name')
+ * const value = await corpus_with_obs.resolve_pointer(pointer)
+ * ```
+ */
+export function create_corpus(): CorpusBuilder<{}> {
+  let backend: Backend | null = null
+  const definitions: StoreDefinition<string, any>[] = []
+  let observation_types: ObservationTypeDef<unknown>[] = []
+
+  const builder: CorpusBuilder<any> = {
+    with_backend(b) {
+      backend = b
+      return builder
+    },
+
+    with_store(definition) {
+      definitions.push(definition)
+      return builder
+    },
+
+    with_observations(types) {
+      observation_types = types
+      return builder
+    },
+
+    build() {
+      if (!backend) {
+        throw new Error('Backend is required. Call with_backend() first.')
+      }
+
+      const b = backend
+      
+      const stores: Record<string, Store<any>> = {}
+      for (const def of definitions) {
+        stores[def.id] = create_store(b, def)
+      }
+
+      const observations_client = observation_types.length > 0 && 'observations' in b
+        ? (b as Backend & { observations: ObservationsClient }).observations
+        : undefined
+
+      async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
+        const store = stores[pointer.store_id]
+        if (!store) {
+          return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
+        }
+
+        const snapshot_result = await store.get(pointer.version)
+        if (!snapshot_result.ok) return snapshot_result
+
+        let value: unknown = snapshot_result.value.data
+
+        if (pointer.path) {
+          const path_result = resolve_path(value, pointer.path)
+          if (!path_result.ok) return path_result
+          value = path_result.value
+        }
+
+        if (pointer.span && typeof value === 'string') {
+          const span_result = apply_span(value, pointer.span)
+          if (!span_result.ok) return span_result
+          value = span_result.value
+        }
+
+        return ok(value as T)
+      }
+
+      async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
+        if (!observations_client?.is_stale) return false
+        return observations_client.is_stale(pointer)
+      }
+
+      return {
+        stores,
+        metadata: b.metadata,
+        data: b.data,
+        observations: observations_client,
+        create_pointer,
+        resolve_pointer: resolve_pointer_impl,
+        is_superseded: is_superseded_impl,
+      } as Corpus<any>
+    },
+  }
+
+  return builder as CorpusBuilder<{}>
+}
+
+```
+
+---
+
+### result.ts (Result Utilities)
+
+```typescript
+/**
+ * @module Result
+ * @description Extended utilities for working with Result types.
+ *
+ * Provides functional utilities for error handling without exceptions:
+ * - Pattern matching with `match`
+ * - Safe unwrapping with `unwrap_or`, `unwrap`, `unwrap_err`
+ * - Exception-to-Result conversion with `try_catch`, `try_catch_async`
+ * - Fetch wrapper with `fetch_result`
+ * - Composable pipelines with `pipe`
+ */
+
+import { ok, err, type Result } from './types.js';
+
+/**
+ * Pattern match on a Result, extracting the value with appropriate handler.
+ *
+ * @param result - The Result to match on
+ * @param on_ok - Handler for success case
+ * @param on_err - Handler for error case
+ * @returns The return value of the matching handler
+ *
+ * @example
+ * ```ts
+ * const result = await fetchUser(id)
+ * const message = match(
+ *   result,
+ *   user => `Hello, ${user.name}!`,
+ *   error => `Failed: ${error.message}`
+ * )
+ * ```
+ */
+export const match = <T, E, R>(result: Result<T, E>, on_ok: (value: T) => R, on_err: (error: E) => R): R => {
+	if (result.ok) return on_ok(result.value);
+	return on_err(result.error);
+};
+
+/**
+ * Extract value from Result, returning default if error.
+ *
+ * @param result - The Result to unwrap
+ * @param default_value - Value to return if Result is an error
+ * @returns The success value or default
+ *
+ * @example
+ * ```ts
+ * const users = unwrap_or(await fetchUsers(), [])
+ * ```
+ */
+export const unwrap_or = <T, E>(result: Result<T, E>, default_value: T): T => (result.ok ? result.value : default_value);
+
+/**
+ * Extract value from Result, throwing if error.
+ * Use only when you're certain the Result is Ok, or in tests.
+ *
+ * @param result - The Result to unwrap
+ * @returns The success value
+ * @throws Error if Result is an error
+ *
+ * @example
+ * ```ts
+ * // In tests
+ * const user = unwrap(await createUser(data))
+ * expect(user.name).toBe('Alice')
+ * ```
+ */
+export const unwrap = <T, E>(result: Result<T, E>): T => {
+	if (!result.ok) throw new Error(`unwrap called on error result: ${JSON.stringify(result.error)}`);
+	return result.value;
+};
+
+/**
+ * Extract error from Result, throwing if Ok.
+ * Use only when you're certain the Result is Err, or in tests.
+ *
+ * @param result - The Result to unwrap
+ * @returns The error value
+ * @throws Error if Result is Ok
+ *
+ * @example
+ * ```ts
+ * // In tests
+ * const error = unwrap_err(await createUser(invalidData))
+ * expect(error.kind).toBe('validation_error')
+ * ```
+ */
+export const unwrap_err = <T, E>(result: Result<T, E>): E => {
+	if (result.ok) throw new Error(`unwrap_err called on ok result: ${JSON.stringify(result.value)}`);
+	return result.error;
+};
+
+/**
+ * Execute a function and convert exceptions to Result.
+ *
+ * @param fn - Function to execute
+ * @param on_error - Transform caught exception to error type
+ * @returns Result containing success value or transformed error
+ *
+ * @example
+ * ```ts
+ * const result = try_catch(
+ *   () => JSON.parse(input),
+ *   e => ({ kind: 'parse_error', message: format_error(e) })
+ * )
+ * ```
+ */
+export const try_catch = <T, E>(fn: () => T, on_error: (e: unknown) => E): Result<T, E> => {
+	try {
+		return ok(fn());
+	} catch (e) {
+		return err(on_error(e));
+	}
+};
+
+/**
+ * Execute an async function and convert exceptions to Result.
+ *
+ * @param fn - Async function to execute
+ * @param on_error - Transform caught exception to error type
+ * @returns Promise of Result containing success value or transformed error
+ *
+ * @example
+ * ```ts
+ * const result = await try_catch_async(
+ *   () => db.query('SELECT * FROM users'),
+ *   e => ({ kind: 'database_error', cause: e })
+ * )
+ * ```
+ */
+export const try_catch_async = async <T, E>(fn: () => Promise<T>, on_error: (e: unknown) => E): Promise<Result<T, E>> => {
+	try {
+		return ok(await fn());
+	} catch (e) {
+		return err(on_error(e));
+	}
+};
+
+/**
+ * Error types for fetch operations.
+ */
+export type FetchError = { type: "network"; cause: unknown } | { type: "http"; status: number; status_text: string };
+
+/**
+ * Fetch wrapper that returns Result instead of throwing.
+ *
+ * @param input - URL or Request to fetch
+ * @param init - Fetch options
+ * @param on_error - Transform FetchError to your error type
+ * @param parse_body - Custom body parser (defaults to JSON)
+ * @returns Promise of Result with parsed response or error
+ *
+ * @example
+ * ```ts
+ * const result = await fetch_result(
+ *   'https://api.example.com/users',
+ *   { headers: { Authorization: `Bearer ${token}` } },
+ *   e => e.type === 'http' ? `HTTP ${e.status}` : 'Network error'
+ * )
+ * ```
+ */
+export const fetch_result = async <T, E>(input: string | URL | Request, init: RequestInit | undefined, on_error: (e: FetchError) => E, parse_body: (response: Response) => Promise<T> = r => r.json() as Promise<T>): Promise<Result<T, E>> => {
+	try {
+		const response = await fetch(input, init);
+		if (!response.ok) {
+			return err(on_error({ type: "http", status: response.status, status_text: response.statusText }));
+		}
+		return ok(await parse_body(response));
+	} catch (e) {
+		return err(on_error({ type: "network", cause: e }));
+	}
+};
+
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * A composable pipeline for chaining Result operations.
+ *
+ * All operations are lazy - nothing executes until `.result()` or `.unwrap_or()` is called.
+ *
+ * @example
+ * ```ts
+ * const user = await pipe(fetchUser(id))
+ *   .map(user => user.profile)
+ *   .flat_map(profile => fetchAvatar(profile.avatar_id))
+ *   .map(avatar => avatar.url)
+ *   .unwrap_or('/default-avatar.png')
+ * ```
+ */
+export type Pipe<T, E> = {
+	/** Transform the success value */
+	map: <U>(fn: (value: T) => U) => Pipe<U, E>;
+	/** Transform the success value with an async function */
+	map_async: <U>(fn: (value: T) => Promise<U>) => Pipe<U, E>;
+	/** Chain with another Result-returning operation */
+	flat_map: <U>(fn: (value: T) => MaybePromise<Result<U, E>>) => Pipe<U, E>;
+	/** Transform the error value */
+	map_err: <F>(fn: (error: E) => F) => Pipe<T, F>;
+	/** Execute side effect on success (logging, metrics) */
+	tap: (fn: (value: T) => MaybePromise<void>) => Pipe<T, E>;
+	/** Execute side effect on error */
+	tap_err: (fn: (error: E) => MaybePromise<void>) => Pipe<T, E>;
+	/** Extract value with fallback */
+	unwrap_or: (default_value: T) => Promise<T>;
+	/** Get the underlying Result */
+	result: () => Promise<Result<T, E>>;
+};
+
+const create_pipe = <T, E>(promised: Promise<Result<T, E>>): Pipe<T, E> => ({
+	map: <U>(fn: (value: T) => U): Pipe<U, E> =>
+		create_pipe(
+			promised.then((r): Result<U, E> => {
+				if (r.ok) return ok(fn(r.value));
+				return err(r.error);
+			})
+		),
+	map_async: <U>(fn: (value: T) => Promise<U>): Pipe<U, E> =>
+		create_pipe(
+			promised.then(async (r): Promise<Result<U, E>> => {
+				if (r.ok) return ok(await fn(r.value));
+				return err(r.error);
+			})
+		),
+	flat_map: <U>(fn: (value: T) => MaybePromise<Result<U, E>>): Pipe<U, E> =>
+		create_pipe(
+			promised.then((r): MaybePromise<Result<U, E>> => {
+				if (r.ok) return fn(r.value);
+				return err(r.error);
+			})
+		),
+	map_err: <F>(fn: (error: E) => F): Pipe<T, F> =>
+		create_pipe(
+			promised.then((r): Result<T, F> => {
+				if (r.ok) return ok(r.value);
+				return err(fn(r.error));
+			})
+		),
+	tap: (fn: (value: T) => MaybePromise<void>): Pipe<T, E> =>
+		create_pipe(
+			promised.then(async (r): Promise<Result<T, E>> => {
+				if (r.ok) await fn(r.value);
+				return r;
+			})
+		),
+	tap_err: (fn: (error: E) => MaybePromise<void>): Pipe<T, E> =>
+		create_pipe(
+			promised.then(async (r): Promise<Result<T, E>> => {
+				if (!r.ok) await fn(r.error);
+				return r;
+			})
+		),
+	unwrap_or: (default_value: T): Promise<T> => promised.then(r => (r.ok ? r.value : default_value)),
+	result: (): Promise<Result<T, E>> => promised,
+});
+
+/**
+ * Create a composable pipeline from a Result or Promise<Result>.
+ *
+ * @param initial - Starting Result value (sync or async)
+ * @returns A Pipe for chaining operations
+ *
+ * @example
+ * ```ts
+ * // From existing Result
+ * const result = await pipe(ok(42))
+ *   .map(n => n * 2)
+ *   .result()
+ *
+ * // From async operation
+ * const user = await pipe(fetchUser(id))
+ *   .flat_map(u => fetchProfile(u.id))
+ *   .result()
+ * ```
+ */
+export const pipe = <T, E>(initial: MaybePromise<Result<T, E>>): Pipe<T, E> => create_pipe(Promise.resolve(initial));
+
+/** Create a pipe starting with an Ok value */
+pipe.ok = <T>(value: T): Pipe<T, never> => pipe(ok(value));
+
+/** Create a pipe starting with an Err value */
+pipe.err = <E>(error: E): Pipe<never, E> => pipe(err(error));
+
+/** Create a pipe from a function that may throw */
+pipe.try = <T, E>(fn: () => Promise<T>, on_error: (e: unknown) => E): Pipe<T, E> => pipe(try_catch_async(fn, on_error));
+
+/** Create a pipe from a fetch operation */
+pipe.fetch = <T, E>(input: string | URL | Request, init: RequestInit | undefined, on_error: (e: FetchError) => E, parse_body?: (response: Response) => Promise<T>): Pipe<T, E> => pipe(fetch_result(input, init, on_error, parse_body));
+
+/**
+ * Extract value from Result, returning null for any error.
+ * Use for "fetch single resource" patterns where not-found is expected.
+ *
+ * @param result - The Result to convert
+ * @returns The value or null
+ *
+ * @example
+ * ```ts
+ * const user = to_nullable(await store.get(userId))
+ * if (!user) return <NotFound />
+ * ```
+ */
+export const to_nullable = <T, E>(result: Result<T, E>): T | null => (result.ok ? result.value : null);
+
+/**
+ * Extract value from Result, returning fallback for any error.
+ * Use for list endpoints where empty array is acceptable.
+ *
+ * @param result - The Result to convert
+ * @param fallback - Value to return on error
+ * @returns The value or fallback
+ *
+ * @example
+ * ```ts
+ * const items = to_fallback(await store.list(), [])
+ * ```
+ */
+export const to_fallback = <T, E>(result: Result<T, E>, fallback: T): T => (result.ok ? result.value : fallback);
+
+/**
+ * Return null if error matches predicate, otherwise throw the error.
+ * Use for 404-as-null pattern specifically.
+ *
+ * @param result - The Result to check
+ * @param predicate - Returns true for expected errors (e.g., not_found)
+ * @returns The value or null for expected errors
+ * @throws The error if predicate returns false
+ *
+ * @example
+ * ```ts
+ * const user = null_on(
+ *   await store.get(id),
+ *   e => e.kind === 'not_found'
+ * )
+ * ```
+ */
+export const null_on = <T, E>(result: Result<T, E>, predicate: (error: E) => boolean): T | null => {
+	if (result.ok) return result.value;
+	if (predicate(result.error)) return null;
+	throw result.error;
+};
+
+/**
+ * Return fallback if error matches predicate, otherwise throw.
+ *
+ * @param result - The Result to check
+ * @param predicate - Returns true for expected errors
+ * @param fallback - Value to return for expected errors
+ * @returns The value or fallback for expected errors
+ * @throws The error if predicate returns false
+ *
+ * @example
+ * ```ts
+ * const count = fallback_on(
+ *   await store.count(),
+ *   e => e.kind === 'not_found',
+ *   0
+ * )
+ * ```
+ */
+export const fallback_on = <T, E>(result: Result<T, E>, predicate: (error: E) => boolean, fallback: T): T => {
+	if (result.ok) return result.value;
+	if (predicate(result.error)) return fallback;
+	throw result.error;
+};
+
+/**
+ * Format an unknown error to a string message.
+ *
+ * @param e - Any error value
+ * @returns A string representation
+ *
+ * @example
+ * ```ts
+ * try {
+ *   riskyOperation()
+ * } catch (e) {
+ *   console.error(format_error(e)) // Handles Error, string, or anything
+ * }
+ * ```
+ */
+export const format_error = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Recursively makes all properties of T optional.
+ *
+ * @example
+ * ```ts
+ * type Config = { api: { url: string; timeout: number } }
+ * type PartialConfig = DeepPartial<Config>
+ * // { api?: { url?: string; timeout?: number } }
+ * ```
+ */
+export type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+
+/**
+ * Deep merge two objects, with overrides taking precedence.
+ * Only merges plain objects; arrays and null are replaced entirely.
+ *
+ * @param base - The base object to merge into
+ * @param overrides - Partial object with values to override
+ * @returns A new object with merged values
+ *
+ * @example
+ * ```ts
+ * const config = merge_deep(
+ *   { api: { url: 'http://localhost', timeout: 5000 }, debug: false },
+ *   { api: { timeout: 10000 } }
+ * )
+ * // { api: { url: 'http://localhost', timeout: 10000 }, debug: false }
+ * ```
+ */
+export const merge_deep = <T extends Record<string, unknown>>(base: T, overrides: DeepPartial<T>): T => {
+	const result = { ...base };
+	for (const key in overrides) {
+		const value = overrides[key as keyof typeof overrides];
+		if (value !== undefined && typeof value === "object" && !Array.isArray(value) && value !== null) {
+			(result as Record<string, unknown>)[key] = merge_deep(result[key] as Record<string, unknown>, value as DeepPartial<Record<string, unknown>>);
+		} else if (value !== undefined) {
+			(result as Record<string, unknown>)[key] = value;
+		}
+	}
+	return result;
+};
+
+/**
+ * Safely access an array element by index, returning a Result.
+ * Unlike bracket notation, this never returns undefined for out-of-bounds access.
+ *
+ * @param array - The array to access
+ * @param index - The index to retrieve (must be non-negative)
+ * @returns Result containing the element or an index_out_of_bounds error
+ *
+ * @example
+ * ```ts
+ * const items = ['a', 'b', 'c']
+ * const second = at(items, 1)   // { ok: true, value: 'b' }
+ * const tenth = at(items, 10)   // { ok: false, error: { kind: 'index_out_of_bounds', index: 10, length: 3 } }
+ * ```
+ */
+export const at = <T>(array: readonly T[], index: number): Result<T, { kind: "index_out_of_bounds"; index: number; length: number }> => {
+	if (index < 0 || index >= array.length) {
+		return err({ kind: "index_out_of_bounds", index, length: array.length });
+	}
+	const element = array[index];
+	if (element === undefined) {
+		return err({ kind: "index_out_of_bounds", index, length: array.length });
+	}
+	return ok(element);
+};
+
+/**
+ * Safely get the first element of an array.
+ *
+ * @param array - The array to access
+ * @returns Result containing the first element or an empty_array error
+ *
+ * @example
+ * ```ts
+ * const head = first([1, 2, 3])  // { ok: true, value: 1 }
+ * const empty = first([])        // { ok: false, error: { kind: 'empty_array' } }
+ * ```
+ */
+export const first = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }> => {
+	if (array.length === 0) {
+		return err({ kind: "empty_array" });
+	}
+	return ok(array[0] as T);
+};
+
+/**
+ * Safely get the last element of an array.
+ *
+ * @param array - The array to access
+ * @returns Result containing the last element or an empty_array error
+ *
+ * @example
+ * ```ts
+ * const tail = last([1, 2, 3])  // { ok: true, value: 3 }
+ * const empty = last([])        // { ok: false, error: { kind: 'empty_array' } }
+ * ```
+ */
+export const last = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }> => {
+	if (array.length === 0) {
+		return err({ kind: "empty_array" });
+	}
+	return ok(array[array.length - 1] as T);
+};
+
+
+```
+
+---
+
+### utils.ts (Utilities)
+
+```typescript
+/**
+ * @module Utilities
+ * @description Utility functions for hashing, versioning, and codecs.
+ */
+
+import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
+
+/**
+ * Computes the SHA-256 hash of binary data.
+ * @category Utilities
+ * @group Hashing
+ * 
+ * Returns a lowercase hexadecimal string (64 characters).
+ * Used internally for content-addressable storage and deduplication.
+ * 
+ * @param data - The binary data to hash
+ * @returns A lowercase hex string of the SHA-256 hash
+ * 
+ * @example
+ * ```ts
+ * const data = new TextEncoder().encode('Hello, world!')
+ * const hash = await compute_hash(data)
+ * // => '315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3'
+ * ```
+ */
+export async function compute_hash(data: Uint8Array): Promise<string> {
+  const hash_buffer = await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>)
+  const hash_array = new Uint8Array(hash_buffer)
+  return Array.from(hash_array).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+let last_timestamp = 0
+let sequence = 0
+
+/**
+ * Generates a unique, time-sortable version string.
+ * 
+ * Format: base64url-encoded timestamp, with optional `.N` suffix when multiple
+ * versions are generated within the same millisecond.
+ * 
+ * Versions sort lexicographically in chronological order, making them suitable
+ * for use as database keys where ordering matters.
+ * 
+ * @category Utilities
+ * @group Versioning
+ * @returns A unique version string like `AZJx4vM` or `AZJx4vM.1`
+ * 
+ * @example
+ * ```ts
+ * const v1 = generate_version() // => 'AZJx4vM'
+ * const v2 = generate_version() // => 'AZJx4vM.1' (same millisecond)
+ * const v3 = generate_version() // => 'AZJx4vN' (next millisecond)
+ * 
+ * // Versions sort chronologically
+ * [v3, v1, v2].sort() // => [v1, v2, v3]
+ * ```
+ */
+export function generate_version(): string {
+  const now = Date.now()
+  
+  if (now === last_timestamp) {
+    sequence++
+  } else {
+    last_timestamp = now
+    sequence = 0
+  }
+  
+  // base64url encode the timestamp (no padding, url-safe)
+  const timestamp_bytes = new Uint8Array(8)
+  const view = new DataView(timestamp_bytes.buffer)
+  view.setBigUint64(0, BigInt(now), false) // big-endian for lexicographic sorting
+  
+  // trim leading zeros for compactness
+  let start = 0
+  while (start < 7 && timestamp_bytes[start] === 0) start++
+  const trimmed = timestamp_bytes.slice(start)
+  
+  const base64 = btoa(String.fromCharCode(...trimmed))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '')
+  
+  return sequence > 0 ? `${base64}.${sequence}` : base64
+}
+
+/**
+ * Creates a JSON codec with schema validation.
+ * 
+ * Data is serialized to JSON on encode and validated against the schema on decode.
+ * Works with both Zod 3.x and 4.x (uses structural typing, not Zod imports).
+ * 
+ * Note: Validation only happens on decode. Invalid data passed to encode will
+ * serialize but may fail validation when decoded later.
+ * 
+ * @category Codecs
+ * @group Codec Factories
+ * @param schema - A Zod schema (or any object with a `parse` method)
+ * @returns A Codec for JSON serialization with validation
+ * 
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * 
+ * const UserSchema = z.object({
+ *   id: z.string().uuid(),
+ *   name: z.string(),
+ *   createdAt: z.coerce.date()
+ * })
+ * 
+ * const codec = json_codec(UserSchema)
+ * const users = define_store('users', codec)
+ * 
+ * // Decoding validates and transforms data
+ * const bytes = codec.encode({ id: '...', name: 'Alice', createdAt: '2024-01-01' })
+ * const user = codec.decode(bytes) // createdAt is now a Date object
+ * ```
+ */
+export function json_codec<T>(schema: Parser<T>): Codec<T> {
+	return {
+		content_type: "application/json",
+		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
+		decode: (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
+	};
+}
+
+/**
+ * Creates a plain text codec using UTF-8 encoding.
+ * 
+ * No validation is performed - any string can be encoded and any valid
+ * UTF-8 bytes can be decoded.
+ * 
+ * @category Codecs
+ * @group Codec Factories
+ * @returns A Codec for plain text strings
+ * 
+ * @example
+ * ```ts
+ * const notes = define_store('notes', text_codec())
+ * 
+ * await corpus.stores.notes.put('Meeting notes for 2024-01-15...')
+ * 
+ * const result = await corpus.stores.notes.get_latest()
+ * if (result.ok) {
+ *   console.log(result.value.data) // string
+ * }
+ * ```
+ */
+export function text_codec(): Codec<string> {
+	return {
+		content_type: "text/plain",
+		encode: (value) => new TextEncoder().encode(value),
+		decode: (bytes) => new TextDecoder().decode(bytes),
+	};
+}
+
+/**
+ * Creates a pass-through codec for raw binary data.
+ * 
+ * No transformation is performed - bytes are stored and retrieved as-is.
+ * Use for images, PDFs, pre-serialized data, or any binary content.
+ * 
+ * @category Codecs
+ * @group Codec Factories
+ * @returns A Codec for raw binary data
+ * 
+ * @example
+ * ```ts
+ * const images = define_store('images', binary_codec())
+ * 
+ * // Store an image
+ * const imageData = await fetch('photo.png').then(r => r.arrayBuffer())
+ * await corpus.stores.images.put(new Uint8Array(imageData))
+ * 
+ * // Store pre-serialized protobuf
+ * const protoBytes = MyMessage.encode(message).finish()
+ * await corpus.stores.images.put(protoBytes)
+ * ```
+ */
+export function binary_codec(): Codec<Uint8Array> {
+	return {
+		content_type: "application/octet-stream",
+		encode: (value) => value,
+		decode: (bytes) => bytes,
+	};
+}
+
+/**
+ * Concatenate multiple Uint8Array chunks into a single array.
+ */
+export function concat_bytes(chunks: Uint8Array[]): Uint8Array {
+	const total = chunks.reduce((sum, c) => sum + c.length, 0)
+	const result = new Uint8Array(total)
+	let offset = 0
+	for (const chunk of chunks) {
+		result.set(chunk, offset)
+		offset += chunk.length
+	}
+	return result
+}
+
+/**
+ * Read a stream into a single Uint8Array.
+ */
+export async function stream_to_bytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+	const chunks: Uint8Array[] = []
+	const reader = stream.getReader()
+	while (true) {
+		const { done, value } = await reader.read()
+		if (done) break
+		chunks.push(value)
+	}
+	return concat_bytes(chunks)
+}
+
+/**
+ * Convert a stream or Uint8Array to Uint8Array.
+ */
+export async function to_bytes(data: ReadableStream<Uint8Array> | Uint8Array): Promise<Uint8Array> {
+	return data instanceof Uint8Array ? data : await stream_to_bytes(data)
+}
+
+/**
+ * Create an event emitter function from an optional handler.
+ */
+export function create_emitter(handler?: EventHandler): (event: CorpusEvent) => void {
+	return (event: CorpusEvent) => handler?.(event)
+}
+
+/**
+ * Configuration for a filter pipeline.
+ * @typeParam T - The type of items being filtered
+ * @typeParam Opts - The options type containing filter criteria
+ */
+export type FilterPipelineConfig<T, Opts> = {
+	filters: Array<{
+		key: keyof Opts
+		predicate: (item: T, optValue: NonNullable<Opts[keyof Opts]>) => boolean
+	}>
+	sort: (a: T, b: T) => number
+}
+
+/**
+ * Creates a reusable filter pipeline function.
+ * Applies filters based on options, sorts results, and applies optional limit.
+ * 
+ * @typeParam T - The type of items being filtered
+ * @typeParam Opts - The options type (must include optional limit)
+ * @param config - Filter definitions and sort function
+ * @returns A function that filters, sorts, and limits items
+ * 
+ * @example
+ * ```ts
+ * const filter_users = create_filter_pipeline<User, UserQueryOpts>({
+ *   filters: [
+ *     { key: 'role', predicate: (u, role) => u.role === role },
+ *     { key: 'active', predicate: (u, active) => u.active === active }
+ *   ],
+ *   sort: (a, b) => b.created_at.getTime() - a.created_at.getTime()
+ * })
+ * 
+ * const results = filter_users(users, { role: 'admin', limit: 10 })
+ * ```
+ */
+export function create_filter_pipeline<T, Opts extends { limit?: number }>(
+	config: FilterPipelineConfig<T, Opts>
+): (items: T[], opts: Opts) => T[] {
+	return (items, opts) => {
+		let filtered = items
+		for (const { key, predicate } of config.filters) {
+			const optValue = opts[key]
+			if (optValue !== undefined && optValue !== null) {
+				filtered = filtered.filter(item => predicate(item, optValue as NonNullable<Opts[keyof Opts]>))
+			}
+		}
+		filtered.sort(config.sort)
+		if (opts.limit) {
+			filtered = filtered.slice(0, opts.limit)
+		}
+		return filtered
+	}
+}
+
+const snapshot_filter_pipeline = create_filter_pipeline<SnapshotMeta, ListOpts>({
+	filters: [
+		{ key: 'before', predicate: (m, before) => m.created_at < (before as Date) },
+		{ key: 'after', predicate: (m, after) => m.created_at > (after as Date) },
+		{ key: 'tags', predicate: (m, tags) => (tags as string[]).length === 0 || (tags as string[]).every(tag => m.tags?.includes(tag)) }
+	],
+	sort: (a, b) => b.created_at.getTime() - a.created_at.getTime()
+})
+
+/**
+ * Filter and sort snapshot metadata based on list options.
+ * Used by in-memory storage implementations (memory backend, file backend).
+ */
+export function filter_snapshots(
+	metas: SnapshotMeta[],
+	opts: ListOpts = {}
+): SnapshotMeta[] {
+	return snapshot_filter_pipeline(metas, opts)
+}
+
+/**
+ * Parse a raw snapshot object (from JSON or database row) into a proper SnapshotMeta.
+ * Handles date string conversion and JSON parsing of array fields.
+ */
+export function parse_snapshot_meta(raw: {
+  store_id: string
+  version: string
+  data_key: string
+  created_at: string | Date
+  invoked_at?: string | Date | null
+  parents?: string | ParentRef[] | null
+  tags?: string | string[] | null
+  content_hash?: string
+  content_type?: string
+  size_bytes?: number
+}): SnapshotMeta {
+  return {
+    store_id: raw.store_id,
+    version: raw.version,
+    data_key: raw.data_key,
+    created_at: raw.created_at instanceof Date ? raw.created_at : new Date(raw.created_at),
+    invoked_at: raw.invoked_at 
+      ? (raw.invoked_at instanceof Date ? raw.invoked_at : new Date(raw.invoked_at))
+      : undefined,
+    parents: raw.parents
+      ? (typeof raw.parents === 'string' ? JSON.parse(raw.parents) : raw.parents)
+      : [],
+    tags: raw.tags
+      ? (typeof raw.tags === 'string' ? JSON.parse(raw.tags) : raw.tags)
+      : undefined,
+    content_hash: raw.content_hash ?? '',
+    content_type: (raw.content_type ?? 'application/octet-stream') as ContentType,
+    size_bytes: raw.size_bytes ?? 0,
+  }
+}
+
+```
+
+---
+
+### observations/types.ts (Observation Types)
+
+```typescript
+/**
+ * @module ObservationTypes
+ * @description Type definitions for the observations feature.
+ */
+
+import type { ZodType } from "zod";
+
+/**
+ * Universal address to versioned content within a corpus store.
+ *
+ * A SnapshotPointer identifies a specific location within a versioned snapshot:
+ * - `store_id` + `version` - Required: which snapshot
+ * - `path` - Optional: JSONPath expression to a specific element
+ * - `span` - Optional: character range within text content
+ *
+ * @category Types
+ * @group Observation Types
+ *
+ * @example
+ * ```ts
+ * // Point to entire snapshot
+ * const pointer: SnapshotPointer = {
+ *   store_id: 'hansard',
+ *   version: 'AZJx4vM'
+ * }
+ *
+ * // Point to specific speech within a transcript
+ * const speechPointer: SnapshotPointer = {
+ *   store_id: 'hansard',
+ *   version: 'AZJx4vM',
+ *   path: '$.content[0].speeches[2]'
+ * }
+ *
+ * // Point to text range within content
+ * const rangePointer: SnapshotPointer = {
+ *   store_id: 'hansard',
+ *   version: 'AZJx4vM',
+ *   path: '$.content[0].speeches[2].text',
+ *   span: { start: 100, end: 250 }
+ * }
+ * ```
+ */
+export type SnapshotPointer = {
+	store_id: string;
+	version: string;
+	path?: string;
+	span?: {
+		start: number;
+		end: number;
+	};
+};
+
+/**
+ * Definition for a typed observation schema.
+ *
+ * Created by `define_observation_type()` and passed to `observations.put()`.
+ * The schema validates observation content and provides type inference.
+ *
+ * @category Types
+ * @group Observation Types
+ */
+export type ObservationTypeDef<T> = {
+	readonly name: string;
+	readonly schema: ZodType<T>;
+};
+
+/**
+ * A stored observation record linking structured facts to versioned content.
+ *
+ * Observations are typed facts extracted from or computed about content:
+ * - `source` - Points to the content this observation is about
+ * - `content` - The typed observation data (validated by schema)
+ * - `confidence` - Optional confidence score (0.0 to 1.0)
+ * - `observed_at` - When the observation was made (vs when stored)
+ * - `derived_from` - Optional provenance chain for computed observations
+ *
+ * @category Types
+ * @group Observation Types
+ *
+ * @example
+ * ```ts
+ * const observation: Observation<EntityMention> = {
+ *   id: 'obs_abc123',
+ *   type: 'entity_mention',
+ *   source: { store_id: 'hansard', version: 'AZJx4vM', path: '$.speeches[0]' },
+ *   content: { entity: 'Climate Change', entity_type: 'topic' },
+ *   confidence: 0.95,
+ *   observed_at: new Date('2024-01-15'),
+ *   created_at: new Date(),
+ *   derived_from: [{ store_id: 'hansard', version: 'AZJx4vM' }]
+ * }
+ * ```
+ */
+export type Observation<T = unknown> = {
+	id: string;
+	type: string;
+	source: SnapshotPointer;
+	content: T;
+	confidence?: number;
+	observed_at?: Date;
+	created_at: Date;
+	derived_from?: SnapshotPointer[];
+};
+
+/**
+ * Observation metadata without content payload.
+ *
+ * Used for efficient listing operations where only metadata is needed.
+ *
+ * @category Types
+ * @group Observation Types
+ */
+export type ObservationMeta = Omit<Observation<never>, "content">;
+
+/**
+ * Options for creating a new observation.
+ *
+ * @category Types
+ * @group Observation Types
+ */
+export type ObservationPutOpts<T> = {
+	source: SnapshotPointer;
+	content: T;
+	confidence?: number;
+	observed_at?: Date;
+	derived_from?: SnapshotPointer[];
+};
+
+/**
+ * Filter for version-based observation filtering.
+ * - Set<string> or string[]: Include if version is in the collection
+ * - Function: Called with (store_id, version), return true to include
+ *
+ * @category Types
+ * @group Observation Types
+ *
+ * @example
+ * ```ts
+ * // Filter to specific versions
+ * const filter: VersionFilter = new Set(['v1', 'v2', 'v3'])
+ *
+ * // Or use an array
+ * const filter: VersionFilter = ['v1', 'v2', 'v3']
+ *
+ * // Or use a function for dynamic filtering
+ * const filter: VersionFilter = async (store_id, version) => {
+ *   const published = await db.query.published_reports.findFirst({
+ *     where: eq(published_reports.version, version)
+ *   });
+ *   return published !== null;
+ * };
+ * ```
+ */
+export type VersionFilter = Set<string> | string[] | ((store_id: string, version: string) => boolean | Promise<boolean>);
+
+/**
+ * Query options for filtering observations.
+ *
+ * @category Types
+ * @group Observation Types
+ *
+ * @example
+ * ```ts
+ * // Find recent entity mentions from a specific store
+ * const opts: ObservationQueryOpts = {
+ *   type: 'entity_mention',
+ *   source_store: 'hansard',
+ *   after: new Date('2024-01-01'),
+ *   limit: 100
+ * }
+ *
+ * // Filter to only published versions
+ * const versionOpts: ObservationQueryOpts = {
+ *   source_store: 'hansard',
+ *   version_filter: new Set(['v1', 'v2'])
+ * }
+ * ```
+ */
+export type ObservationQueryOpts = {
+	type?: string | string[];
+	source_store?: string;
+	source_version?: string;
+	source_prefix?: string;
+	after?: Date;
+	before?: Date;
+	created_after?: Date;
+	created_before?: Date;
+	limit?: number;
+	cursor?: string;
+	/**
+	 * Filter observations by version.
+	 * When provided, only observations whose source version passes the filter are included.
+	 *
+	 * - Set<string> or string[]: Include if version is in the collection
+	 * - Function: Called with (store_id, version), return true to include
+	 */
+	version_filter?: VersionFilter;
+};
+
+/**
+ * Utility type to extract the content type from an ObservationTypeDef.
+ *
+ * @category Types
+ * @group Observation Types
+ *
+ * @example
+ * ```ts
+ * const entity_mention = define_observation_type('entity_mention', EntityMentionSchema)
+ *
+ * type EntityMention = InferObservationContent<typeof entity_mention>
+ * // => { entity: string; entity_type: 'person' | 'organization' | ... }
+ * ```
+ */
+export type InferObservationContent<T> = T extends ObservationTypeDef<infer C> ? C : never;
+
+/**
+ * Defines a typed observation schema.
+ *
+ * Creates an ObservationTypeDef that provides:
+ * - Runtime validation via Zod schema
+ * - Compile-time type inference for content
+ * - Named type for querying and filtering
+ *
+ * @category Core
+ * @group Observation Helpers
+ * @param name - Unique identifier for this observation type
+ * @param schema - Zod schema for validating observation content
+ * @returns An ObservationTypeDef to pass to `observations.put()`
+ *
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ *
+ * const EntityMentionSchema = z.object({
+ *   entity: z.string(),
+ *   entity_type: z.enum(['person', 'organization', 'topic', 'location']),
+ *   context: z.string().optional()
+ * })
+ *
+ * const entity_mention = define_observation_type('entity_mention', EntityMentionSchema)
+ *
+ * // Type-safe usage
+ * await corpus.observations.put(entity_mention, {
+ *   source: { store_id: 'hansard', version: 'abc123' },
+ *   content: { entity: 'Parliament', entity_type: 'organization' }
+ * })
+ * ```
+ */
+export function define_observation_type<T>(name: string, schema: ZodType<T>): ObservationTypeDef<T> {
+	return { name, schema };
+}
+
+```
+
+---
+
+### observations/utils.ts (Observation Utilities)
+
+```typescript
+/**
+ * @module ObservationUtils
+ * @description Utility functions for working with SnapshotPointers and observations.
+ */
+
+import type { SnapshotPointer } from './types.js';
+import type { Result, CorpusError } from '../types.js';
+import { ok, err } from '../types.js';
+import { last, to_nullable } from '../result.js';
+
+/**
+ * Creates a SnapshotPointer to a location in a snapshot.
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param store_id - The store identifier
+ * @param version - The snapshot version
+ * @param path - Optional JSONPath expression to a specific element
+ * @param span - Optional character range within text content
+ * @returns A SnapshotPointer instance
+ * 
+ * @example
+ * ```ts
+ * // Point to entire snapshot
+ * const pointer = create_pointer('hansard', 'AZJx4vM')
+ * 
+ * // Point to specific element
+ * const element = create_pointer('hansard', 'AZJx4vM', '$.speeches[0]')
+ * 
+ * // Point to text range
+ * const range = create_pointer('hansard', 'AZJx4vM', '$.speeches[0].text', { start: 100, end: 250 })
+ * ```
+ */
+export function create_pointer(
+  store_id: string,
+  version: string,
+  path?: string,
+  span?: { start: number; end: number }
+): SnapshotPointer {
+  const pointer: SnapshotPointer = { store_id, version }
+  if (path !== undefined) pointer.path = path
+  if (span !== undefined) pointer.span = span
+  return pointer
+}
+
+/**
+ * Converts a SnapshotPointer to a stable string key for Map storage.
+ * 
+ * Format: `store_id:version[:path][:start-end]`
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param pointer - The pointer to convert
+ * @returns A string key suitable for use as a Map key
+ * 
+ * @example
+ * ```ts
+ * const key = pointer_to_key({ store_id: 'hansard', version: 'abc' })
+ * // => 'hansard:abc'
+ * 
+ * const pathKey = pointer_to_key({ store_id: 'hansard', version: 'abc', path: '$.foo' })
+ * // => 'hansard:abc:$.foo'
+ * 
+ * const spanKey = pointer_to_key({ store_id: 'hansard', version: 'abc', span: { start: 0, end: 10 } })
+ * // => 'hansard:abc:0-10'
+ * ```
+ */
+export function pointer_to_key(pointer: SnapshotPointer): string {
+  let key = `${pointer.store_id}:${pointer.version}`
+  if (pointer.path) key += `:${pointer.path}`
+  if (pointer.span) key += `:${pointer.span.start}-${pointer.span.end}`
+  return key
+}
+
+/**
+ * Parses a pointer key back to a SnapshotPointer.
+ * 
+ * Note: This is a best-effort parse - complex paths containing colons may not round-trip perfectly.
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param key - The string key to parse
+ * @returns A SnapshotPointer or null if parsing fails
+ * 
+ * @example
+ * ```ts
+ * const pointer = key_to_pointer('hansard:abc:$.foo:0-10')
+ * // => { store_id: 'hansard', version: 'abc', path: '$.foo', span: { start: 0, end: 10 } }
+ * 
+ * const simple = key_to_pointer('hansard:abc')
+ * // => { store_id: 'hansard', version: 'abc' }
+ * 
+ * const invalid = key_to_pointer('invalid')
+ * // => null
+ * ```
+ */
+export function key_to_pointer(key: string): SnapshotPointer | null {
+  const parts = key.split(':')
+  if (parts.length < 2) return null
+
+  const [store_id, version, ...rest] = parts
+  if (!store_id || !version) return null
+
+  const pointer: SnapshotPointer = { store_id, version }
+
+  if (rest.length === 0) return pointer
+
+  const last_part = to_nullable(last(rest))
+  if (!last_part) return pointer
+  const span_match = /^(\d+)-(\d+)$/.exec(last_part)
+
+  if (span_match) {
+    const [, start_str, end_str] = span_match
+    pointer.span = { start: parseInt(start_str!, 10), end: parseInt(end_str!, 10) }
+    const path_parts = rest.slice(0, -1)
+    if (path_parts.length > 0) pointer.path = path_parts.join(':')
+  } else {
+    pointer.path = rest.join(':')
+  }
+
+  return pointer
+}
+
+/**
+ * Resolves a JSONPath expression against a value.
+ * 
+ * Supports simple dot notation with array indices:
+ * - `$` or empty string - Returns the root value
+ * - `$.foo` - Property access
+ * - `$.foo.bar` - Nested property access
+ * - `$.foo[0]` - Array index access
+ * - `$.foo[0].bar` - Combined access
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param value - The value to resolve against
+ * @param path - The JSONPath expression
+ * @returns Result containing the resolved value or an error
+ * 
+ * @example
+ * ```ts
+ * const data = { speeches: [{ text: 'Hello', speaker: 'Alice' }] }
+ * 
+ * const result = resolve_path(data, '$.speeches[0].text')
+ * if (result.ok) console.log(result.value) // 'Hello'
+ * 
+ * const root = resolve_path(data, '$')
+ * if (root.ok) console.log(root.value) // { speeches: [...] }
+ * ```
+ */
+export function resolve_path<T = unknown>(value: unknown, path: string): Result<T, CorpusError> {
+  if (!path || path === '$') return ok(value as T)
+
+  const normalized = path.startsWith('$.')
+    ? path.slice(2)
+    : path.startsWith('$')
+      ? path.slice(1)
+      : path
+
+  if (!normalized) return ok(value as T)
+
+  const segments = normalized.split(/\.|\[|\]/).filter(s => s !== '')
+
+  let current: unknown = value
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return err({
+        kind: 'not_found',
+        store_id: '',
+        version: '',
+        message: `Path segment '${segment}' not found - parent is null/undefined`
+      } as CorpusError)
+    }
+
+    if (typeof current !== 'object') {
+      return err({
+        kind: 'not_found',
+        store_id: '',
+        version: '',
+        message: `Path segment '${segment}' not found - parent is not an object`
+      } as CorpusError)
+    }
+
+    const index = /^\d+$/.test(segment) ? parseInt(segment, 10) : segment
+    current = (current as Record<string | number, unknown>)[index]
+  }
+
+  return ok(current as T)
+}
+
+/**
+ * Applies a span (character range) to a string value.
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param value - The string to slice
+ * @param span - The character range to extract
+ * @returns Result containing the substring or an error for invalid spans
+ * 
+ * @example
+ * ```ts
+ * const result = apply_span('Hello, world!', { start: 0, end: 5 })
+ * if (result.ok) console.log(result.value) // 'Hello'
+ * 
+ * const invalid = apply_span('Hi', { start: 0, end: 10 })
+ * if (!invalid.ok) console.log(invalid.error.kind) // 'validation_error'
+ * ```
+ */
+export function apply_span(value: string, span: { start: number; end: number }): Result<string, CorpusError> {
+  if (span.start < 0 || span.end > value.length || span.start > span.end) {
+    return err({
+      kind: 'validation_error',
+      cause: new Error(`Invalid span [${span.start}, ${span.end}] for string of length ${value.length}`),
+      message: `Invalid span [${span.start}, ${span.end}] for string of length ${value.length}`
+    })
+  }
+  return ok(value.slice(span.start, span.end))
+}
+
+/**
+ * Generates a unique observation ID.
+ * 
+ * Format: `obs_{timestamp}_{random}` where timestamp is base36-encoded
+ * and random is 8 characters of base36.
+ * 
+ * @category Utilities
+ * @group Observation Utilities
+ * @returns A unique observation ID string
+ * 
+ * @example
+ * ```ts
+ * const id = generate_observation_id()
+ * // => 'obs_lq9x2k_a7b3c2d1'
+ * ```
+ */
+export function generate_observation_id(): string {
+  const timestamp = Date.now().toString(36)
+  const random = Math.random().toString(36).substring(2, 10)
+  return `obs_${timestamp}_${random}`
+}
+
+/**
+ * Checks if two SnapshotPointers reference the same location.
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param a - First pointer
+ * @param b - Second pointer
+ * @returns True if pointers reference the same location
+ * 
+ * @example
+ * ```ts
+ * const p1 = create_pointer('hansard', 'abc', '$.foo')
+ * const p2 = create_pointer('hansard', 'abc', '$.foo')
+ * const p3 = create_pointer('hansard', 'xyz', '$.foo')
+ * 
+ * pointers_equal(p1, p2) // true
+ * pointers_equal(p1, p3) // false
+ * ```
+ */
+export function pointers_equal(a: SnapshotPointer, b: SnapshotPointer): boolean {
+  if (a.store_id !== b.store_id) return false
+  if (a.version !== b.version) return false
+  if (a.path !== b.path) return false
+  if (a.span?.start !== b.span?.start) return false
+  if (a.span?.end !== b.span?.end) return false
+  return true
+}
+
+/**
+ * Creates a pointer to the same snapshot without path or span.
+ * 
+ * @category Utilities
+ * @group Pointer Utilities
+ * @param pointer - The source pointer
+ * @returns A pointer to just the snapshot (store_id + version)
+ * 
+ * @example
+ * ```ts
+ * const detailed = create_pointer('hansard', 'abc', '$.speeches[0]', { start: 0, end: 100 })
+ * const snapshot = pointer_to_snapshot(detailed)
+ * // => { store_id: 'hansard', version: 'abc' }
+ * ```
+ */
+export function pointer_to_snapshot(pointer: SnapshotPointer): SnapshotPointer {
+  return { store_id: pointer.store_id, version: pointer.version }
+}
+
+```
+
+---
+
+### concurrency.ts (Concurrency Utilities)
+
+```typescript
+/**
+ * @module Concurrency
+ * @description Utilities for controlling concurrent async operations.
+ */
+
+/**
+ * Semaphore for controlling concurrent operations.
+ *
+ * Limits the number of concurrent async operations by requiring
+ * callers to acquire a permit before proceeding. When all permits
+ * are taken, subsequent acquires wait until a permit is released.
+ *
+ * @example
+ * ```ts
+ * const semaphore = new Semaphore(3) // Allow 3 concurrent operations
+ *
+ * async function rateLimitedFetch(url: string) {
+ *   await semaphore.acquire()
+ *   try {
+ *     return await fetch(url)
+ *   } finally {
+ *     semaphore.release()
+ *   }
+ * }
+ *
+ * // Only 3 fetches will run concurrently
+ * await Promise.all(urls.map(rateLimitedFetch))
+ * ```
+ */
+export class Semaphore {
+	private permits: number;
+	private waiting: Array<() => void> = [];
+
+	constructor(permits: number) {
+		this.permits = permits;
+	}
+
+	/**
+	 * Acquire a permit. Resolves immediately if available,
+	 * otherwise waits until a permit is released.
+	 */
+	async acquire(): Promise<void> {
+		if (this.permits > 0) {
+			this.permits--;
+			return;
+		}
+		return new Promise<void>(resolve => {
+			this.waiting.push(resolve);
+		});
+	}
+
+	/**
+	 * Release a permit, allowing the next waiting operation to proceed.
+	 */
+	release(): void {
+		const next = this.waiting.shift();
+		if (next) {
+			next();
+		} else {
+			this.permits++;
+		}
+	}
+}
+
+/**
+ * Map over array with controlled concurrency.
+ *
+ * Unlike Promise.all which starts all operations at once, this limits
+ * concurrent operations. Results are returned in the same order as inputs.
+ *
+ * @param items - Array of items to process
+ * @param mapper - Async function to apply to each item
+ * @param concurrency - Maximum number of concurrent operations
+ * @returns Array of results in the same order as inputs
+ *
+ * @example
+ * ```ts
+ * // Process 100 items, but only 5 at a time
+ * const results = await parallel_map(
+ *   urls,
+ *   async (url, index) => {
+ *     console.log(`Fetching ${index + 1}/${urls.length}`)
+ *     return fetch(url).then(r => r.json())
+ *   },
+ *   5
+ * )
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Use with AI APIs that have rate limits
+ * const summaries = await parallel_map(
+ *   documents,
+ *   doc => summarize(doc),
+ *   3 // Only 3 concurrent API calls
+ * )
+ * ```
+ */
+export const parallel_map = async <T, R>(items: T[], mapper: (item: T, index: number) => Promise<R>, concurrency: number): Promise<R[]> => {
+	const semaphore = new Semaphore(concurrency);
+	const results: R[] = new Array(items.length);
+
+	await Promise.all(
+		items.map(async (item, index) => {
+			await semaphore.acquire();
+			try {
+				results[index] = await mapper(item, index);
+			} finally {
+				semaphore.release();
+			}
+		})
+	);
+
+	return results;
+};
+
+```
+
+---
+
+### schema.ts (Drizzle Schema)
+
+```typescript
+/**
+ * @module Schema
+ * @description Database schema definitions for Drizzle ORM.
+ */
+
+import { sqliteTable, text, integer, primaryKey, index } from 'drizzle-orm/sqlite-core'
+
+/**
+ * Drizzle ORM schema for the corpus_snapshots table.
+ * 
+ * Used by the Cloudflare backend with D1 (SQLite). Defines the table structure
+ * for storing snapshot metadata.
+ * 
+ * Columns:
+ * - `store_id` + `version` - Composite primary key
+ * - `parents` - JSON array of parent references
+ * - `created_at` / `invoked_at` - ISO 8601 timestamps
+ * - `content_hash` - SHA-256 hash for deduplication
+ * - `data_key` - Key to retrieve binary data from R2
+ * - `tags` - Optional JSON array of tags
+ * 
+ * @example
+ * ```ts
+ * import { drizzle } from 'drizzle-orm/d1'
+ * import { corpus_snapshots } from 'corpus/schema'
+ * 
+ * const db = drizzle(env.D1)
+ * const rows = await db.select().from(corpus_snapshots).limit(10)
+ * ```
+ */
+export const corpus_snapshots = sqliteTable('corpus_snapshots', {
+  store_id: text('store_id').notNull(),
+  version: text('version').notNull(),
+  parents: text('parents').notNull(),
+  created_at: text('created_at').notNull(),
+  invoked_at: text('invoked_at'),
+  content_hash: text('content_hash').notNull(),
+  content_type: text('content_type').notNull(),
+  size_bytes: integer('size_bytes').notNull(),
+  data_key: text('data_key').notNull(),
+  tags: text('tags'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.store_id, table.version] }),
+  created_idx: index('idx_store_created').on(table.store_id, table.created_at),
+  hash_idx: index('idx_content_hash').on(table.store_id, table.content_hash),
+  data_key_idx: index('idx_data_key').on(table.data_key),
+}))
+
+export type CorpusSnapshotRow = typeof corpus_snapshots.$inferSelect
+export type CorpusSnapshotInsert = typeof corpus_snapshots.$inferInsert
+
+```
+
+---
+
+### sst.ts (SST Infrastructure)
+
+```typescript
+export type CorpusInfraConfig = {
+  name: string
+  bucket_name?: string
+  database_name?: string
+}
+
+export type CorpusInfra = {
+  database: { name: string }
+  bucket: { name: string }
+  database_name: string
+  bucket_name: string
+}
+
+/**
+ * SST infrastructure helper for creating Corpus resources.
+ * 
+ * Generates resource names for D1 database and R2 bucket based on a prefix.
+ * Returns objects compatible with SST resource definitions.
+ * 
+ * @param name - Base name prefix for resources
+ * @param config - Optional overrides for resource names
+ * @returns Resource definitions with database and bucket names
+ * 
+ * @example
+ * ```ts
+ * // In sst.config.ts
+ * const corpus = createCorpusInfra('myapp')
+ * 
+ * const db = new sst.cloudflare.D1(corpus.database.name)
+ * const bucket = new sst.cloudflare.R2(corpus.bucket.name)
+ * 
+ * // Resource names: 'myappDb', 'myappBucket'
+ * ```
+ */
+export function createCorpusInfra(
+  name: string,
+  config?: Partial<CorpusInfraConfig>
+): CorpusInfra {
+  const database_name = config?.database_name ?? `${name}Db`
+  const bucket_name = config?.bucket_name ?? `${name}Bucket`
+
+  return {
+    database: { name: database_name },
+    bucket: { name: bucket_name },
+    database_name,
+    bucket_name,
+  }
+}
+
+```
