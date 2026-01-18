@@ -132,6 +132,54 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
   </div>
 </div>
 
+## Package Exports
+
+Corpus provides multiple entry points to minimize bundle size and keep platform-specific code separate.
+
+### Full Package
+
+```typescript
+import { create_corpus, define_store, json_codec, ok, err } from '@f0rbit/corpus'
+```
+
+The main entry point includes all core utilities, the memory backend, Result types, and pipe utilities. Use this for most applications.
+
+### File Backend (Node.js)
+
+```typescript
+import { create_file_backend } from '@f0rbit/corpus/file'
+```
+
+File system backend for Node.js and Bun environments. Stores snapshots as JSON files on disk.
+
+### Cloudflare Backend (Workers)
+
+```typescript
+import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+```
+
+Cloudflare Workers backend using D1 for metadata and R2 for blob storage. Import only in Worker environments.
+
+### Types Only
+
+```typescript
+import type { Result, Snapshot, CorpusError } from '@f0rbit/corpus/types'
+```
+
+TypeScript type definitions with no runtime code. Use for type annotations in shared interfaces or when you only need types for dependency injection.
+
+### Drizzle Schemas
+
+```typescript
+import { snapshots, observations, lineage } from '@f0rbit/corpus/schema'
+```
+
+Drizzle ORM table definitions for the Corpus data model. Use when you need to query Corpus tables directly or integrate with existing Drizzle schemas.
+
+<Aside type="tip">
+  Tree-shaking works best when you import from specific entry points. For Cloudflare Workers, always use `@f0rbit/corpus/cloudflare` to avoid bundling Node.js-specific code.
+</Aside>
+
 ## Next Steps
 
 <div class="grid">
