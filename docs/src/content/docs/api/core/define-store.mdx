@@ -7,7 +7,7 @@ description: Create a type-safe store definition
 function define_store<Id extends string, T>(
   id: Id,
   codec: Codec<T>,
-  description?: string
+  opts?: DefineStoreOpts | string
 ): StoreDefinition<Id, T>
 ```
 
@@ -39,7 +39,72 @@ const images = define_store('images', binary_codec())
 |-----------|------|-------------|
 | `id` | `string` | Unique identifier for the store |
 | `codec` | `Codec<T>` | Serialization codec for the data |
-| `description` | `string?` | Optional description for documentation |
+| `opts` | `DefineStoreOpts \| string?` | Options object or description string |
+
+## Types
+
+```ts
+type DefineStoreOpts = {
+  description?: string
+  data_key_fn?: (ctx: DataKeyContext) => string
+}
+
+type DataKeyContext = {
+  store_id: string      // The store's id
+  version: string       // Version string passed to put()
+  content_hash: string  // SHA-256 hash of serialized content
+  tags?: string[]       // Optional tags passed to put()
+}
+```
+
+## Custom Storage Paths
+
+By default, corpus stores data at `{store_id}/{content_hash}`. The `data_key_fn` option lets you customize this path based on version, tags, or content hash.
+
+### When to Use
+
+- **Organizing by date**: Group snapshots by date tags for easier browsing
+- **Namespace prefixes**: Add project or environment prefixes
+- **Human-readable paths**: Use version strings instead of content hashes
+- **Hierarchical storage**: Create folder structures based on metadata
+
+### Example: Organizing by Date Tags
+
+```ts
+const hansard = define_store('hansard', text_codec(), {
+  data_key_fn: (ctx) => {
+    const date = ctx.tags?.find(t => t.startsWith('date:'))?.slice(5) ?? 'unknown'
+    return `australia-house/raw/${date}/${ctx.version}`
+  }
+})
+
+// Usage
+await corpus.stores.hansard.put(transcript, {
+  version: 'v1',
+  tags: ['date:2024-03-15', 'chamber:house']
+})
+// Stored at: australia-house/raw/2024-03-15/v1
+```
+
+### Example: Custom Namespace Prefixes
+
+```ts
+const configs = define_store('configs', json_codec(ConfigSchema), {
+  description: 'Application configs',
+  data_key_fn: (ctx) => `myapp/prod/configs/${ctx.version}/${ctx.content_hash.slice(0, 8)}`
+})
+
+// Stored at: myapp/prod/configs/v2/a1b2c3d4
+```
+
+### Default Behavior
+
+Without `data_key_fn`, the default path is `{store_id}/{content_hash}`:
+
+```ts
+const logs = define_store('logs', text_codec())
+// Stored at: logs/abc123def456...
+```
 
 ## With create_corpus
 
