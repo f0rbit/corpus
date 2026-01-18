@@ -45,41 +45,42 @@ wrangler r2 bucket create corpus-bucket
   <div class="step vertical-connector-item">
     <div class="step-indicator vertical-indicator">2</div>
     <div class="step-content vertical-content">
-      <div class="step-title">Run the migration</div>
+      <div class="step-title">Set up database migrations</div>
       <div class="step-body">
-Create `migrations/0001_init.sql`:
-
-```sql
-CREATE TABLE IF NOT EXISTS corpus_snapshots (
-  store_id TEXT NOT NULL,
-  version TEXT NOT NULL,
-  parents TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  invoked_at TEXT,
-  content_hash TEXT NOT NULL,
-  content_type TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  data_key TEXT NOT NULL,
-  tags TEXT,
-  PRIMARY KEY (store_id, version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_store_created 
-  ON corpus_snapshots(store_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_content_hash 
-  ON corpus_snapshots(store_id, content_hash);
-CREATE INDEX IF NOT EXISTS idx_data_key 
-  ON corpus_snapshots(data_key);
-```
-
-Apply it:
+Install Drizzle Kit as a dev dependency:
 
 ```bash
-wrangler d1 execute corpus-db --file=migrations/0001_init.sql
+bun add -D drizzle-kit
+```
+
+Create `drizzle.config.ts` in your project root:
+
+```typescript
+import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  dialect: 'sqlite',
+  driver: 'd1-http',
+  schema: [
+    './node_modules/@f0rbit/corpus/schema.js',
+    './node_modules/@f0rbit/corpus/observations/schema.js',
+  ],
+  out: './migrations',
+})
+```
+
+Generate and apply migrations:
+
+```bash
+# Generate migration files from corpus schemas
+bunx drizzle-kit generate
+
+# Apply migrations to your D1 database
+wrangler d1 migrations apply corpus-db
 ```
 
 <Aside type="tip">
-  You can also run the migration programmatically using `CORPUS_MIGRATION_SQL` exported from `@f0rbit/corpus`.
+  The `corpus_snapshots` and `corpus_observations` schemas are exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
 </Aside>
       </div>
     </div>
@@ -193,10 +194,15 @@ import { createCorpusInfra } from '@f0rbit/corpus'
 const corpus = createCorpusInfra('myapp')
 
 const db = new sst.cloudflare.D1(corpus.database.name)
-const bucket = new sst.cloudflare.R2(corpus.bucket.name)
+const bucket = new sst.cloudflare.Bucket(corpus.bucket.name)
 
 // Creates resources: 'myappDb' and 'myappBucket'
 ```
+
+<a href="/corpus/guides/sst/" class="card card-interactive">
+  <div class="card-title">SST Integration Guide</div>
+  <div class="card-description">Full API reference, configuration options, and Drizzle migration examples</div>
+</a>
 
 ## Using the Cloudflare Entry Point
 
@@ -299,6 +305,10 @@ return new Response(JSON.stringify(result.value.data))
 ## See Also
 
 <div class="grid">
+  <a href="/corpus/guides/sst/" class="card card-interactive">
+    <div class="card-title">SST Integration</div>
+    <div class="card-description">Type-safe infrastructure as code with full API reference.</div>
+  </a>
   <a href="/corpus/guides/backends/" class="card card-interactive">
     <div class="card-title">Storage Backends</div>
     <div class="card-description">Learn about all available backends including memory and file.</div>
