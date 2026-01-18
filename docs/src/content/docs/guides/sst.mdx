@@ -1,0 +1,193 @@
+---
+title: SST Integration
+description: Deploy Corpus with SST v3 for type-safe infrastructure as code on Cloudflare.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+[SST](https://sst.dev) is an infrastructure-as-code framework that makes deploying to Cloudflare simple and type-safe. Corpus provides helper functions to streamline resource creation.
+
+## Installation
+
+```bash
+bun add @f0rbit/corpus
+```
+
+## API Reference
+
+### `createCorpusInfra(name, config?)`
+
+Creates resource name definitions for D1 database and R2 bucket.
+
+```typescript
+import { createCorpusInfra } from '@f0rbit/corpus'
+
+const corpus = createCorpusInfra('myapp')
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `string` | Base prefix for resource names |
+| `config` | `Partial<CorpusInfraConfig>` | Optional overrides |
+
+### `CorpusInfraConfig`
+
+```typescript
+type CorpusInfraConfig = {
+  name: string
+  bucket_name?: string    // Override bucket name (default: `${name}Bucket`)
+  database_name?: string  // Override database name (default: `${name}Db`)
+}
+```
+
+### `CorpusInfra` (Return Type)
+
+```typescript
+type CorpusInfra = {
+  database: { name: string }  // For SST resource constructor
+  bucket: { name: string }    // For SST resource constructor
+  database_name: string       // Raw name string
+  bucket_name: string         // Raw name string
+}
+```
+
+## Complete Example
+
+### SST Config
+
+```typescript
+// sst.config.ts
+import { createCorpusInfra } from '@f0rbit/corpus'
+
+export default $config({
+  app(input) {
+    return {
+      name: 'my-app',
+      removal: input?.stage === 'production' ? 'retain' : 'remove',
+      home: 'cloudflare',
+    }
+  },
+  async run() {
+    const corpus = createCorpusInfra('corpus')
+
+    const db = new sst.cloudflare.D1(corpus.database.name)
+    const bucket = new sst.cloudflare.Bucket(corpus.bucket.name)
+
+    const worker = new sst.cloudflare.Worker('Api', {
+      handler: 'src/index.ts',
+      link: [db, bucket],
+      url: true,
+    })
+
+    return { url: worker.url }
+  },
+})
+```
+
+<Aside type="note">
+  Resource names follow PascalCase convention: `createCorpusInfra('app')` creates `appDb` and `appBucket`.
+</Aside>
+
+### Worker Code
+
+```typescript
+// src/index.ts
+import { Resource } from 'sst'
+import { 
+  create_corpus, 
+  create_cloudflare_backend, 
+  define_store, 
+  json_codec 
+} from '@f0rbit/corpus/cloudflare'
+import { z } from 'zod'
+
+const DataSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  updated_at: z.string(),
+})
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    const backend = create_cloudflare_backend({
+      d1: Resource.corpusDb,
+      r2: Resource.corpusBucket,
+    })
+
+    const corpus = create_corpus()
+      .with_backend(backend)
+      .with_store(define_store('data', json_codec(DataSchema)))
+      .build()
+
+    const result = await corpus.stores.data.put({
+      id: 'doc-1',
+      content: 'Hello from SST!',
+      updated_at: new Date().toISOString(),
+    })
+
+    if (!result.ok) {
+      return Response.json({ error: result.error }, { status: 500 })
+    }
+
+    return Response.json({ version: result.value.version })
+  },
+}
+```
+
+## Drizzle Migrations
+
+Corpus schemas are exported for use with Drizzle Kit. Configure `drizzle.config.ts`:
+
+```typescript
+import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  dialect: 'sqlite',
+  driver: 'd1-http',
+  schema: [
+    './node_modules/@f0rbit/corpus/schema.js',
+    './node_modules/@f0rbit/corpus/observations/schema.js',
+  ],
+  out: './migrations',
+})
+```
+
+Generate and apply migrations:
+
+```bash
+bunx drizzle-kit generate
+wrangler d1 migrations apply <database-name>
+```
+
+<Aside type="tip">
+  See the [Cloudflare guide](/corpus/guides/cloudflare/) for detailed migration setup instructions.
+</Aside>
+
+## Custom Resource Names
+
+Override the default naming convention when needed:
+
+```typescript
+const corpus = createCorpusInfra('myapp', {
+  database_name: 'MyCustomDatabase',
+  bucket_name: 'my-custom-bucket',
+})
+
+// corpus.database.name === 'MyCustomDatabase'
+// corpus.bucket.name === 'my-custom-bucket'
+```
+
+## See Also
+
+<div class="grid">
+  <a href="/corpus/guides/cloudflare/" class="card card-interactive">
+    <div class="card-title">Cloudflare Deployment</div>
+    <div class="card-description">Manual setup with Wrangler CLI</div>
+  </a>
+  <a href="/corpus/guides/backends/" class="card card-interactive">
+    <div class="card-title">Storage Backends</div>
+    <div class="card-description">Learn about all available backends</div>
+  </a>
+</div>
