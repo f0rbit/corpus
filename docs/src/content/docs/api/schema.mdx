@@ -1,0 +1,235 @@
+---
+title: Drizzle Schema
+description: Database schema exports for direct Drizzle ORM access to corpus tables
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The corpus library exports Drizzle ORM schema definitions for direct database access. Use these when you need to query corpus tables directly, join with your own tables, or build custom queries beyond the high-level API.
+
+## Tables
+
+### corpus_snapshots
+
+The primary table for storing versioned content snapshots.
+
+```ts
+import { corpus_snapshots } from '@f0rbit/corpus'
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `store_id` | `text` | Store identifier (part of composite PK) |
+| `version` | `text` | Unique version identifier (part of composite PK) |
+| `parents` | `text` | JSON array of parent version references |
+| `created_at` | `text` | ISO 8601 timestamp when snapshot was created |
+| `invoked_at` | `text` | Optional ISO 8601 timestamp for scheduled invocations |
+| `content_hash` | `text` | SHA-256 hash of content for deduplication |
+| `content_type` | `text` | MIME type (e.g., `application/json`) |
+| `size_bytes` | `integer` | Size of the stored data |
+| `data_key` | `text` | Key to retrieve binary data from storage (R2/filesystem) |
+| `tags` | `text` | Optional JSON array of string tags |
+
+**Primary Key:** `(store_id, version)`
+
+**Indexes:**
+- `idx_store_created` on `(store_id, created_at)` - efficient latest queries
+- `idx_content_hash` on `(store_id, content_hash)` - deduplication lookups
+- `idx_data_key` on `(data_key)` - data retrieval
+
+---
+
+### corpus_observations
+
+Table for storing structured observations that reference snapshots.
+
+```ts
+import { corpus_observations } from '@f0rbit/corpus'
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | `text` | Primary key (unique observation identifier) |
+| `type` | `text` | Observation type name (e.g., `entity_mention`) |
+| `source_store_id` | `text` | Store ID of the referenced snapshot |
+| `source_version` | `text` | Version of the referenced snapshot |
+| `source_path` | `text` | Optional JSONPath to specific element |
+| `source_span_start` | `text` | Optional start of character range |
+| `source_span_end` | `text` | Optional end of character range |
+| `content` | `text` | JSON-encoded observation data |
+| `confidence` | `real` | Optional confidence score (0.0 to 1.0) |
+| `observed_at` | `text` | ISO 8601 timestamp when observation was made |
+| `created_at` | `text` | ISO 8601 timestamp when record was stored |
+| `derived_from` | `text` | Optional JSON array of source snapshot pointers |
+
+**Primary Key:** `id`
+
+**Indexes:**
+- `idx_obs_type` on `(type)` - filter by observation type
+- `idx_obs_source` on `(source_store_id, source_version)` - find observations for a snapshot
+- `idx_obs_type_observed` on `(type, observed_at)` - temporal queries by type
+- `idx_obs_type_source` on `(type, source_store_id)` - type queries within a store
+
+---
+
+## Type Exports
+
+Drizzle infers TypeScript types from schema definitions:
+
+```ts
+import type {
+  CorpusSnapshotRow,
+  CorpusSnapshotInsert,
+  ObservationRow,
+  ObservationInsert,
+} from '@f0rbit/corpus'
+```
+
+| Type | Description |
+|------|-------------|
+| `CorpusSnapshotRow` | Select type - all columns as returned from queries |
+| `CorpusSnapshotInsert` | Insert type - required and optional columns for inserts |
+| `ObservationRow` | Select type for observations |
+| `ObservationInsert` | Insert type for observations |
+
+---
+
+## Usage Examples
+
+### Querying Snapshots Directly
+
+Use Drizzle's query builder for custom queries:
+
+```ts
+import { drizzle } from 'drizzle-orm/d1'
+import { eq, desc, and } from 'drizzle-orm'
+import { corpus_snapshots } from '@f0rbit/corpus'
+
+const db = drizzle(env.D1)
+
+// Get latest 10 snapshots for a store
+const recent = await db
+  .select()
+  .from(corpus_snapshots)
+  .where(eq(corpus_snapshots.store_id, 'articles'))
+  .orderBy(desc(corpus_snapshots.created_at))
+  .limit(10)
+
+// Find snapshots by content hash (deduplication check)
+const existing = await db
+  .select()
+  .from(corpus_snapshots)
+  .where(
+    and(
+      eq(corpus_snapshots.store_id, 'articles'),
+      eq(corpus_snapshots.content_hash, hash)
+    )
+  )
+  .limit(1)
+```
+
+### Joining Observations with External Tables
+
+Link observations to your domain tables:
+
+```ts
+import { drizzle } from 'drizzle-orm/d1'
+import { eq, and } from 'drizzle-orm'
+import { corpus_observations } from '@f0rbit/corpus'
+import { users, documents } from './schema'
+
+const db = drizzle(env.D1)
+
+// Find all entity mentions in a user's documents
+const mentions = await db
+  .select({
+    observation: corpus_observations,
+    document: documents,
+  })
+  .from(corpus_observations)
+  .innerJoin(
+    documents,
+    and(
+      eq(corpus_observations.source_store_id, 'documents'),
+      eq(corpus_observations.source_version, documents.corpus_version)
+    )
+  )
+  .innerJoin(users, eq(documents.user_id, users.id))
+  .where(
+    and(
+      eq(corpus_observations.type, 'entity_mention'),
+      eq(users.id, userId)
+    )
+  )
+```
+
+### Aggregating Observations
+
+```ts
+import { count, sql } from 'drizzle-orm'
+
+// Count observations by type
+const counts = await db
+  .select({
+    type: corpus_observations.type,
+    count: count(),
+  })
+  .from(corpus_observations)
+  .groupBy(corpus_observations.type)
+
+// Get observations with confidence above threshold
+const confident = await db
+  .select()
+  .from(corpus_observations)
+  .where(sql`${corpus_observations.confidence} >= 0.8`)
+```
+
+---
+
+## Migrations
+
+<Aside type="caution" title="Use Drizzle Kit">
+Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from schema changes.
+</Aside>
+
+Include the corpus schemas in your Drizzle config:
+
+```ts
+// drizzle.config.ts
+import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: [
+    './src/schema.ts',           // Your app schemas
+    './node_modules/@f0rbit/corpus/schema.ts',
+    './node_modules/@f0rbit/corpus/observations/schema.ts',
+  ],
+  out: './drizzle',
+  dialect: 'sqlite',
+})
+```
+
+Generate migrations when corpus updates its schema:
+
+```bash
+bunx drizzle-kit generate
+bunx drizzle-kit migrate
+```
+
+<Aside type="tip">
+After updating `@f0rbit/corpus`, always regenerate migrations to pick up any schema changes.
+</Aside>
+
+---
+
+## When to Use Direct Queries
+
+| Use Case | Approach |
+|----------|----------|
+| Standard CRUD operations | High-level corpus API |
+| Custom aggregations | Direct Drizzle queries |
+| Joins with your tables | Direct Drizzle queries |
+| Bulk operations | Direct Drizzle queries |
+| Complex filtering | Direct Drizzle queries |
+
+The high-level corpus API handles encoding/decoding, versioning, and lineage tracking. Use direct queries when you need raw database access for analytics, reporting, or cross-table operations.
