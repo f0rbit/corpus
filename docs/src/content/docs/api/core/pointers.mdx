@@ -1,0 +1,152 @@
+---
+title: Pointer Utilities
+description: Utility functions for creating, comparing, and resolving SnapshotPointers
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Pointer utilities help you work with `SnapshotPointer` types - the universal address format for referencing versioned content in Corpus stores.
+
+<Aside type="tip">
+  For the `SnapshotPointer` type definition, see [Observations API](/corpus/api/core/observations/).
+</Aside>
+
+---
+
+## create_pointer
+
+```ts
+function create_pointer(
+  store_id: string, version: string, path?: string, span?: { start: number; end: number }
+): SnapshotPointer
+```
+
+Creates a `SnapshotPointer` to a location within a versioned snapshot.
+
+```ts
+const snapshot = create_pointer('hansard', 'AZJx4vM')
+const speech = create_pointer('hansard', 'AZJx4vM', '$.speeches[0]')
+const excerpt = create_pointer('hansard', 'AZJx4vM', '$.speeches[0].text', { start: 100, end: 250 })
+```
+
+---
+
+## pointer_to_key
+
+```ts
+function pointer_to_key(pointer: SnapshotPointer): string
+```
+
+Converts a pointer to a stable string key. Format: `store_id:version[:path][:start-end]`
+
+```ts
+pointer_to_key({ store_id: 'hansard', version: 'abc' })           // => 'hansard:abc'
+pointer_to_key({ store_id: 'hansard', version: 'abc', path: '$.foo' }) // => 'hansard:abc:$.foo'
+```
+
+---
+
+## key_to_pointer
+
+```ts
+function key_to_pointer(key: string): SnapshotPointer | null
+```
+
+Parses a string key back to a `SnapshotPointer`. Returns `null` if parsing fails.
+
+<Aside type="caution">
+  Complex paths containing colons may not round-trip perfectly.
+</Aside>
+
+```ts
+key_to_pointer('hansard:abc:$.foo:0-10')
+// => { store_id: 'hansard', version: 'abc', path: '$.foo', span: { start: 0, end: 10 } }
+key_to_pointer('invalid') // => null
+```
+
+---
+
+## resolve_path
+
+```ts
+function resolve_path<T = unknown>(value: unknown, path: string): Result<T, CorpusError>
+```
+
+Resolves a JSONPath expression against a value. Supports:
+- `$` or empty - root value
+- `$.foo` - property access
+- `$.foo[0]` - array index
+- `$.foo[0].bar` - combined
+
+```ts
+const data = { speeches: [{ text: 'Hello', speaker: 'Alice' }] }
+resolve_path(data, '$.speeches[0].text') // => ok('Hello')
+resolve_path(data, '$')                   // => ok({ speeches: [...] })
+```
+
+---
+
+## apply_span
+
+```ts
+function apply_span(value: string, span: { start: number; end: number }): Result<string, CorpusError>
+```
+
+Extracts a substring using a character span. Returns an error for invalid ranges.
+
+```ts
+apply_span('Hello, world!', { start: 0, end: 5 }) // => ok('Hello')
+apply_span('Hi', { start: 0, end: 10 })          // => err({ kind: 'validation_error', ... })
+```
+
+---
+
+## pointers_equal
+
+```ts
+function pointers_equal(a: SnapshotPointer, b: SnapshotPointer): boolean
+```
+
+Compares two pointers for equality across all fields (store_id, version, path, and span).
+
+```ts
+const p1 = create_pointer('hansard', 'abc', '$.foo')
+pointers_equal(p1, create_pointer('hansard', 'abc', '$.foo')) // true
+pointers_equal(p1, create_pointer('hansard', 'xyz', '$.foo')) // false
+```
+
+---
+
+## pointer_to_snapshot
+
+```ts
+function pointer_to_snapshot(pointer: SnapshotPointer): SnapshotPointer
+```
+
+Strips `path` and `span` from a pointer, returning just the base snapshot reference.
+
+```ts
+const detailed = create_pointer('hansard', 'abc', '$.speeches[0]', { start: 0, end: 100 })
+pointer_to_snapshot(detailed) // => { store_id: 'hansard', version: 'abc' }
+```
+
+---
+
+## generate_observation_id
+
+```ts
+function generate_observation_id(): string
+```
+
+Generates a unique observation ID. Format: `obs_{timestamp}_{random}` where timestamp is base36-encoded.
+
+```ts
+generate_observation_id() // => 'obs_lq9x2k_a7b3c2d1'
+```
+
+---
+
+## See Also
+
+- [Observations API](/corpus/api/core/observations/) - `SnapshotPointer` type
+- [Core Types](/corpus/api/core/types/) - `Result`, `CorpusError`
