@@ -3,14 +3,14 @@
  * @description Cloudflare Workers storage backend using D1 and R2.
  */
 
-import { eq, and, desc, lt, gt, like, sql, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, EventHandler } from '../types.js';
-import { create_emitter, parse_snapshot_meta } from '../utils.js';
-import { ok, err } from '../types.js';
-import { first, to_nullable, to_fallback } from '../result.js';
-import { corpus_snapshots } from '../schema.js';
-import { corpus_observations, type ObservationsStorage, type StorageQueryOpts, create_observations_client } from '../observations/index.js';
+import { corpus_observations, create_observations_client, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
+import { first, to_fallback, to_nullable } from "../result.js";
+import { corpus_snapshots } from "../schema.js";
+import type { Backend, CorpusError, DataClient, EventHandler, MetadataClient, Result, SnapshotMeta } from "../types.js";
+import { err, ok } from "../types.js";
+import { create_emitter, parse_snapshot_meta } from "../utils.js";
 
 type D1Database = { prepare: (sql: string) => unknown };
 type R2Bucket = {
@@ -26,9 +26,7 @@ export type CloudflareBackendConfig = {
 	on_event?: EventHandler;
 };
 
-function create_cloudflare_storage(
-	db: ReturnType<typeof drizzle>
-): ObservationsStorage {
+function create_cloudflare_storage(db: ReturnType<typeof drizzle>): ObservationsStorage {
 	return {
 		async put_row(row) {
 			try {
@@ -38,24 +36,20 @@ function create_cloudflare_storage(
 				return err({
 					kind: "storage_error",
 					cause: cause as Error,
-					operation: "observations.put"
+					operation: "observations.put",
 				});
 			}
 		},
 
 		async get_row(id) {
 			try {
-				const rows = await db
-					.select()
-					.from(corpus_observations)
-					.where(eq(corpus_observations.id, id))
-					.limit(1);
+				const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
 				return ok(to_nullable(first(rows)));
 			} catch (cause) {
 				return err({
 					kind: "storage_error",
 					cause: cause as Error,
-					operation: "observations.get"
+					operation: "observations.get",
 				});
 			}
 		},
@@ -110,11 +104,7 @@ function create_cloudflare_storage(
 
 		async delete_row(id) {
 			try {
-				const existing = await db
-					.select()
-					.from(corpus_observations)
-					.where(eq(corpus_observations.id, id))
-					.limit(1);
+				const existing = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
 
 				if (existing.length === 0) {
 					return ok(false);
@@ -126,17 +116,14 @@ function create_cloudflare_storage(
 				return err({
 					kind: "storage_error",
 					cause: cause as Error,
-					operation: "observations.delete"
+					operation: "observations.delete",
 				});
 			}
 		},
 
 		async delete_by_source(store_id, version, path) {
 			try {
-				const conditions = [
-					eq(corpus_observations.source_store_id, store_id),
-					eq(corpus_observations.source_version, version)
-				];
+				const conditions = [eq(corpus_observations.source_store_id, store_id), eq(corpus_observations.source_version, version)];
 
 				if (path !== undefined) {
 					conditions.push(eq(corpus_observations.source_path, path));
@@ -158,10 +145,10 @@ function create_cloudflare_storage(
 				return err({
 					kind: "storage_error",
 					cause: cause as Error,
-					operation: "observations.delete_by_source"
+					operation: "observations.delete_by_source",
 				});
 			}
-		}
+		},
 	};
 }
 
@@ -209,7 +196,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	const emit = create_emitter(on_event);
 
 	function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
-		return parse_snapshot_meta(row)
+		return parse_snapshot_meta(row);
 	}
 
 	const metadata: MetadataClient = {
@@ -288,7 +275,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 
 		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
-			const conditions = [like(corpus_snapshots.store_id, `${store_id}%`)];
+			const conditions = [eq(corpus_snapshots.store_id, store_id)];
 
 			if (opts?.before) {
 				conditions.push(lt(corpus_snapshots.created_at, opts.before.toISOString()));
@@ -307,7 +294,15 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 				query = query.limit(opts.limit) as typeof query;
 			}
 
-			const rows = await query;
+			let rows: (typeof corpus_snapshots.$inferSelect)[];
+			try {
+				rows = await query;
+			} catch (cause) {
+				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.list" };
+				emit({ type: "error", error });
+				return;
+			}
+
 			let count = 0;
 
 			for (const row of rows) {
