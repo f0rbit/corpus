@@ -6,6 +6,9 @@ export { create_layered_backend, type LayeredBackendOptions } from './backend/la
 
 export { json_codec, text_codec, binary_codec, compose, compute_hash, generate_version } from './utils.js';
 
+export { gzip_codec } from './codecs/gzip.js';
+export { encrypt_codec } from './codecs/encrypt.js';
+
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
 export type {
