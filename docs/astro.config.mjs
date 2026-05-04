@@ -25,6 +25,7 @@ export default defineConfig({
           items: [
             { label: 'Storage Backends', slug: 'guides/backends' },
             { label: 'Cloudflare Deployment', slug: 'guides/cloudflare' },
+            { label: 'Events and Observability', slug: 'guides/events-and-observability' },
             { label: 'Observations', slug: 'guides/observations' },
             { label: 'Testing Patterns', slug: 'guides/testing' },
           ],
@@ -47,6 +48,7 @@ export default defineConfig({
             { label: 'Cloudflare', slug: 'api/backends/cloudflare' },
             { label: 'Layered', slug: 'api/backends/layered' },
             { label: 'Types', slug: 'api/backends/types' },
+            { label: 'Extending', slug: 'api/extending-backends' },
           ],
         },
         {

@@ -198,11 +198,46 @@ if (!result.ok) {
 This backend uses Bun-specific APIs (`Bun.file()`, `Bun.write()`). It's not compatible with Node.js. For Node.js, use the [Memory](/corpus/api/backends/memory) backend for testing or implement a custom backend.
 :::
 
+## Observations Storage
+
+If you enable observations on the file backend, they are persisted to an `_observations.json` file in the store directory:
+
+```
+base_path/
+├── documents/
+│   ├── _meta.json
+│   └── _observations.json    # Observation rows (added with observations support)
+└── _data/
+    └── ...
+```
+
+The observations file contains a JSON array of observation rows:
+
+```json
+[
+  {
+    "id": "obs_abc123",
+    "type": "entity_mention",
+    "source_store_id": "documents",
+    "source_version": "AZx5kQ",
+    "source_path": null,
+    "content": "{\"entity\": \"Apple\", \"type\": \"organization\"}",
+    "confidence": 0.95,
+    "created_at": "2024-01-15T10:30:00Z",
+    "observed_at": "2024-01-15T10:00:00Z",
+    "derived_from": null
+  }
+]
+```
+
+**Performance caveat**: The entire observations file is read and rewritten on every observation write. This is fine for small to medium counts (hundreds of observations), but not suitable for high-volume streaming. For production workloads with many observations, use the [Cloudflare](/corpus/api/backends/cloudflare) backend, which stores observations in D1 with proper indexes for efficient inserts and queries.
+
 ## Performance Considerations
 
 - **Metadata**: All metadata for a store is in one JSON file. Very large stores (100K+ versions) may see slower list operations.
 - **Data**: Binary data is stored in separate files, so retrieval is fast regardless of total data size.
-- **Writes**: Each write updates the metadata JSON file, which requires reading and rewriting the entire file.
+- **Observations**: The entire observations JSON is read/rewritten on every write. Fine for small counts, consider Cloudflare for high volume.
+- **Writes**: Each write updates the JSON file, which requires reading and rewriting the entire file.
 
 For high-throughput scenarios, consider the [Layered](/corpus/api/backends/layered) backend with memory caching.
 

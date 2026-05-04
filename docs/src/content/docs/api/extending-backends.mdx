@@ -1,0 +1,308 @@
+---
+title: Extending Backends
+description: Implement custom storage backends using the adapter interfaces.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+If the built-in backends (memory, file, Cloudflare) don't fit your use case, you can implement a custom backend by implementing the adapter interfaces and wrapping them with the provided factory functions.
+
+## Overview
+
+A backend chains together three parts:
+
+1. **Adapter interfaces** — Your implementation of metadata and data storage (thin, single-method operations)
+2. **Wrapper factories** — `create_metadata_client()`, `create_data_client()` that add error handling, event emission, and Result wrapping
+3. **Backend composition** — Combine the clients into a `Backend` object
+
+This layering minimizes boilerplate: you implement the bare storage logic; the wrappers handle error wrapping, deduplication, and event emission.
+
+## The Backend Interface
+
+For reference, here's what you're assembling into:
+
+```typescript
+type Backend = {
+  metadata: MetadataClient
+  data: DataClient
+  on_event?: EventHandler
+}
+```
+
+See [Backend Types](/corpus/api/backends/types) for the full `MetadataClient` and `DataClient` interfaces.
+
+## Implementing MetadataStorage
+
+Metadata storage handles versioned snapshots (without data):
+
+```typescript
+type MetadataStorage = {
+  get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
+  put: (meta: SnapshotMeta) => Promise<void>
+  delete: (store_id: string, version: string) => Promise<void>
+  list: (store_id: string) => AsyncIterable<SnapshotMeta>
+  find_by_hash: (store_id: string, hash: string) => Promise<SnapshotMeta | null>
+}
+```
+
+### Contract
+
+- **get**: Return the metadata row, or `null` if not found. Don't throw.
+- **put**: Store or update the metadata. Return `void` or throw if I/O fails.
+- **delete**: Remove metadata. No error if already absent.
+- **list**: Yield all metadata rows for a store (order doesn't matter). No pagination—the wrapper handles that.
+- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`.
+
+### Example: Postgres Metadata Adapter
+
+```typescript
+import { SnapshotMeta } from '@f0rbit/corpus'
+
+type MetadataStorage = {
+  get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
+  put: (meta: SnapshotMeta) => Promise<void>
+  delete: (store_id: string, version: string) => Promise<void>
+  list: (store_id: string) => AsyncIterable<SnapshotMeta>
+  find_by_hash: (store_id: string, hash: string) => Promise<SnapshotMeta | null>
+}
+
+export function create_postgres_metadata_adapter(db: Pool): MetadataStorage {
+  return {
+    async get(store_id, version) {
+      const result = await db.query(
+        'SELECT * FROM corpus_snapshots WHERE store_id = $1 AND version = $2',
+        [store_id, version]
+      )
+      if (result.rows.length === 0) return null
+      return result.rows[0] as SnapshotMeta
+    },
+
+    async put(meta) {
+      await db.query(
+        `INSERT INTO corpus_snapshots (store_id, version, content_hash, data_key, created_at, size_bytes, parents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (store_id, version) DO UPDATE SET ...`,
+        [meta.store_id, meta.version, meta.content_hash, meta.data_key, meta.created_at, meta.size_bytes, JSON.stringify(meta.parents)]
+      )
+    },
+
+    async delete(store_id, version) {
+      await db.query(
+        'DELETE FROM corpus_snapshots WHERE store_id = $1 AND version = $2',
+        [store_id, version]
+      )
+    },
+
+    async *list(store_id) {
+      const result = await db.query(
+        'SELECT * FROM corpus_snapshots WHERE store_id = $1 ORDER BY created_at DESC',
+        [store_id]
+      )
+      for (const row of result.rows) {
+        yield row as SnapshotMeta
+      }
+    },
+
+    async find_by_hash(store_id, hash) {
+      const result = await db.query(
+        'SELECT * FROM corpus_snapshots WHERE store_id = $1 AND content_hash = $2 LIMIT 1',
+        [store_id, hash]
+      )
+      if (result.rows.length === 0) return null
+      return result.rows[0] as SnapshotMeta
+    },
+  }
+}
+```
+
+## Implementing DataStorage
+
+Data storage handles binary blob persistence:
+
+```typescript
+type DataStorage = {
+  get: (data_key: string) => Promise<Uint8Array | null>
+  put: (data_key: string, data: Uint8Array) => Promise<void>
+  delete: (data_key: string) => Promise<void>
+  exists: (data_key: string) => Promise<boolean>
+}
+```
+
+### Contract
+
+- **get**: Return the bytes, or `null` if not found. Don't throw.
+- **put**: Store the bytes. Overwrite if already present. Throw on I/O failure.
+- **delete**: Remove the blob. No error if already absent.
+- **exists**: Return whether the key exists (used for deduplication checks).
+
+### Example Sketch: R2-Compatible Storage
+
+```typescript
+export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStorage> {
+  return {
+    async get(data_key) {
+      const obj = await bucket.get(data_key)
+      if (!obj) return null
+      return new Uint8Array(await obj.arrayBuffer())
+    },
+
+    async put(data_key, data) {
+      await bucket.put(data_key, data)
+    },
+
+    async delete(data_key) {
+      await bucket.delete(data_key)
+    },
+
+    async exists(data_key) {
+      const obj = await bucket.head(data_key)
+      return obj !== null
+    },
+  }
+}
+```
+
+## Wrapping Adapters into Clients
+
+Use the factory functions from `backend/base.ts` to wrap adapters and get error handling + event emission for free:
+
+```typescript
+import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
+import type { Backend, EventHandler } from '@f0rbit/corpus'
+
+export function create_custom_backend(
+  metaAdapter: MetadataStorage,
+  dataAdapter: DataStorage,
+  on_event?: EventHandler
+): Backend {
+  const emit = on_event || (() => {})
+
+  return {
+    metadata: create_metadata_client(metaAdapter, emit),
+    data: create_data_client(dataAdapter, emit),
+    on_event,
+  }
+}
+```
+
+What you get from the wrapper:
+
+- **Error wrapping**: Catches throws and converts them to `Result<T, CorpusError>` with `kind: 'storage_error'`
+- **Event emission**: Emits `meta_get`, `meta_put`, `data_get`, `data_put`, etc.
+- **Deduplication tracking**: `deduplicated: true` on events when content hash matches
+
+## Observations Support (Optional)
+
+Observations are stored separately from metadata/data. If you want to support observations, implement an observations adapter:
+
+```typescript
+type ObservationsStorage = {
+  put_row: (row: ObservationRow) => Promise<Result<ObservationRow, CorpusError>>
+  get_row: (id: string) => Promise<Result<ObservationRow | null, CorpusError>>
+  query_rows: (opts?: StorageQueryOpts) => AsyncIterable<ObservationRow>
+  delete_row: (id: string) => Promise<Result<boolean, CorpusError>>
+  delete_by_source: (store_id: string, version: string, path?: string) => Promise<Result<number, CorpusError>>
+}
+```
+
+### Required Methods
+
+You must implement all methods above. Here's a minimal outline:
+
+- **put_row**: Store an observation row (with JSON content). Return the row.
+- **get_row**: Retrieve a row by ID, or `null`.
+- **query_rows**: Yield all rows matching filters (type, source_store, date ranges, etc.). Return as async iterable.
+- **delete_row**: Remove a row. Return `true` if deleted, `false` if not found.
+- **delete_by_source**: Remove all rows pointing to a specific source (store + version). Return count deleted.
+
+### Optional Optimizations
+
+The wrapper (`create_observations_storage`) can fall back to per-row operations if you don't provide optimized batch methods. However, providing these improves performance:
+
+```typescript
+type ObservationsAdapter = ObservationsStorage & {
+  // Optional: batch query with filters (called by wrapper if present)
+  query_rows_optimized?: (opts: StorageQueryOpts) => AsyncIterable<ObservationRow>
+
+  // Optional: efficiently delete by source prefix (called if present)
+  delete_by_source_prefix?: (store_id: string, version_prefix: string) => Promise<Result<number, CorpusError>>
+}
+```
+
+### Wrapping into Client
+
+```typescript
+import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
+
+const storage = create_observations_storage(adapter)
+const client = create_observations_client(storage, metadata_client)
+```
+
+## Example: Full Custom Backend
+
+Here's a skeleton for a custom backend combining all pieces:
+
+```typescript
+import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
+import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
+import type { Backend, MetadataStorage, DataStorage, EventHandler } from '@f0rbit/corpus'
+import type { ObservationsStorage } from '@f0rbit/corpus'
+
+export interface CustomBackendConfig {
+  metaAdapter: MetadataStorage
+  dataAdapter: DataStorage
+  obsAdapter?: ObservationsStorage
+  on_event?: EventHandler
+}
+
+export function create_custom_backend(config: CustomBackendConfig): Backend {
+  const emit = config.on_event || (() => {})
+
+  return {
+    metadata: create_metadata_client(config.metaAdapter, emit),
+    data: create_data_client(config.dataAdapter, emit),
+    observations: config.obsAdapter
+      ? create_observations_client(
+          create_observations_storage(config.obsAdapter),
+          create_metadata_client(config.metaAdapter, emit)
+        )
+      : undefined,
+    on_event: config.on_event,
+  }
+}
+```
+
+## Error Handling
+
+Adapters should:
+
+- **Not throw** for not-found cases; return `null` instead
+- **Throw on I/O failures** (network, disk, permissions); the wrapper converts to `Result` with `kind: 'storage_error'`
+- Keep error messages descriptive for debugging
+
+The wrapper automatically logs errors via the `on_event` handler if provided.
+
+## Testing Custom Backends
+
+Use the integration test suite to validate your backend:
+
+```typescript
+import { runBackendContractTests } from '@f0rbit/corpus'
+
+describe('custom backend', () => {
+  runBackendContractTests(
+    'my-custom-backend',
+    async () => create_custom_backend(config),
+    async (backend) => {
+      // Cleanup function (optional)
+      await cleanup()
+    }
+  )
+})
+```
+
+## See Also
+
+- [Backend Types](/corpus/api/backends/types) — Full interface definitions
+- [Memory Backend](/corpus/api/backends/memory) — Simple reference implementation
+- [File Backend](/corpus/api/backends/file) — Complete production implementation

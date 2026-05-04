@@ -394,6 +394,78 @@ type Observation<T = unknown> = {
 }
 ```
 
+## Provenance Chains with `derived_from`
+
+Observations can link back to their source observations via the `derived_from` field. This is essential for tracking AI pipeline provenance—which model produced which annotation from what input.
+
+### Use Case: Multi-Hop Annotation Pipeline
+
+Imagine a document processing pipeline:
+
+```
+Raw text → Named Entity Recognition → Entity Disambiguation → Final Annotation
+```
+
+Each stage produces observations. By linking them with `derived_from`, you can walk back the full chain:
+
+```typescript
+// Stage 1: Extract raw entities from text
+const entities = await corpus.observations.put(EntityExtractionObservation, {
+  source: { store_id: 'documents', version: docVersion },
+  content: { entities: ['Apple', 'Microsoft'] },
+})
+
+// Stage 2: Disambiguate entities (linking back to stage 1)
+const disambiguation = await corpus.observations.put(DisambiguationObservation, {
+  source: { store_id: 'documents', version: docVersion },
+  content: { resolved_entities: [
+    { name: 'Apple Inc.', wikidata_id: 'Q312' }
+  ] },
+  derived_from: [entities.value.source]  // Link to stage 1
+})
+
+// Stage 3: Final annotation (linking back to stage 2)
+const final = await corpus.observations.put(FinalAnnotationObservation, {
+  source: { store_id: 'documents', version: docVersion },
+  content: { labels: ['company', 'tech'] },
+  derived_from: [disambiguation.value.source]  // Link to stage 2
+})
+```
+
+Later, you can trace back the full provenance:
+
+```typescript
+async function trace_provenance(obs: Observation): Promise<Observation[]> {
+  const chain = [obs]
+
+  let current = obs
+  while (current.derived_from && current.derived_from.length > 0) {
+    const source = current.derived_from[0]
+    const result = await corpus.observations.get(source_to_id(source)) // Assuming you store source IDs
+    if (!result.ok) break
+    chain.push(result.value)
+    current = result.value
+  }
+
+  return chain
+}
+
+const provenance = await trace_provenance(final)
+console.log('Pipeline:', provenance.map(p => p.type).join(' → '))
+// Output: entity_extraction → disambiguation → final_annotation
+```
+
+**Practical benefits:**
+
+- **Model auditing** — See which model versions produced which annotations
+- **Error recovery** — If stage 3 fails, you still have stage 2 results to work with
+- **Explainability** — Show users the full computation chain that led to a decision
+- **Reprocessing** — Replace one stage without re-running the entire pipeline
+
+<Aside type="tip">
+`derived_from` is just an optional array of SnapshotPointers. You choose the granularity: point to the exact source observation, or to the document version, depending on your tracing needs.
+</Aside>
+
 ## Re-processing Workflows
 
 When you need to re-analyze documents (e.g., with an improved model), you have two options:

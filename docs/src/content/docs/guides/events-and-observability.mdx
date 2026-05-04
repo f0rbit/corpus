@@ -1,0 +1,242 @@
+---
+title: Events and Observability
+description: Wire event handlers into backends to observe storage operations for debugging, metrics, and auditing.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Tabs, TabList, Tab, TabPanel } from '@f0rbit/ui';
+
+Corpus backends can emit events as they perform storage operations. This enables real-time observability: metrics, debugging logs, audit trails, and event-driven integrations—without blocking the main control flow.
+
+## Why Events?
+
+Events are **side-channel notifications**, not part of the core API contract. They're ideal for:
+
+- **Debugging** — Log operations to understand what your backend is doing
+- **Metrics** — Count reads, writes, cache hits, and errors
+- **Auditing** — Track who changed what, when
+- **Alerting** — Trigger alerts on errors or unusual patterns
+- **Integrations** — React to corpus events externally
+
+Unlike observations (which are data), events are ephemeral signals for operational insight. They don't survive restarts, and missing an event is not a data loss—it just means you didn't see that operation happen.
+
+<Aside type="tip">
+Events are **not** the primary control flow. Never use events to enforce consistency or critical business logic. Use observations for that.
+</Aside>
+
+## Wiring an EventHandler
+
+Every backend accepts an optional `on_event` field that receives an `EventHandler`:
+
+```typescript
+type EventHandler = (event: CorpusEvent) => void
+```
+
+Pass it during backend creation:
+
+```typescript
+import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const corpus = create_corpus()
+  .with_backend(create_file_backend({
+    base_path: './data',
+    on_event: (event) => {
+      // Handle the event
+      console.log(`[${event.type}]`, event)
+    }
+  }))
+  .with_store(define_store('articles', json_codec(ArticleSchema)))
+  .build()
+```
+
+All backends support `on_event`:
+
+- **Memory** — `create_memory_backend({ on_event })`
+- **File** — `create_file_backend({ base_path, on_event })`
+- **Cloudflare** — `create_cloudflare_backend({ d1, r2, on_event })`
+- **Layered** — Events propagate from both read and write backends
+
+## Event Types
+
+Every event includes a `type` discriminator. Here's the complete reference:
+
+### Metadata Operations
+
+| Event Type | Fields | When It Fires |
+|------------|--------|---------------|
+| `meta_get` | `store_id`, `version`, `found: boolean` | Metadata lookup (found or not) |
+| `meta_put` | `store_id`, `version` | Metadata stored |
+| `meta_delete` | `store_id`, `version` | Metadata deleted |
+| `meta_list` | `store_id`, `count: number` | After listing all metadata (count = total returned) |
+
+### Data Operations
+
+| Event Type | Fields | When It Fires |
+|------------|--------|---------------|
+| `data_get` | `store_id`, `version`, `found: boolean` | Data retrieval (found or not) |
+| `data_put` | `store_id`, `version`, `size_bytes: number`, `deduplicated: boolean` | Data stored |
+| `data_delete` | `store_id`, `version` | Data deleted |
+
+**Note on `deduplicated`**: Set to `true` if the content_hash already existed in the backend and the data write was skipped. This indicates successful deduplication—no new data was written, but the operation succeeded.
+
+### Snapshot Operations
+
+| Event Type | Fields | When It Fires |
+|------------|--------|---------------|
+| `snapshot_put` | `store_id`, `version`, `content_hash: string`, `deduplicated: boolean` | High-level snapshot write completed |
+| `snapshot_get` | `store_id`, `version`, `found: boolean` | High-level snapshot read (found or not) |
+
+**Note on `deduplicated`**: Same meaning as data_put—true if the content hash already existed.
+
+### Error Events
+
+| Event Type | Fields | When It Fires |
+|------------|--------|---------------|
+| `error` | `error: CorpusError` | Any operation fails |
+
+The `error` field is a full `CorpusError` object (discriminated union on `kind`). Check `error.kind` to handle specific failure modes.
+
+## Practical Examples
+
+### Example 1: Console Logging
+
+Debug what operations are happening:
+
+```typescript
+const corpus = create_corpus()
+  .with_backend(create_file_backend({
+    base_path: './data',
+    on_event: (event) => {
+      if (event.type === 'error') {
+        console.error(`[ERROR] ${event.error.kind}`, event.error)
+      } else if (event.type === 'snapshot_put') {
+        console.log(`✓ Saved ${event.store_id}@${event.version}`)
+      } else if (event.type === 'snapshot_get') {
+        console.log(`${event.found ? '✓' : '✗'} Loaded ${event.store_id}@${event.version}`)
+      }
+    }
+  }))
+  .with_store(define_store('documents', json_codec(DocumentSchema)))
+  .build()
+```
+
+### Example 2: Counting Reads and Writes
+
+Collect metrics on storage operations:
+
+```typescript
+type Metrics = {
+  reads: number
+  writes: number
+  errors: number
+  bytes_written: number
+  deduped: number
+}
+
+const metrics: Metrics = {
+  reads: 0,
+  writes: 0,
+  errors: 0,
+  bytes_written: 0,
+  deduped: 0,
+}
+
+const corpus = create_corpus()
+  .with_backend(create_file_backend({
+    base_path: './data',
+    on_event: (event) => {
+      switch (event.type) {
+        case 'snapshot_get':
+          if (event.found) metrics.reads++
+          break
+        case 'snapshot_put':
+          metrics.writes++
+          if (event.deduplicated) metrics.deduped++
+          break
+        case 'data_put':
+          metrics.bytes_written += event.size_bytes
+          break
+        case 'error':
+          metrics.errors++
+          break
+      }
+    }
+  }))
+  .with_store(define_store('documents', json_codec(DocumentSchema)))
+  .build()
+
+// Later, log metrics periodically
+setInterval(() => {
+  console.log('Corpus metrics:', metrics)
+}, 60000)
+```
+
+### Example 3: Routing Errors to a Logger
+
+Send all errors to your logging service:
+
+```typescript
+import { create_corpus, create_file_backend } from '@f0rbit/corpus'
+
+async function log_error_to_service(error: CorpusError) {
+  await fetch('https://logs.example.com/api/errors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      timestamp: new Date().toISOString(),
+      error_kind: error.kind,
+      operation: 'operation' in error ? error.operation : undefined,
+      message: error.kind === 'storage_error' ? error.cause.message : undefined,
+    })
+  })
+}
+
+const corpus = create_corpus()
+  .with_backend(create_file_backend({
+    base_path: './data',
+    on_event: async (event) => {
+      if (event.type === 'error') {
+        await log_error_to_service(event.error)
+      }
+    }
+  }))
+  .with_store(define_store('documents', json_codec(DocumentSchema)))
+  .build()
+```
+
+## Performance Notes
+
+- Events are **synchronous callbacks**. Avoid blocking operations in the handler (don't await I/O).
+- For async work, dispatch to a background queue: `queue.push(event)` and process later.
+- Missing an event is not a data loss—events are best-effort for observability.
+
+## Error Handling in Events
+
+Event handlers receive fully-formed `CorpusError` objects. Switch on `error.kind` for type-safe handling:
+
+```typescript
+on_event: (event) => {
+  if (event.type === 'error') {
+    const error = event.error
+    switch (error.kind) {
+      case 'not_found':
+        console.log(`Missing: ${error.store_id}:${error.version}`)
+        break
+      case 'storage_error':
+        console.error(`I/O failed during ${error.operation}:`, error.cause)
+        break
+      case 'decode_error':
+        console.error(`Failed to decode:`, error.cause)
+        break
+      // ... handle other kinds
+    }
+  }
+}
+```
+
+## See Also
+
+- [Backend Types](/corpus/api/backends/types) — Full CorpusEvent and EventHandler definitions
+- [Storage Backends](/corpus/guides/backends) — Configuring backends with event handlers
+- [Observations](/corpus/guides/observations) — For persistent, queryable facts (vs ephemeral events)
