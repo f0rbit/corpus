@@ -76,16 +76,16 @@ export type Store<T> = {
 
 The conditional `stream: T extends … ? … : never` makes `handle.stream()` a compile-time error on a `Store<User>` backed by `json_codec(UserSchema)`.
 
-### 2.2 Codec interface evolution — additive optional methods
+### 2.2 Codec interface evolution
 
-**Decision: extend `Codec<T>` with optional `encode_stream` and `decode_stream`. Existing codec implementations are unaffected.**
+**Decision: `Codec<T>.encode` and `Codec<T>.decode` become async (always return `Promise<…>`). Stream variants are added as optional methods. Sync codec implementations are no longer supported.**
 
 ```ts
-// types.ts (additions)
+// types.ts
 export type Codec<T> = {
   content_type: ContentType
-  encode: (value: T) => Uint8Array
-  decode: (bytes: Uint8Array) => T
+  encode: (value: T) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<T>
 
   /** Optional: chunked encode. If absent, store falls back to `encode` + one-chunk stream. */
   encode_stream?: (value: T) => ReadableStream<Uint8Array>
@@ -100,11 +100,19 @@ export type Codec<T> = {
 }
 ```
 
-**Why optional and not separate `StreamingCodec<T>` interface?**
-- Most consumers don't care. Forcing all codec implementers to declare a streaming variant is gratuitous churn for `json_codec` users.
-- The conditional type on `SnapshotHandle.stream` derives from whether `decode_stream` is in the codec's type, so it works with structural typing — no runtime tagging needed.
+**Why always-async over union return type?**
+- One signature, no branch logic at callsites. `corpus.ts:68` and `corpus.ts:133` always `await`.
+- Workers compatibility falls out for free — `CompressionStream` (gzip), `crypto.subtle` (encrypt), and any other Web Streams-based codec layer can be implemented natively without sync escape hatches.
+- A union return type (`Uint8Array | Promise<Uint8Array>`) creates a permanent two-shape API where each callsite has to consider both. Going fully async is cleaner.
+- Performance cost is one microtask hop on sync codecs (json/text/binary) — negligible vs. the I/O on either side.
+
+This is **breaking** for end-users (every existing codec implementation needs updating; consumers calling `codec.encode` / `codec.decode` directly need to `await`). Ship as 0.4.0 with a clear migration note. See §3.
 
 **Why both `encode_stream` and `decode_stream`?** Encode-side streaming only matters for `Store.put` accepting a stream. That's a separate (smaller) feature — we ship the type field for symmetry and fill in the encode wiring as a follow-up. Out of scope for this plan but flagged in §6.
+
+**Why optional stream methods and not a separate `StreamingCodec<T>` interface?**
+- Most consumers don't care. Forcing all codec implementers to declare a streaming variant is gratuitous churn for `json_codec` users.
+- The conditional type on `SnapshotHandle.stream` derives from whether `decode_stream` is in the codec's type, so it works with structural typing — no runtime tagging needed.
 
 ### 2.3 Composition signature
 
@@ -131,8 +139,15 @@ export function compose<T>(
 
   return {
     content_type: head.content_type,
-    encode(value) { /* fold */ },
-    decode(bytes) { /* fold reverse */ },
+    async encode(value) {
+      let bytes = await head.encode(value)
+      for (const layer of layers) bytes = await layer.encode(bytes)
+      return bytes
+    },
+    async decode(bytes) {
+      for (const layer of [...layers].reverse()) bytes = await layer.decode(bytes)
+      return head.decode(bytes)
+    },
     ...(decode_streamable && {
       decode_stream(stream) {
         // pipe stream through layers[n-1].decode_stream → … → layers[0].decode_stream → head.decode_stream
@@ -175,15 +190,26 @@ If a consumer wants "decoded bytes" out of `binary_codec()`, they call `value()`
 
 ### 3.1 Public API additions (non-breaking)
 
-- `Codec<T>.encode_stream?` / `decode_stream?` — optional, structural. **Custom codec implementations continue to compile.**
+- `Codec<T>.encode_stream?` / `decode_stream?` — new optional methods.
 - `Store.get_handle` / `get_latest_handle` — new methods, additive.
 - `SnapshotHandle<T>` — new exported type.
 - `compose`, `BytesCodec` — new exports.
 - `gzip_codec()`, `encrypt_codec(key)` — new exports.
 
-### 3.2 Internal changes (BREAKING for custom backends)
+### 3.2 BREAKING: `Codec<T>.encode` / `decode` become async
 
-**BREAKING: `DataStorage` adapter interface changes.**
+`Codec<T>.encode: (value: T) => Uint8Array` becomes `(value: T) => Promise<Uint8Array>`.
+`Codec<T>.decode: (bytes: Uint8Array) => T` becomes `(bytes: Uint8Array) => Promise<T>`.
+
+Affects:
+- **All custom codec implementations.** Sync return types stop type-checking. Wrap return values in `Promise.resolve(...)` or convert the function to `async`. Drop-in mechanical migration.
+- **Consumers calling `codec.encode` / `codec.decode` directly.** Must `await` the result. The vast majority of corpus consumers go through `store.put` / `store.get` and won't notice.
+- **Built-in codecs (`json_codec`, `text_codec`, `binary_codec`)** — updated in Phase 1. Sync internals wrapped as `async` — one-line change each.
+- **Internal callsites** in `corpus.ts:68` (encode in `put`) and `corpus.ts:133` (decode in `get`) — add `await`.
+
+Ship the migration note prominently in the 0.4.0 release notes and `api/codecs.mdx`.
+
+### 3.3 BREAKING: `DataStorage` adapter interface changes
 
 `backend/base.ts:28` — `DataStorage.get` signature changes from `Promise<Uint8Array | null>` to `Promise<DataStorageHandle | null>`:
 
@@ -202,9 +228,9 @@ This affects anyone who built a custom backend using `create_data_client(storage
 
 Document the change in the changelog. This is `0.4.0` material.
 
-### 3.3 Non-breaking for end-users
+### 3.4 Non-breaking for end-users
 
-Nothing on `Corpus`, `Store.get`, `Store.put`, or any backend factory function (`create_memory_backend`, `create_file_backend`, `create_cloudflare_backend`, `create_layered_backend`) changes signature. Existing consumer code keeps working.
+Nothing on `Corpus`, `Store.get`, `Store.put`, or any backend factory function (`create_memory_backend`, `create_file_backend`, `create_cloudflare_backend`, `create_layered_backend`) changes signature. End-user consumers using only the built-in codecs and the high-level `store.put`/`store.get` API see no break — the async codec internals are fully transparent through the store layer.
 
 ---
 
@@ -216,24 +242,21 @@ Nothing on `Corpus`, `Store.get`, `Store.put`, or any backend factory function (
 export function gzip_codec(): BytesCodec {
   return {
     content_type: 'application/gzip',  // wrapper layer — head's content_type wins after compose
-    encode(bytes) {
-      // sync compress is awkward in web standards; this is the buffered path
+    async encode(bytes) {
       const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))
-      return await new Response(stream).arrayBuffer().then(b => new Uint8Array(b))
-      // (encode signature is sync — for sync we'd need a Node zlib path; see open question §6)
+      return new Uint8Array(await new Response(stream).arrayBuffer())
     },
-    decode(bytes) { /* DecompressionStream similarly */ },
+    async decode(bytes) {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+      return new Uint8Array(await new Response(stream).arrayBuffer())
+    },
     encode_stream(bytesStream) { return bytesStream.pipeThrough(new CompressionStream('gzip')) },
     decode_stream(bytesStream) { return bytesStream.pipeThrough(new DecompressionStream('gzip')) },
   }
 }
 ```
 
-Important note: `Codec<T>.encode` is currently `(value: T) => Uint8Array` (sync). gzip's `CompressionStream` is async. Either:
-- Make sync `encode` use Bun's `Bun.gzipSync` / Node's `zlib.gzipSync` (fast but ties us to Bun/Node — won't run in Workers without polyfill).
-- Change `Codec.encode` to allow `Promise<Uint8Array>` (BREAKING for the codec interface).
-
-**Decision: change `encode` and `decode` to allow `T | Promise<T>` / `Uint8Array | Promise<Uint8Array>` return types** — this is also additive at the consumer level (callers `await` either way) but is a type-signature change for codec implementers. Treat as a tolerated breaking change in 0.4.0. See §6 (open question).
+The buffered `encode`/`decode` paths trivially fall out of the streaming impl — wrap input in a `Blob` stream, pipe through compression/decompression, and consume the output. Identical bytes either way. Works on Workers, Bun, and Node 18+.
 
 ### 4.2 `encrypt_codec(key)`
 
@@ -245,8 +268,8 @@ So:
 export function encrypt_codec(key: CryptoKey): BytesCodec {
   return {
     content_type: 'application/octet-stream',
-    encode(bytes) { /* WebCrypto AES-GCM encrypt; prepends 12-byte IV */ },
-    decode(bytes) { /* slice IV, decrypt */ },
+    async encode(bytes) { /* WebCrypto AES-GCM encrypt; prepends 12-byte IV */ },
+    async decode(bytes) { /* slice IV, decrypt */ },
     encode_stream(bytes) { /* fine — encrypt in chunks then append tag */ },
     // decode_stream INTENTIONALLY omitted: must verify auth tag before yielding plaintext
   }
@@ -264,25 +287,27 @@ Each phase is independently committable and verifiable. Parallelisation noted pe
 ### Phase 1 — Codec interface evolution + composition
 
 **Scope:**
+- Change `Codec<T>.encode` / `decode` to always-async (`Promise<Uint8Array>` / `Promise<T>`) in `types.ts`.
 - Add `encode_stream?` / `decode_stream?` to `Codec<T>` (`types.ts`).
-- Change `Codec.encode` / `Codec.decode` to support sync OR async return (see §6 — depends on user decision; default plan is async-allowed).
 - Add `BytesCodec` alias.
+- Update `json_codec`, `text_codec`, `binary_codec` in `utils.ts` — wrap existing sync internals in `async` (one-line change each).
+- Update internal callsites in `corpus.ts` (~`corpus.ts:68`, `corpus.ts:133`) to `await` codec calls.
 - Add `compose(...)` to `utils.ts` (or new `codecs/compose.ts`).
-- Update `json_codec`, `text_codec`, `binary_codec`:
-  - `text_codec` and `binary_codec` get `encode_stream` / `decode_stream` (chunked passthrough).
-  - `json_codec` stays decode-only on bytes (no stream methods).
+- Add `encode_stream` / `decode_stream` on `text_codec` and `binary_codec` (chunked passthrough). `json_codec` stays without stream methods (Zod validation needs full document).
 - Unit tests for `compose()` (4–6 tests: composition order, error propagation, streamability inference, non-streamable layer disables stream).
+- Unit tests for built-in codecs around the async signature.
 
-**Files touched:** `types.ts`, `utils.ts`, `tests/unit/compose.test.ts` (new), `tests/unit/codecs.test.ts` (new — covers stream codecs).
+**Files touched:** `types.ts`, `utils.ts`, `corpus.ts`, `tests/unit/compose.test.ts` (new), `tests/unit/codecs.test.ts` (new — covers stream codecs and the async signature).
 
-**LOC estimate:** ~250 (compose ~80, codec stream methods ~60, tests ~110).
+**LOC estimate:** ~280 (codec interface + built-in updates ~70, compose ~80, codec stream methods ~60, callsite awaits ~10, tests ~110).
 
-**Parallelisation:** Two sub-tasks can run in parallel in worktrees:
+**Parallelisation:** The async-signature change to `Codec<T>` is foundational — it must land first as a single sequential task before anything can parallelise.
+
+After that, two sub-tasks can run in parallel in worktrees:
 - Worktree A: `compose()` impl + `tests/unit/compose.test.ts`.
 - Worktree B: `text_codec` / `binary_codec` stream methods + `tests/unit/codecs.test.ts`.
-- Sequential after both: type changes to `Codec<T>` in `types.ts` (foundational; needs to land before either worktree merges cleanly).
 
-So in practice: do the `types.ts` change as a small task first, then parallelise A + B.
+So: (1) sequential foundational change to `Codec<T>` + built-in codec updates + corpus.ts await callsites — must compile and pass existing tests. (2) parallelise A + B.
 
 **Exit criteria:** `bun test` green. New tests cover: compose order, encode/decode roundtrip, structural streamability check (a unit test that asserts `compose(text_codec(), gzip_codec()).decode_stream` is defined; `compose(json_codec(s), gzip_codec()).decode_stream` is undefined).
 
@@ -371,10 +396,7 @@ So in practice: do the `types.ts` change as a small task first, then parallelise
 
 These should be resolved before Phase 1 starts.
 
-1. **`Codec.encode` / `decode` sync vs async.** gzip's `CompressionStream` is async. Either:
-   - (a) Allow `Codec.encode` to return `Uint8Array | Promise<Uint8Array>` (and same for `decode`). Tolerated breaking change for codec implementers — they keep returning sync if they can; consumers just `await`. Affects `corpus.ts:68` and `corpus.ts:133` (need an `await` added).
-   - (b) Pin `gzip_codec.encode` to a sync zlib path (Bun-only / Node-only) and skip Workers compatibility on the sync API.
-   - **Recommendation: (a).** Workers compatibility matters for this library and the cost is one `await`.
+1. ~~**`Codec.encode` / `decode` sync vs async.**~~ **RESOLVED 2026-05-05:** `Codec.encode` and `Codec.decode` become always-async (`Promise<Uint8Array>` / `Promise<T>`). Sync codecs are no longer supported. Cleaner contract than a union return type at the cost of being a tagged breaking change. See §2.2 and §3.2.
 
 2. **`Store.put` accepting a `ReadableStream<T>` for streaming encode.** Out of scope here? Or fold into Phase 3? The `DataClient.put` already accepts a `ReadableStream<Uint8Array>`, so the plumbing for an encode-side streaming path exists. Adding `Store.put_stream(stream: ReadableStream<T>): Promise<…>` would mirror the read side. **Recommendation: defer to a follow-up plan; keep this plan read-focused.**
 
@@ -425,7 +447,8 @@ Tasks to mirror in devpad once the plan is approved. Format: `[priority] title �
 
 ### Phase 1 — Codec interface + compose
 
-- `[high] Add streaming methods to Codec<T> interface` — extend `types.ts` with optional `encode_stream` / `decode_stream`; allow `encode`/`decode` to return promises. Foundation for everything else.
+- `[high] BREAKING: Codec.encode/decode become async` — change `types.ts` signatures to `Promise<...>`; update built-in codecs (`json_codec`, `text_codec`, `binary_codec`); add `await` at internal callsites in `corpus.ts`. Foundation for everything else.
+- `[high] Add streaming methods to Codec<T> interface` — extend `types.ts` with optional `encode_stream` / `decode_stream`.
 - `[high] Implement compose() operator` — variadic `compose(head, ...layers)` in `utils.ts`; structural streamability inference.
 - `[medium] Add streaming to text_codec / binary_codec` — `encode_stream` / `decode_stream` on the two chunkable built-ins.
 - `[medium] Unit tests for compose() and stream codecs` — coverage per §7.
@@ -466,9 +489,10 @@ To capture after implementation lands:
 
 ### Add to "Conventions"
 
-> **Codecs** — `Codec<T>` exposes optional `encode_stream` / `decode_stream`. A codec without `decode_stream` cannot be used through `Store.get_handle().handle.stream()` — TypeScript enforces this via a conditional type. When writing a new byte-transformer codec (gzip, encrypt, base64), prefer to ship both `encode_stream` and `decode_stream` unless the format fundamentally can't (auth-tagged AEAD on decode, schema-validated formats like Zod-backed JSON).
+> **Codecs** — `Codec<T>.encode` and `decode` are async (`Promise<...>` return types) since 0.4.0. Sync internals are fine, just wrap them in `async`. `Codec<T>` also exposes optional `encode_stream` / `decode_stream`. A codec without `decode_stream` cannot be used through `Store.get_handle().handle.stream()` — TypeScript enforces this via a conditional type. When writing a new byte-transformer codec (gzip, encrypt, base64), prefer to ship both `encode_stream` and `decode_stream` unless the format fundamentally can't (auth-tagged AEAD on decode, schema-validated formats like Zod-backed JSON).
 
 ### Add to "Gotchas"
 
 > - `compose(head, ...layers)` returns a `Codec<T>` whose `decode_stream` is only defined when every layer (head + all wrappers) has `decode_stream`. Dropping `encrypt_codec()` into a composition disables streaming reads — by design, because AES-GCM requires the auth tag before any plaintext is safe to release.
 > - `DataStorage.get` returns a `DataStorageHandle`, not raw bytes (changed in 0.4.0). Custom backends should call `wrap_bytes_storage(...)` if they only have a bytes-returning getter.
+> - Calling `codec.encode(v)` or `codec.decode(b)` directly (rare — most consumers go through `store.put`/`store.get`) requires `await` since 0.4.0.
