@@ -118,8 +118,8 @@ export function generate_version(): string {
 export function json_codec<T>(schema: Parser<T>): Codec<T> {
 	return {
 		content_type: "application/json",
-		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
-		decode: (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
+		encode: async (value) => new TextEncoder().encode(JSON.stringify(value)),
+		decode: async (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
 	};
 }
 
@@ -148,8 +148,8 @@ export function json_codec<T>(schema: Parser<T>): Codec<T> {
 export function text_codec(): Codec<string> {
 	return {
 		content_type: "text/plain",
-		encode: (value) => new TextEncoder().encode(value),
-		decode: (bytes) => new TextDecoder().decode(bytes),
+		encode: async (value) => new TextEncoder().encode(value),
+		decode: async (bytes) => new TextDecoder().decode(bytes),
 	};
 }
 
@@ -179,8 +179,8 @@ export function text_codec(): Codec<string> {
 export function binary_codec(): Codec<Uint8Array> {
 	return {
 		content_type: "application/octet-stream",
-		encode: (value) => value,
-		decode: (bytes) => bytes,
+		encode: async (value) => value,
+		decode: async (bytes) => bytes,
 	};
 }
 

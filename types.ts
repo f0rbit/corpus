@@ -269,8 +269,8 @@ export type Backend = {
  */
 export type Codec<T> = {
   content_type: ContentType
-  encode: (value: T) => Uint8Array
-  decode: (bytes: Uint8Array) => T
+  encode: (value: T) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<T>
 }
 
 /**

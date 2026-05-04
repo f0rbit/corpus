@@ -65,7 +65,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       
       let bytes: Uint8Array
       try {
-        bytes = codec.encode(data)
+        bytes = await codec.encode(data)
       } catch (cause) {
         const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
         emit({ type: 'error', error })
@@ -130,7 +130,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       const bytes = await data_result.value.bytes()
       let data: T
       try {
-        data = codec.decode(bytes)
+        data = await codec.decode(bytes)
       } catch (cause) {
         const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
         emit({ type: 'error', error })
@@ -156,7 +156,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       const bytes = await data_result.value.bytes()
       let data: T
       try {
-        data = codec.decode(bytes)
+        data = await codec.decode(bytes)
       } catch (cause) {
         const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
         emit({ type: 'error', error })
