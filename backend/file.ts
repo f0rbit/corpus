@@ -3,14 +3,18 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, SnapshotMeta, EventHandler } from '../types.js';
+import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta, EventHandler } from '../types.js';
 import type { ObservationRow } from '../observations/index.js';
 import { create_observations_client, create_observations_storage } from '../observations/index.js';
 import { create_emitter, parse_snapshot_meta } from '../utils.js';
-import { mkdir, readdir } from "node:fs/promises";
+import { ok, err } from '../types.js';
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from './base.js';
 import type { MetadataStorage, DataStorage } from './base.js';
+
+/** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
+const TX_DIR_PREFIX = '.tx-';
 
 export type FileBackendConfig = {
 	base_path: string;
@@ -85,7 +89,9 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		try {
 			const entries = await readdir(base_path, { withFileTypes: true });
 			for (const entry of entries) {
-				if (entry.isDirectory() && !entry.name.startsWith("_")) {
+				// Skip `_*` (internal: `_data`, `_observations.json`) and `.*`
+				// (transaction staging dirs `.tx-<id>/`).
+				if (entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".")) {
 					yield entry.name;
 				}
 			}
@@ -212,5 +218,209 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 	});
 	const observations = create_observations_client(storage, metadata);
 
-	return { metadata, data, observations, on_event };
+	/**
+	 * Atomically apply a batch of ops via stage-and-rename.
+	 *
+	 * Staging phase: builds the post-commit state for every affected store's
+	 * meta map, every staged data file, and (if any observation op exists) the
+	 * post-commit observations array, all under `<base>/.tx-<id>/`. If any
+	 * staging step fails, the whole staging dir is removed and the live tree
+	 * is untouched — readers see no partial state.
+	 *
+	 * Commit phase: renames staged files over the live targets. Order is
+	 * data → meta → observations so any committed metadata always has its
+	 * blob present (matches the existing non-transactional ordering in
+	 * `create_store`). Renames are atomic per-file on POSIX/NTFS but the
+	 * batch of renames is NOT atomic across files — a crash mid-commit can
+	 * leave some renames applied. The staging dir is left in place if a
+	 * rename fails so `recover()` can clean it up; `partial_commit` is
+	 * returned with the staging path in the cause.
+	 *
+	 * Best-effort durability — Bun's fs API does not expose `fsync`, so we
+	 * rely on kernel-level guarantees only.
+	 */
+	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+		const tx_id = crypto.randomUUID();
+		const tx_dir = join(base_path, `${TX_DIR_PREFIX}${tx_id}`);
+		const staged_meta_dir = join(tx_dir, 'meta');
+		const staged_data_dir = join(tx_dir, 'data');
+		const staged_obs_path = join(tx_dir, '_observations.json');
+
+		try {
+			await mkdir(tx_dir, { recursive: true });
+
+			// Bucket meta ops per store so we read/merge each store's _meta.json
+			// only once (one staged write per affected store, not per op).
+			const meta_changes = new Map<string, { puts: SnapshotMeta[]; deletes: string[] }>();
+			const data_writes: { staged: string; live: string }[] = [];
+			let touches_observations = false;
+			const obs_puts: ObservationRow[] = [];
+			const obs_deletes: string[] = [];
+
+			function meta_bucket(store_id: string): { puts: SnapshotMeta[]; deletes: string[] } {
+				let bucket = meta_changes.get(store_id);
+				if (!bucket) {
+					bucket = { puts: [], deletes: [] };
+					meta_changes.set(store_id, bucket);
+				}
+				return bucket;
+			}
+
+			// Pass 1: stage data + collect meta/obs ops.
+			for (const op of ops) {
+				switch (op.type) {
+					case 'meta_put':
+						meta_bucket(op.meta.store_id).puts.push(op.meta);
+						break;
+					case 'meta_delete':
+						meta_bucket(op.store_id).deletes.push(op.version);
+						break;
+					case 'data_put': {
+						const live = data_path(op.data_key);
+						const staged = join(staged_data_dir, `${op.data_key.replace(/\//g, '_')}.bin`);
+						await mkdir(dirname(staged), { recursive: true });
+						await Bun.write(staged, op.bytes);
+						data_writes.push({ staged, live });
+						break;
+					}
+					case 'observation_put':
+						touches_observations = true;
+						obs_puts.push(op.row);
+						break;
+					case 'observation_delete':
+						touches_observations = true;
+						obs_deletes.push(op.id);
+						break;
+				}
+			}
+
+			// Pass 2: build merged meta maps per affected store and stage them.
+			const meta_writes: { staged: string; live: string }[] = [];
+			for (const [store_id, bucket] of meta_changes) {
+				const live = meta_path(store_id);
+				const staged = join(staged_meta_dir, `${store_id}.json`);
+				const merged = await read_store_meta(store_id);
+				for (const meta of bucket.puts) merged.set(meta.version, meta);
+				for (const version of bucket.deletes) merged.delete(version);
+				await mkdir(dirname(staged), { recursive: true });
+				await Bun.write(staged, JSON.stringify(Array.from(merged.entries())));
+				meta_writes.push({ staged, live });
+			}
+
+			// Pass 3: build merged observations array if touched, stage it.
+			let obs_write: { staged: string; live: string } | null = null;
+			if (touches_observations) {
+				const merged = await read_observations();
+				const delete_set = new Set(obs_deletes);
+				const filtered = merged.filter((r) => !delete_set.has(r.id));
+				const final = filtered.concat(obs_puts);
+				await Bun.write(staged_obs_path, JSON.stringify(final, null, 2));
+				obs_write = { staged: staged_obs_path, live: file_path };
+			}
+
+			// Commit phase. Data first (idempotent — content-addressed), then
+			// meta (the source of truth for visibility), then observations.
+			// Mid-flight failure leaves the staging dir for `recover()`.
+			const renames: { staged: string; live: string }[] = [
+				...data_writes,
+				...meta_writes,
+				...(obs_write ? [obs_write] : []),
+			];
+
+			let committed = 0;
+			for (const { staged, live } of renames) {
+				try {
+					await mkdir(dirname(live), { recursive: true });
+					await rename(staged, live);
+					committed++;
+				} catch (cause) {
+					return err({
+						kind: 'partial_commit',
+						ops_completed: committed,
+						ops_failed: renames.length - committed,
+						cause: cause instanceof Error
+							? new Error(`${cause.message} (staging dir: ${tx_dir})`, { cause })
+							: new Error(`apply_batch rename failed (staging dir: ${tx_dir})`),
+					});
+				}
+			}
+
+			// All renames succeeded — clean up the now-empty staging tree.
+			await rm(tx_dir, { recursive: true, force: true });
+			return ok(undefined);
+		} catch (cause) {
+			// Staging-phase failure: nothing was visible to readers, so this
+			// is a clean abort. Nuke the staging dir.
+			await rm(tx_dir, { recursive: true, force: true }).catch(() => {});
+			return err({
+				kind: 'transaction_aborted',
+				reason: 'apply_batch_failed',
+				cause: cause instanceof Error ? cause : new Error(String(cause)),
+			});
+		}
+	}
+
+	return { metadata, data, observations, on_event, apply_batch };
+}
+
+/**
+ * Clean up stale transaction staging directories left behind by a previous
+ * crash mid-commit.
+ * @category Backends
+ * @group Storage Backends
+ *
+ * Stage-and-rename `apply_batch` writes everything to `<root>/.tx-<id>/`
+ * before issuing renames. If the process dies between renames, the staging
+ * dir is left on disk. This helper scans `<root>` for `.tx-*` directories
+ * and removes them. We do not attempt to roll forward — leftover staging
+ * dirs represent aborted transactions.
+ *
+ * Call once at startup before the first `create_file_backend()` against a
+ * directory that may have been left in a half-state. **Do not** invoke
+ * concurrently with another process that's actively writing the same
+ * directory — there's no locking, and you may race a live transaction.
+ *
+ * @param root_dir - The same `base_path` passed to `create_file_backend`
+ * @returns `{ recovered, aborted }` — `aborted` is the number of staging
+ *          dirs found, `recovered` is the number successfully removed.
+ *
+ * @example
+ * ```ts
+ * await recover('./data/corpus')
+ * const backend = create_file_backend({ base_path: './data/corpus' })
+ * ```
+ */
+export async function recover(root_dir: string): Promise<Result<{ recovered: number; aborted: number }, CorpusError>> {
+	let entries: { name: string; isDirectory: () => boolean }[];
+	try {
+		entries = await readdir(root_dir, { withFileTypes: true });
+	} catch (cause) {
+		return err({
+			kind: 'storage_error',
+			cause: cause instanceof Error ? cause : new Error(String(cause)),
+			operation: 'recover',
+		});
+	}
+
+	const stale = entries.filter((e) => e.isDirectory() && e.name.startsWith(TX_DIR_PREFIX));
+	let recovered = 0;
+	const failures: Error[] = [];
+	for (const entry of stale) {
+		try {
+			await rm(join(root_dir, entry.name), { recursive: true, force: true });
+			recovered++;
+		} catch (cause) {
+			failures.push(cause instanceof Error ? cause : new Error(String(cause)));
+		}
+	}
+
+	if (failures.length > 0) {
+		return err({
+			kind: 'storage_error',
+			cause: failures[0]!,
+			operation: 'recover',
+		});
+	}
+
+	return ok({ recovered, aborted: stale.length });
 }
