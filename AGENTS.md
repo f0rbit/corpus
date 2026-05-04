@@ -107,7 +107,11 @@ Docs live in `docs/` as an Astro Starlight workspace.
 - Always run `bun run docs:build` after MDX changes — it regenerates `llms.txt` from the docs and will catch broken links / missing frontmatter.
 - The package name in user-facing docs is **`@f0rbit/corpus`** (with the scope). The README has historically used the unscoped form — prefer the scoped form going forward.
 
-The latest doc gap analysis lives at `.plans/documentation-gap-analysis.md` (dated 2026-01-18). It's partially stale; many "missing" items have been added since. Re-verify before acting on it.
+Active plans live in `.plans/`:
+- `streamed-reads.md` — streaming reads + codec composition (`Codec.encode/decode` becomes async)
+- `cross-store-atomic.md` — `corpus.transaction(async tx => ...)` API
+
+These are the source of truth for in-flight design; consult them before changing `types.ts`, `corpus.ts`, or any backend.
 
 ## Gotchas
 
@@ -116,3 +120,4 @@ The latest doc gap analysis lives at `.plans/documentation-gap-analysis.md` (dat
 - `define_store` accepts an optional `data_key_fn(ctx)` to override the default `${store_id}/${content_hash}` data key. Custom layouts (e.g. partition by tag/date) go through this — don't reimplement key computation upstream.
 - Cloudflare backend uses `eq()` (not `like()`) for `store_id` filtering in `metadata.list()`. Don't regress this — see commit `02bee7f`.
 - `peerDependencies` lists `zod ^3` and `typescript ^5`. Codecs that take a Zod schema should accept the schema generically (`z.ZodType<T>`), not pin to a specific Zod version's class.
+- Cross-store transactions on the Cloudflare backend can leave R2 orphan blobs when a transaction aborts after data writes but before D1 commit. This is intentional (data is content-addressed and idempotent; metadata is the source of truth). A follow-up `corpus.gc()` is tracked in the README.

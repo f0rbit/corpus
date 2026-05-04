@@ -332,17 +332,20 @@ export type CorpusError =
 
 Each phase ends with a verification coder running typecheck + `bun test`, then committing.
 
-### Phase 1 — API surface + types (~150 LOC)
+### Phase 1 — API surface + types (~170 LOC)
 
 Sequential, single coder. Foundation for everything else.
 
 - Edit `types.ts`:
-  - Add `BatchOp`, `TransactionHandle`, `TransactionResult`.
+  - Add `BatchOp` (including `meta_delete`, `observation_delete` from the start — see §10 Q6).
+  - Add `TransactionHandle` with `put`, `get`, `delete`, `observe`, `observation_delete` methods.
+  - Add `TransactionResult`.
   - Add three new `CorpusError` kinds.
   - Add optional `apply_batch` to `Backend`.
   - Add `transaction` to `Corpus`.
 - Edit `corpus.ts`:
   - Implement `transaction()` on the corpus instance. The implementation is backend-agnostic: it builds a buffered handle, runs the body, then either calls `backend.apply_batch(ops)` or falls back to sequential-with-compensation.
+  - Detect nested transactions (transaction body invoking `corpus.transaction()` again) → return `err({ kind: 'invalid_config', message: 'nested transactions are not supported' })`.
 - New `tx.ts` module (or inlined in `corpus.ts` if it stays small) with:
   - `create_tx_handle(corpus, backend)` — returns `{ handle, get_ops, get_results }`.
   - Buffer + read-through logic.
@@ -350,7 +353,7 @@ Sequential, single coder. Foundation for everything else.
 - Update `index.ts` barrel.
 
 Files touched: `types.ts`, `corpus.ts`, `index.ts`, possibly `tx.ts` (new).
-Exit: typecheck passes; existing tests pass; `transaction()` works against memory backend via fallback path.
+Exit: typecheck passes; existing tests pass; `transaction()` works against memory backend via fallback path; nested transaction returns `invalid_config`.
 
 ### Phase 2 — Memory backend `apply_batch` + contract tests (~200 LOC)
 
@@ -442,13 +445,15 @@ For the Cloudflare backend specifically, add an ordering test (no real D1 needed
 
 ## 10. Open questions
 
-1. **Nested transactions.** Should `corpus.transaction()` inside a transaction body chain into the parent (like Postgres savepoints) or error? Proposed: error with `invalid_config` for v1; revisit if a real case appears.
-2. **Timeout / deadlock.** corpus does no locking, so deadlock isn't possible, but a hung body will hold the buffer forever. Should `transaction()` accept a timeout option that aborts the body? Proposed: not for v1 — consumers can use `Promise.race` themselves.
-3. **Staging-dir inspection on file backend.** Should we expose `.tx-*` directories via a debug API, or keep them strictly internal? Proposed: internal; provide a documented `recover()` for cleanup but no enumeration API.
-4. **R2 orphan GC.** Out of scope for this plan, but worth tracking. Proposed follow-up: a `corpus.gc()` method that scans D1 for live `data_key`s and lists R2 objects not in that set.
-5. **Concurrency control opt-in.** Should we offer a per-tx `version_check: { store_id, expected_latest }` option that maps to D1's optimistic concurrency? Useful but adds API surface; defer to a follow-up.
-6. **`tx.delete`?** The spec only mentions `tx.put` and `tx.observe`. Should we support `tx.delete(store, version)` and `tx.observation_delete(id)` for symmetry? Proposed: yes — adding the ops is trivial since `meta_delete` and `observation_delete` are already in `BatchOp`. Surface them on the handle.
-7. **Snapshot semantics for memory backend rollback.** Confirmed shallow snapshot is sufficient because corpus never mutates `SnapshotMeta`. Should we add a runtime invariant check (`Object.freeze` on stored meta) to enforce this? Proposed: yes, behind a `dev` flag — too expensive in hot paths.
+All resolved 2026-05-05.
+
+1. ~~**Nested transactions.**~~ **RESOLVED:** Error with `kind: 'invalid_config'` for v1; revisit if a real use case appears.
+2. ~~**Timeout / deadlock.**~~ **RESOLVED — no built-in timeout.** Consumers use `Promise.race` themselves.
+3. ~~**Staging-dir inspection on file backend.**~~ **RESOLVED — internal.** Provide a documented `recover()` helper for cleanup. No enumeration API.
+4. ~~**R2 orphan GC.**~~ **RESOLVED — follow-up work.** Out of scope for this plan. Tracked as a TODO in `README.md` (and in §12 AGENTS.md "Gotchas" addition). Follow-up shape: a `corpus.gc()` method that scans D1 for live `data_key`s and lists R2 objects not in that set.
+5. ~~**Concurrency control opt-in (`version_check`).**~~ **RESOLVED — defer.** Useful but adds API surface; revisit if a real use case appears.
+6. ~~**`tx.delete` / `tx.observation_delete`.**~~ **RESOLVED — yes, include in v1.** `meta_delete` and `observation_delete` are already in `BatchOp`; surface them on the handle. Phase 1 scope expanded to include these methods.
+7. ~~**`Object.freeze` invariant check on memory snapshots.**~~ **RESOLVED — yes, behind a `dev` flag.** Too expensive in hot paths but useful in development.
 
 ---
 

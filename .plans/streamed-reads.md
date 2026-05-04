@@ -184,6 +184,35 @@ That's a breaking change to anyone implementing a custom backend on top of `Data
 
 If a consumer wants "decoded bytes" out of `binary_codec()`, they call `value()` — which returns `Uint8Array` for that codec.
 
+### 2.6 Streaming encode (`Store.put_stream`)
+
+Symmetric with `Store.get_handle`: consumers can hand corpus a `ReadableStream<T>` instead of a materialised value. Required when the upstream is itself a stream (HTTP body, file, sub-process stdout) and you don't want to buffer it.
+
+```ts
+// types.ts (additions to Store<T>)
+export type Store<T> = {
+  // ...existing fields
+  put: (value: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put_stream: T extends StreamableValue
+    ? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+    : never
+}
+```
+
+Same conditional-type pattern as `SnapshotHandle.stream` — `put_stream` is only present when the codec has `encode_stream`. Type error if you call it on a `Store<User>` backed by `json_codec`.
+
+**Content-hash strategy:** corpus content-addresses by SHA-256 of the encoded bytes. With a streaming encode, you have three options:
+
+| Option | Pros | Cons |
+|---|---|---|
+| (a) Tee the encoded byte stream — one branch to backend, one to a streaming hasher | True streaming, low memory | Needs a streaming SHA-256 (no standard one in Workers/Bun — `crypto.subtle.digest` is one-shot) |
+| (b) Buffer encoded output, hash, then write to backend | Uses existing `compute_hash` | Defeats the streaming benefit on memory; OK if the upstream is the bottleneck |
+| **(c) Buffer-and-write under the hood, but accept the stream from the consumer** | Consumer never has to materialise; corpus internally collects encoded chunks until end-of-stream, hashes, then issues one `data.put`. Existing dedup behaviour preserved. | Memory grows with encoded payload size during put |
+
+**Decision: option (c) for v0.4.0.** Consumers get a clean `put_stream` API without having to manage the encode pipeline themselves; corpus buffers internally. We document the memory profile and revisit option (a) when a real streaming hasher dependency makes sense (or when corpus drops the strict "content_hash from encoded bytes" invariant).
+
+Phase 3 implements `put_stream` alongside `get_handle`. The bulk of the implementation is: `pipeThrough(codec.encode_stream)` → `concat_bytes` → `compute_hash` → `data.put(bytes)`.
+
 ---
 
 ## 3. Backwards compatibility
@@ -333,26 +362,28 @@ So: (1) sequential foundational change to `Codec<T>` + built-in codec updates + 
 
 **Exit criteria:** existing backend contract suite still passes; new "stream is actually chunked" test passes for file backend with a >64 KB payload.
 
-### Phase 3 — `Store.get_handle` + `SnapshotHandle<T>`
+### Phase 3 — `Store.get_handle` + `Store.put_stream` + `SnapshotHandle<T>`
 
 **Scope:**
 - Add `SnapshotHandle<T>` to `types.ts`.
-- Add `get_handle` and `get_latest_handle` to `Store<T>` interface.
+- Add `get_handle`, `get_latest_handle`, and `put_stream` to `Store<T>` interface.
 - Implement in `corpus.ts`'s `create_store`:
   - `get_handle` fetches metadata, fetches `DataHandle`, wraps in `SnapshotHandle<T>` that calls `codec.decode` on `value()` and `codec.decode_stream` on `stream()` (if present).
   - `get_latest_handle` similarly.
+  - `put_stream`: pipe input stream through `codec.encode_stream`, collect via `concat_bytes`, hash, then `data.put(bytes)`. Per §2.6 design choice (option c — buffer encoded output for hashing).
 - Integration tests in `tests/integration/store-streaming.test.ts` (new):
   - put/get_handle roundtrip: `value()`, `bytes()`, `stream()` all return correct content.
   - `stream()` with a streamable codec yields chunks; assert chunk count > 1 with a multi-chunk source.
-  - Type-level test (compile-only): `corpus.stores.users.get_handle(v).then(r => r.value.handle.stream())` should be a TS error when `users` uses `json_codec` — verify by reading a `// @ts-expect-error` line.
+  - `put_stream` roundtrip: stream a multi-chunk source through `text_codec` or `binary_codec`, verify resulting `SnapshotMeta.content_hash` matches `compute_hash(encoded_full_bytes)`.
+  - Type-level test (compile-only): `corpus.stores.users.get_handle(v).then(r => r.value.handle.stream())` should be a TS error when `users` uses `json_codec`; `corpus.stores.users.put_stream(...)` should likewise fail to type-check on a `json_codec`-backed store. Verify with `// @ts-expect-error`.
 
-**Files touched:** `types.ts`, `corpus.ts`, `tests/integration/store-streaming.test.ts` (new).
+**Files touched:** `types.ts`, `corpus.ts`, `utils.ts` (export `concat_bytes` if not already public for the put_stream impl), `tests/integration/store-streaming.test.ts` (new).
 
-**LOC estimate:** ~150.
+**LOC estimate:** ~220 (was 150 — `put_stream` impl + tests adds ~70).
 
-**Parallelisation:** Sequential. Single coder. Depends on Phase 1 + Phase 2.
+**Parallelisation:** Sequential within itself. Single coder. Depends on Phase 1 + Phase 2.
 
-**Exit criteria:** New store-streaming test green; existing tests untouched.
+**Exit criteria:** New store-streaming test green (covers both read and write streaming paths); existing tests untouched.
 
 ### Phase 4 — Reference streamable codecs
 
@@ -394,17 +425,17 @@ So: (1) sequential foundational change to `Codec<T>` + built-in codec updates + 
 
 ## 6. Open questions
 
-These should be resolved before Phase 1 starts.
+All resolved 2026-05-05.
 
-1. ~~**`Codec.encode` / `decode` sync vs async.**~~ **RESOLVED 2026-05-05:** `Codec.encode` and `Codec.decode` become always-async (`Promise<Uint8Array>` / `Promise<T>`). Sync codecs are no longer supported. Cleaner contract than a union return type at the cost of being a tagged breaking change. See §2.2 and §3.2.
+1. ~~**`Codec.encode` / `decode` sync vs async.**~~ **RESOLVED:** Always-async (`Promise<Uint8Array>` / `Promise<T>`). Sync codecs no longer supported. See §2.2 and §3.2.
 
-2. **`Store.put` accepting a `ReadableStream<T>` for streaming encode.** Out of scope here? Or fold into Phase 3? The `DataClient.put` already accepts a `ReadableStream<Uint8Array>`, so the plumbing for an encode-side streaming path exists. Adding `Store.put_stream(stream: ReadableStream<T>): Promise<…>` would mirror the read side. **Recommendation: defer to a follow-up plan; keep this plan read-focused.**
+2. ~~**`Store.put` accepting a `ReadableStream<T>` for streaming encode.**~~ **RESOLVED:** In scope. Add `Store.put_stream(stream: ReadableStream<T>, opts?: PutOpts)` symmetrically with `get_handle`. Phase 3 expanded to cover both directions. See §2.6 (added below) for the content-hash-with-streaming design choice.
 
-3. **`DataStorage.get` signature change.** Confirmed BREAKING for custom backends building on `create_data_client`. Are there known external consumers? If yes, the `wrap_bytes_storage` helper is enough. If we want zero breakage, we'd add a parallel `create_streaming_data_client` and leave the old one alone — extra surface area for marginal benefit. **Recommendation: take the break, ship the wrap helper.**
+3. ~~**`DataStorage.get` signature change.**~~ **RESOLVED:** Just take the break. 0.4.0 is the right time. `wrap_bytes_storage` ships as the migration helper but no parallel non-breaking API. Custom backend implementors update on upgrade.
 
-4. **Should `compose()` allow more than one head codec (e.g. `compose(json, msgpack_layer, gzip)`)?** No — keeping it as "one head + N byte transforms" keeps types tractable. If someone needs `Codec<A> → Codec<B>` mid-chain (rare; e.g. base64-encode-as-string), they wrap manually. Decision baked into §2.3.
+4. ~~**Should `compose()` allow more than one head codec.**~~ **RESOLVED — no.** One head + N byte transforms. Keep types tractable.
 
-5. **Hash content addressing on composed codecs.** Today the content_hash is computed on the encoded bytes. With encryption, two identical inputs produce different ciphertexts (because of random IV) → no deduplication. This is correct security behaviour but worth documenting. Should we offer an opt-in deterministic encryption mode (zero IV / nonce-derived)? **Recommendation: no — security footgun. Document the tradeoff in `api/codecs.mdx` and move on.**
+5. ~~**Hash content addressing on composed codecs (deterministic encryption?).**~~ **RESOLVED — no opt-in deterministic mode.** Security footgun. Document the dedup tradeoff in `api/codecs.mdx`.
 
 ---
 
@@ -460,11 +491,13 @@ Tasks to mirror in devpad once the plan is approved. Format: `[priority] title �
 - `[medium] Memory backend conforms to new DataStorageHandle` — wrap bytes in one-chunk stream.
 - `[medium] Backend contract: streaming chunk-count test` — extend `backend-contract.test.ts` with multi-chunk assertion.
 
-### Phase 3 — SnapshotHandle + get_handle
+### Phase 3 — SnapshotHandle + get_handle + put_stream
 
 - `[high] Add SnapshotHandle<T> type` — `types.ts`; conditional `stream` field.
+- `[high] Add Store.put_stream method type` — `types.ts`; conditional on codec `encode_stream`.
 - `[high] Implement Store.get_handle / get_latest_handle` — `corpus.ts`.
-- `[medium] Integration tests for streaming reads` — `tests/integration/store-streaming.test.ts`.
+- `[high] Implement Store.put_stream` — `corpus.ts`; buffer-and-hash strategy (§2.6 option c).
+- `[medium] Integration tests for streaming reads + writes` — `tests/integration/store-streaming.test.ts`.
 
 ### Phase 4 — Reference codecs
 

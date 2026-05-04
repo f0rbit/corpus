@@ -44,5 +44,5 @@ if (result.ok) {
 - [ ] implement data compaction (merge old versions)
 - [ ] add rate limiting awareness for cloudflare api limits
 - [ ] add signed url support for direct r2 access to large files
-- [ ] implement garbage collection for orphaned data blobs
+- [ ] implement garbage collection for orphaned data blobs (especially r2 objects orphaned by aborted cross-store transactions — see `.plans/cross-store-atomic.md`)
 - [ ] add retry logic with exponential backoff for network failures
