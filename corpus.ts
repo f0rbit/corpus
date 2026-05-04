@@ -358,6 +358,7 @@ export function create_corpus(): CorpusBuilder<{}> {
         const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
         const buffered_data = new Map<string, Uint8Array>()          // key: data_key
         const buffered_observations = new Map<string, Observation>() // key: id
+        const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
         const commits: SnapshotMeta[] = []
         const observations: Observation[] = []
 
@@ -428,7 +429,11 @@ export function create_corpus(): CorpusBuilder<{}> {
           },
 
           async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
-            const buffered = buffered_meta.get(meta_key(store.id, version))
+            const key = meta_key(store.id, version)
+            if (tombstoned_meta.has(key)) {
+              return err({ kind: 'not_found', store_id: store.id, version })
+            }
+            const buffered = buffered_meta.get(key)
             if (buffered) {
               const bytes = buffered_data.get(buffered.data_key)
               if (bytes) {
@@ -453,8 +458,10 @@ export function create_corpus(): CorpusBuilder<{}> {
           },
 
           async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
+            const key = meta_key(store.id, version)
             ops.push({ type: 'meta_delete', store_id: store.id, version })
-            buffered_meta.delete(meta_key(store.id, version))
+            buffered_meta.delete(key)
+            tombstoned_meta.add(key)
             return ok(undefined)
           },
 

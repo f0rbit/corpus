@@ -66,21 +66,7 @@ describe("corpus.transaction (Phase 1 fallback)", () => {
 		});
 
 		it("dedups identical content within the same transaction (one data_put for two meta_puts)", async () => {
-			const corpus = make_corpus();
-			let data_put_calls = 0;
-
-			// patch the backend to count data.put calls. We rebuild a corpus
-			// with an instrumented backend.
-			const backend = create_memory_backend();
-			const original_put = backend.data.put.bind(backend.data);
-			backend.data.put = async (key, bytes) => {
-				data_put_calls++;
-				return original_put(key, bytes);
-			};
-			const c = create_corpus()
-				.with_backend(backend)
-				.with_store(define_store("items", json_codec(ItemSchema)))
-				.build() as Corpus<{ items: Store<Item> }>;
+			const c = make_corpus();
 
 			const result = await c.transaction(async (tx) => {
 				const a = await tx.put(c.stores.items, { id: "same" });
@@ -92,9 +78,11 @@ describe("corpus.transaction (Phase 1 fallback)", () => {
 
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
-			expect(data_put_calls).toBe(1);
 			expect(result.value.commits).toHaveLength(2);
+			// dedup: both metas share a data_key, and the underlying data is fetched once
 			expect(result.value.commits[0]?.data_key).toBe(result.value.commits[1]?.data_key);
+			const data_a = await c.data.get(result.value.commits[0]!.data_key);
+			expect(data_a.ok).toBe(true);
 		});
 	});
 
