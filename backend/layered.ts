@@ -3,7 +3,7 @@
  * @description Layered backend for caching and replication strategies.
  */
 
-import type { Backend, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types.js';
+import type { Backend, BatchOp, MetadataClient, DataClient, SnapshotMeta, Result, CorpusError, DataHandle, ObservationsClient } from '../types.js';
 import { ok, err } from '../types.js';
 import { to_bytes } from '../utils.js';
 import { first, to_nullable } from '../result.js';
@@ -191,10 +191,24 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 
   const observations = createLayeredObservationsClient(read, write)
 
+  // Forward apply_batch to the bottom write layer (last entry in `write`).
+  // Cache layers above it are read accelerators only; transactional commits
+  // land at the bottom and the cache fills lazily on subsequent reads.
+  // Only present if a bottom write layer exists and supports apply_batch —
+  // otherwise the layered backend hides the method, falling back to the
+  // sequential best-effort path in `corpus.transaction()`.
+  const bottom_write = write.length > 0 ? write[write.length - 1] : undefined
+  const apply_batch = bottom_write?.apply_batch
+    ? async (ops: BatchOp[]): Promise<Result<void, CorpusError>> => {
+        return bottom_write.apply_batch!(ops)
+      }
+    : undefined
+
   return {
     metadata,
     data,
     ...(observations ? { observations } : {}),
+    ...(apply_batch ? { apply_batch } : {}),
   }
 }
 
