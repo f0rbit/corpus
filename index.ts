@@ -4,7 +4,7 @@ export { create_memory_backend, type MemoryBackendOptions } from './backend/memo
 export { create_cloudflare_backend, type CloudflareBackendConfig } from './backend/cloudflare.js';
 export { create_layered_backend, type LayeredBackendOptions } from './backend/layered.js';
 
-export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from './utils.js';
+export { json_codec, text_codec, binary_codec, compose, compute_hash, generate_version } from './utils.js';
 
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
@@ -19,6 +19,7 @@ export type {
 	ListOpts,
 	Backend,
 	Codec,
+	BytesCodec,
 	Parser,
 	Store,
 	StoreDefinition,

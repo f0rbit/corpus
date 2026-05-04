@@ -271,7 +271,21 @@ export type Codec<T> = {
   content_type: ContentType
   encode: (value: T) => Promise<Uint8Array>
   decode: (bytes: Uint8Array) => Promise<T>
+  /** Optional: chunked encode. If absent, callers can fall back to `encode` + a one-chunk stream. */
+  encode_stream?: (value: T) => ReadableStream<Uint8Array>
+  /** Optional: chunked decode. Absence means the codec is non-streaming on read. */
+  decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>
 }
+
+/**
+ * A codec layer that transforms bytes → bytes (gzip, encrypt, base64, …).
+ * Used as the parameter type for `compose` layers — the head defines `T`,
+ * subsequent layers are byte transformers.
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type BytesCodec = Codec<Uint8Array>
 
 /**
  * Structural type for schema validators (Zod, Valibot, or custom).
