@@ -125,17 +125,55 @@ const meta = await store.get_meta('AZJx4vM')
 for await (const meta of store.list({ limit: 10, tags: ['published'] })) {
   console.log(meta.version)
 }
+
+// Streaming reads/writes (only for codecs that support it; Store<User> errors at type level)
+const handle_result = await store.get_latest_handle()  // SnapshotHandle<T> with value() / bytes() / stream()
+const meta2 = await store.put_stream(readableStream)
 ```
 
 ## Codecs
 
 ```typescript
 const jsonCodec = json_codec(z.object({ name: z.string() }))  // JSON with Zod validation
-const textCodec = text_codec()    // Plain UTF-8 text
-const binaryCodec = binary_codec() // Raw binary pass-through
+const textCodec = text_codec()    // Plain UTF-8 text + streaming
+const binaryCodec = binary_codec() // Raw binary pass-through + streaming
+const gzipLayer = gzip_codec()    // Bytes->bytes layer; streaming both ways
+const aesLayer = encrypt_codec(key)  // AES-GCM bytes->bytes layer; encode_stream only
 
-// Custom codec
-type Codec<T> = { content_type: ContentType; encode: (v: T) => Uint8Array; decode: (b: Uint8Array) => T }
+// Compose a head codec with N byte-transformer layers
+const codec = compose(json_codec(EventSchema), gzip_codec())  // JSON over gzip
+
+// Custom codec — encode/decode are async since 0.4.0
+type Codec<T> = {
+  content_type: ContentType
+  encode: (v: T) => Promise<Uint8Array>
+  decode: (b: Uint8Array) => Promise<T>
+  encode_stream?: (v: T) => ReadableStream<Uint8Array>
+  decode_stream?: (b: ReadableStream<Uint8Array>) => ReadableStream<T>
+}
+```
+
+## Streaming
+
+```typescript
+// SnapshotHandle - lazy access to a snapshot; stream() is 'never' for non-streamable codecs
+type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends string | Uint8Array
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
+// Read: get_handle / get_latest_handle return { meta, handle }
+const r = await corpus.stores.logs.get_latest_handle()
+if (!r.ok) throw r.error
+const stream = await r.value.handle.stream()
+
+// Write: put_stream accepts a ReadableStream<T>; corpus buffers internally for content-hashing
+await corpus.stores.uploads.put_stream(response.body)
+
+// Streamability: gzip yes; encrypt encode-only (auth tag); json never (Zod needs full doc)
 ```
 
 ## Observations
@@ -223,6 +261,9 @@ const bucket = new sst.cloudflare.R2(corpus.bucket.name)    // 'myappBucket'
 - `json_codec`
 - `text_codec`
 - `binary_codec`
+- `gzip_codec`
+- `encrypt_codec`
+- `compose`
 
 ### Result Utilities
 - `ok`
@@ -289,6 +330,18 @@ type SnapshotMeta = {
 }
 
 type Snapshot<T> = { meta: SnapshotMeta; data: T }
+
+type StreamableValue = string | Uint8Array
+
+type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends StreamableValue
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
+type BytesCodec = Codec<Uint8Array>
 
 type SnapshotPointer = {
   store_id: string; version: string
@@ -375,7 +428,10 @@ export { create_memory_backend, type MemoryBackendOptions } from './backend/memo
 export { create_cloudflare_backend, type CloudflareBackendConfig } from './backend/cloudflare.js';
 export { create_layered_backend, type LayeredBackendOptions } from './backend/layered.js';
 
-export { json_codec, text_codec, binary_codec, compute_hash, generate_version } from './utils.js';
+export { json_codec, text_codec, binary_codec, compose, compute_hash, generate_version } from './utils.js';
+
+export { gzip_codec } from './codecs/gzip.js';
+export { encrypt_codec } from './codecs/encrypt.js';
 
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
@@ -384,12 +440,15 @@ export type {
 	ParentRef,
 	SnapshotMeta,
 	Snapshot,
+	SnapshotHandle,
+	StreamableValue,
 	DataHandle,
 	MetadataClient,
 	DataClient,
 	ListOpts,
 	Backend,
 	Codec,
+	BytesCodec,
 	Parser,
 	Store,
 	StoreDefinition,
@@ -622,6 +681,39 @@ export type Snapshot<T = unknown> = {
   data: T
 }
 
+/**
+ * Value types that can be chunked across a `ReadableStream`.
+ *
+ * Streaming reads/writes are only meaningful for byte- or text-shaped payloads;
+ * structured `T` (e.g. `User`) cannot be streamed without a chunked decoder
+ * (NDJSON, etc.) which is out of scope for the v1 streaming API.
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type StreamableValue = string | Uint8Array
+
+/**
+ * Lazy handle returned by `Store.get_handle` / `Store.get_latest_handle`.
+ *
+ * - `value()` decodes the stored bytes through the codec into the typed value.
+ * - `bytes()` returns the literal stored bytes (post-encode, pre-decode — i.e.
+ *   the actual R2 / file payload, including any wrapper layers like gzip).
+ * - `stream()` yields decoded chunks and is only present at the type level when
+ *   `T extends StreamableValue`. The runtime impl is also gated on the codec
+ *   exposing `decode_stream`.
+ *
+ * @category Types
+ * @group Snapshot Types
+ */
+export type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends StreamableValue
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
 /** @internal */
 export type DataHandle = {
   stream: () => ReadableStream<Uint8Array>
@@ -714,9 +806,23 @@ export type Backend = {
  */
 export type Codec<T> = {
   content_type: ContentType
-  encode: (value: T) => Uint8Array
-  decode: (bytes: Uint8Array) => T
+  encode: (value: T) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<T>
+  /** Optional: chunked encode. If absent, callers can fall back to `encode` + a one-chunk stream. */
+  encode_stream?: (value: T) => ReadableStream<Uint8Array>
+  /** Optional: chunked decode. Absence means the codec is non-streaming on read. */
+  decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>
 }
+
+/**
+ * A codec layer that transforms bytes → bytes (gzip, encrypt, base64, …).
+ * Used as the parameter type for `compose` layers — the head defines `T`,
+ * subsequent layers are byte transformers.
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type BytesCodec = Codec<Uint8Array>
 
 /**
  * Structural type for schema validators (Zod, Valibot, or custom).
@@ -768,9 +874,14 @@ export type Store<T> = {
   put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
   get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
+  get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
+  get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
   get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>
   list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>
   delete: (version: string) => Promise<Result<void, CorpusError>>
+  put_stream: T extends StreamableValue
+    ? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+    : never
 }
 
 export type PutOpts = {
@@ -935,10 +1046,10 @@ export type ObservationsClient = {
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types.js';
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient } from './types.js';
 import type { ObservationTypeDef, SnapshotPointer } from './observations/types.js';
 import { ok, err } from './types.js';
-import { compute_hash, generate_version } from './utils.js';
+import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from './utils.js';
 import { create_pointer, resolve_path, apply_span } from './observations/utils.js';
 
 /**
@@ -976,7 +1087,7 @@ import { create_pointer, resolve_path, apply_span } from './observations/utils.j
  */
 export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
   const { id, codec, data_key_fn } = definition
-  
+
   function emit(event: Parameters<NonNullable<Backend['on_event']>>[0]) {
     backend.on_event?.(event)
   }
@@ -988,125 +1099,195 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return `${ctx.store_id}/${ctx.content_hash}`
   }
 
-  return {
+  async function do_put(bytes: Uint8Array, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    const version = generate_version()
+    const content_hash = await compute_hash(bytes)
+    const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
+
+    // deduplication: reuse existing data_key if content already exists
+    const existing = await backend.metadata.find_by_hash(id, content_hash)
+    const deduplicated = existing !== null
+    const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
+
+    if (!deduplicated) {
+      const data_result = await backend.data.put(data_key, bytes)
+      if (!data_result.ok) {
+        emit({ type: 'error', error: data_result.error })
+        return data_result
+      }
+    }
+
+    emit({ type: 'data_put', store_id: id, version, size_bytes: bytes.length, deduplicated })
+
+    const meta: SnapshotMeta = {
+      store_id: id,
+      version,
+      parents: opts?.parents ?? [],
+      created_at: new Date(),
+      invoked_at: opts?.invoked_at,
+      content_hash,
+      content_type: codec.content_type,
+      size_bytes: bytes.length,
+      data_key,
+      tags: opts?.tags,
+    }
+
+    const meta_result = await backend.metadata.put(meta)
+    if (!meta_result.ok) {
+      emit({ type: 'error', error: meta_result.error })
+      return meta_result
+    }
+
+    emit({ type: 'snapshot_put', store_id: id, version, content_hash, deduplicated })
+    return ok(meta)
+  }
+
+  function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
+    const handle: any = {
+      async value(): Promise<Result<T, CorpusError>> {
+        const bytes = await data_handle.bytes()
+        try {
+          return ok(await codec.decode(bytes))
+        } catch (cause) {
+          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          emit({ type: 'error', error })
+          return err(error)
+        }
+      },
+      async bytes(): Promise<Result<Uint8Array, CorpusError>> {
+        return ok(await data_handle.bytes())
+      },
+    }
+
+    if (codec.decode_stream) {
+      const decode_stream = codec.decode_stream
+      handle.stream = async (): Promise<Result<ReadableStream<T>, CorpusError>> => {
+        try {
+          return ok(decode_stream(data_handle.stream()))
+        } catch (cause) {
+          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          emit({ type: 'error', error })
+          return err(error)
+        }
+      }
+    }
+
+    return handle as SnapshotHandle<T>
+  }
+
+  async function get_handle_impl(version: string): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+    const meta_result = await backend.metadata.get(id, version)
+    if (!meta_result.ok) {
+      emit({ type: 'snapshot_get', store_id: id, version, found: false })
+      return meta_result
+    }
+
+    const meta = meta_result.value
+    const data_result = await backend.data.get(meta.data_key)
+    if (!data_result.ok) {
+      emit({ type: 'error', error: data_result.error })
+      return data_result
+    }
+
+    emit({ type: 'snapshot_get', store_id: id, version, found: true })
+    return ok({ meta, handle: build_handle(data_result.value) })
+  }
+
+  async function get_latest_handle_impl(): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+    const meta_result = await backend.metadata.get_latest(id)
+    if (!meta_result.ok) return meta_result
+
+    const meta = meta_result.value
+    const data_result = await backend.data.get(meta.data_key)
+    if (!data_result.ok) {
+      emit({ type: 'error', error: data_result.error })
+      return data_result
+    }
+
+    return ok({ meta, handle: build_handle(data_result.value) })
+  }
+
+  async function put_stream_impl(stream: ReadableStream<T>, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    if (!codec.encode_stream) {
+      const error: CorpusError = { kind: 'invalid_config', message: 'codec does not support encode_stream' }
+      emit({ type: 'error', error })
+      return err(error)
+    }
+
+    let encoded: Uint8Array
+    try {
+      // codec.encode_stream takes a value (T), not a stream — so we adapt by encoding
+      // each consumer-provided chunk independently and concatenating the byte outputs.
+      // Per plan §2.6 option (c): buffer encoded output for hashing, since corpus
+      // content-addresses by SHA-256 of the encoded bytes and there's no streaming
+      // SHA-256 in the standard runtime.
+      const encoded_chunks: Uint8Array[] = []
+      const reader = stream.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        encoded_chunks.push(await stream_to_bytes(codec.encode_stream(value)))
+      }
+      encoded = concat_bytes(encoded_chunks)
+    } catch (cause) {
+      const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+      emit({ type: 'error', error })
+      return err(error)
+    }
+
+    return do_put(encoded, opts)
+  }
+
+  const store: any = {
     id,
     codec,
 
-    async put(data, opts): Promise<Result<SnapshotMeta, CorpusError>> {
-      const version = generate_version()
-      
+    async put(data: T, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
       let bytes: Uint8Array
       try {
-        bytes = codec.encode(data)
+        bytes = await codec.encode(data)
       } catch (cause) {
         const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
         emit({ type: 'error', error })
         return err(error)
       }
 
-      const content_hash = await compute_hash(bytes)
-      const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
-      
-      // deduplication: reuse existing data_key if content already exists
-      const existing = await backend.metadata.find_by_hash(id, content_hash)
-      const deduplicated = existing !== null
-      const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
-
-      if (!deduplicated) {
-        const data_result = await backend.data.put(data_key, bytes)
-        if (!data_result.ok) {
-          emit({ type: 'error', error: data_result.error })
-          return data_result
-        }
-      }
-
-      emit({ type: 'data_put', store_id: id, version, size_bytes: bytes.length, deduplicated })
-
-      const meta: SnapshotMeta = {
-        store_id: id,
-        version,
-        parents: opts?.parents ?? [],
-        created_at: new Date(),
-        invoked_at: opts?.invoked_at,
-        content_hash,
-        content_type: codec.content_type,
-        size_bytes: bytes.length,
-        data_key,
-        tags: opts?.tags,
-      }
-
-      const meta_result = await backend.metadata.put(meta)
-      if (!meta_result.ok) {
-        emit({ type: 'error', error: meta_result.error })
-        return meta_result
-      }
-
-      emit({ type: 'snapshot_put', store_id: id, version, content_hash, deduplicated })
-      return ok(meta)
+      return do_put(bytes, opts)
     },
 
-    async get(version): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-      const meta_result = await backend.metadata.get(id, version)
-      if (!meta_result.ok) {
-        emit({ type: 'snapshot_get', store_id: id, version, found: false })
-        return meta_result
-      }
+    async get(version: string): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+      const handle_result = await get_handle_impl(version)
+      if (!handle_result.ok) return handle_result
 
-      const meta = meta_result.value
-      const data_result = await backend.data.get(meta.data_key)
-      if (!data_result.ok) {
-        emit({ type: 'error', error: data_result.error })
-        return data_result
-      }
+      const value_result = await handle_result.value.handle.value()
+      if (!value_result.ok) return value_result
 
-      const bytes = await data_result.value.bytes()
-      let data: T
-      try {
-        data = codec.decode(bytes)
-      } catch (cause) {
-        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
-        emit({ type: 'error', error })
-        return err(error)
-      }
-
-      emit({ type: 'snapshot_get', store_id: id, version, found: true })
-      return ok({ meta, data })
+      return ok({ meta: handle_result.value.meta, data: value_result.value })
     },
 
     async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-      const meta_result = await backend.metadata.get_latest(id)
-      if (!meta_result.ok) {
-        return meta_result
-      }
+      const handle_result = await get_latest_handle_impl()
+      if (!handle_result.ok) return handle_result
 
-      const meta = meta_result.value
-      const data_result = await backend.data.get(meta.data_key)
-      if (!data_result.ok) {
-        return data_result
-      }
+      const value_result = await handle_result.value.handle.value()
+      if (!value_result.ok) return value_result
 
-      const bytes = await data_result.value.bytes()
-      let data: T
-      try {
-        data = codec.decode(bytes)
-      } catch (cause) {
-        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
-        emit({ type: 'error', error })
-        return err(error)
-      }
-
-      return ok({ meta, data })
+      return ok({ meta: handle_result.value.meta, data: value_result.value })
     },
 
-    async get_meta(version): Promise<Result<SnapshotMeta, CorpusError>> {
+    get_handle: get_handle_impl,
+    get_latest_handle: get_latest_handle_impl,
+    put_stream: put_stream_impl,
+
+    async get_meta(version: string): Promise<Result<SnapshotMeta, CorpusError>> {
       return backend.metadata.get(id, version)
     },
 
-    list(opts) {
+    list(opts?: Parameters<Store<T>['list']>[0]) {
       return backend.metadata.list(id, opts)
     },
 
-    async delete(version): Promise<Result<void, CorpusError>> {
+    async delete(version: string): Promise<Result<void, CorpusError>> {
       const meta_result = await backend.metadata.get(id, version)
       if (!meta_result.ok) {
         return meta_result
@@ -1121,6 +1302,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       return ok(undefined)
     },
   }
+
+  return store as Store<T>
 }
 
 /**
@@ -1753,7 +1936,7 @@ export const last = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }>
  * @description Utility functions for hashing, versioning, and codecs.
  */
 
-import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
+import type { BytesCodec, Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -1868,8 +2051,8 @@ export function generate_version(): string {
 export function json_codec<T>(schema: Parser<T>): Codec<T> {
 	return {
 		content_type: "application/json",
-		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
-		decode: (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
+		encode: async (value) => new TextEncoder().encode(JSON.stringify(value)),
+		decode: async (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
 	};
 }
 
@@ -1898,8 +2081,18 @@ export function json_codec<T>(schema: Parser<T>): Codec<T> {
 export function text_codec(): Codec<string> {
 	return {
 		content_type: "text/plain",
-		encode: (value) => new TextEncoder().encode(value),
-		decode: (bytes) => new TextDecoder().decode(bytes),
+		encode: async (value) => new TextEncoder().encode(value),
+		decode: async (bytes) => new TextDecoder().decode(bytes),
+		encode_stream: (value) => {
+			const stream = new ReadableStream<string>({
+				start(controller) {
+					controller.enqueue(value)
+					controller.close()
+				}
+			})
+			return stream.pipeThrough(new TextEncoderStream())
+		},
+		decode_stream: (bytes) => bytes.pipeThrough(new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>),
 	};
 }
 
@@ -1929,9 +2122,95 @@ export function text_codec(): Codec<string> {
 export function binary_codec(): Codec<Uint8Array> {
 	return {
 		content_type: "application/octet-stream",
-		encode: (value) => value,
-		decode: (bytes) => bytes,
+		encode: async (value) => value,
+		decode: async (bytes) => bytes,
+		encode_stream: (value) => new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(value)
+				controller.close()
+			}
+		}),
+		decode_stream: (bytes) => bytes,
 	};
+}
+
+/**
+ * Compose a head codec with N byte-transforming layers (gzip, encrypt, base64, …).
+ *
+ * Encode runs left-to-right (`head.encode(v)` → `layers[0].encode(bytes)` → … → final bytes).
+ * Decode runs right-to-left (final bytes → `layers[n-1].decode(bytes)` → … → `head.decode(bytes)`).
+ *
+ * `content_type` comes from the head — wrapper layers don't change semantic type.
+ *
+ * Streamability is structural: `encode_stream` / `decode_stream` are present on the
+ * returned codec only when the head and every layer expose the corresponding stream
+ * method. Dropping a non-streamable layer (e.g. an AEAD `decode`) into a composition
+ * disables streaming for the whole pipeline.
+ *
+ * @category Codecs
+ * @group Codec Combinators
+ *
+ * @example
+ * ```ts
+ * const codec = compose(json_codec(UserSchema), gzip_codec())
+ * // codec.decode_stream is undefined — json_codec lacks decode_stream.
+ *
+ * const text_gz = compose(text_codec(), gzip_codec())
+ * // text_gz.decode_stream is defined.
+ * ```
+ */
+export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
+	if (layers.length === 0) return head
+
+	const decode_streamable = !!head.decode_stream && layers.every(l => l.decode_stream)
+	const encode_streamable = !!head.encode_stream && layers.every(l => l.encode_stream)
+
+	const codec: Codec<T> = {
+		content_type: head.content_type,
+		async encode(value) {
+			let bytes = await head.encode(value)
+			for (const layer of layers) bytes = await layer.encode(bytes)
+			return bytes
+		},
+		async decode(bytes) {
+			for (let i = layers.length - 1; i >= 0; i--) bytes = await layers[i]!.decode(bytes)
+			return head.decode(bytes)
+		},
+	}
+
+	if (encode_streamable) {
+		codec.encode_stream = (value) => {
+			let stream = head.encode_stream!(value)
+			for (const layer of layers) {
+				const layer_in = stream
+				const layer_fn = layer.encode_stream!
+				stream = new ReadableStream<Uint8Array>({
+					async start(controller) {
+						const buffered = await stream_to_bytes(layer_in)
+						const layer_out = layer_fn(buffered)
+						const reader = layer_out.getReader()
+						while (true) {
+							const { done, value: chunk } = await reader.read()
+							if (done) break
+							controller.enqueue(chunk)
+						}
+						controller.close()
+					}
+				})
+			}
+			return stream
+		}
+	}
+
+	if (decode_streamable) {
+		codec.decode_stream = (stream) => {
+			let bytes_stream = stream
+			for (let i = layers.length - 1; i >= 0; i--) bytes_stream = layers[i]!.decode_stream!(bytes_stream)
+			return head.decode_stream!(bytes_stream)
+		}
+	}
+
+	return codec
 }
 
 /**

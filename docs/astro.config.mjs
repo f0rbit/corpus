@@ -56,6 +56,10 @@ export default defineConfig({
           slug: 'api/codecs',
         },
         {
+          label: 'Streaming',
+          slug: 'api/streaming',
+        },
+        {
           label: 'Utilities',
           slug: 'api/utilities',
         },

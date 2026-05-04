@@ -117,23 +117,31 @@ export function create_postgres_metadata_adapter(db: Pool): MetadataStorage {
 
 ## Implementing DataStorage
 
-Data storage handles binary blob persistence:
+Data storage handles binary blob persistence. Since 0.4.0, `get` returns a lazy handle so backends with native streaming (R2, `Bun.file()`) can avoid buffering large objects:
 
 ```typescript
 type DataStorage = {
-  get: (data_key: string) => Promise<Uint8Array | null>
+  get: (data_key: string) => Promise<DataStorageHandle | null>
   put: (data_key: string, data: Uint8Array) => Promise<void>
   delete: (data_key: string) => Promise<void>
   exists: (data_key: string) => Promise<boolean>
+}
+
+type DataStorageHandle = {
+  bytes: () => Promise<Uint8Array>
+  stream?: () => ReadableStream<Uint8Array>
+  size?: number
 }
 ```
 
 ### Contract
 
-- **get**: Return the bytes, or `null` if not found. Don't throw.
+- **get**: Return a `DataStorageHandle`, or `null` if not found. Don't throw.
 - **put**: Store the bytes. Overwrite if already present. Throw on I/O failure.
 - **delete**: Remove the blob. No error if already absent.
 - **exists**: Return whether the key exists (used for deduplication checks).
+
+The handle's `bytes()` is mandatory; `stream()` is optional. If you don't provide a native stream, `create_data_client` falls back to a one-chunk wrapper around `bytes()`. Implement `stream()` when the underlying storage supports it natively (R2 `object.body`, `Bun.file().stream()`).
 
 ### Example Sketch: R2-Compatible Storage
 
@@ -143,7 +151,11 @@ export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStor
     async get(data_key) {
       const obj = await bucket.get(data_key)
       if (!obj) return null
-      return new Uint8Array(await obj.arrayBuffer())
+      return {
+        bytes: async () => new Uint8Array(await obj.arrayBuffer()),
+        stream: () => obj.body as ReadableStream<Uint8Array>,
+        size: obj.size,
+      }
     },
 
     async put(data_key, data) {
@@ -161,6 +173,26 @@ export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStor
   }
 }
 ```
+
+### Migration: 0.4.0 — `DataStorage.get` returns `DataStorageHandle`
+
+Before 0.4.0, `DataStorage.get` returned `Promise<Uint8Array | null>`. From 0.4.0 it returns `Promise<DataStorageHandle | null>`. This was driven by the new streaming read surface ([`Store.get_handle`](/corpus/api/streaming)) — backends with native streams (R2, `Bun.file().stream()`) can now flow data through to consumers without buffering.
+
+For backends that genuinely only have a bytes-getter, use the `wrap_bytes_storage` helper to keep the migration to a single line:
+
+```typescript
+import { create_data_client, wrap_bytes_storage } from '@f0rbit/corpus/backend/base'
+
+// before — pre-0.4.0
+const data = create_data_client(my_bytes_storage, emit)
+
+// after — 0.4.0
+const data = create_data_client(wrap_bytes_storage(my_bytes_storage), emit)
+```
+
+`wrap_bytes_storage` produces a `DataStorageHandle` whose `bytes()` returns the stored bytes and whose `stream()` wraps them in a one-chunk `ReadableStream`. Existing semantics are preserved — `bytes()` callers see no change, and `stream()` callers get a single-chunk read instead of a true streaming read. Upgrade to a native `stream()` only when the underlying storage offers one.
+
+The consumer-facing `DataHandle` (the shape returned by `DataClient.get`) is unchanged — only the adapter contract moved.
 
 ## Wrapping Adapters into Clients
 

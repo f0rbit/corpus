@@ -102,7 +102,7 @@ const categorizeExports = () => {
 	const categories = {
 		core: ["create_corpus", "create_store", "define_store"],
 		backends: ["create_memory_backend", "create_file_backend", "create_cloudflare_backend", "create_layered_backend"],
-		codecs: ["json_codec", "text_codec", "binary_codec"],
+		codecs: ["json_codec", "text_codec", "binary_codec", "gzip_codec", "encrypt_codec", "compose"],
 		result: ["ok", "err", "match", "unwrap", "unwrap_or", "unwrap_err", "try_catch", "try_catch_async", "fetch_result", "pipe", "to_nullable", "to_fallback", "null_on", "fallback_on", "format_error", "at", "first", "last", "merge_deep"],
 		observations: ["define_observation_type", "create_pointer", "pointer_to_key", "key_to_pointer", "resolve_path", "apply_span", "pointers_equal", "pointer_to_snapshot", "generate_observation_id", "create_observations_client", "create_observations_storage"],
 		concurrency: ["Semaphore", "parallel_map"],
@@ -238,17 +238,55 @@ const meta = await store.get_meta('AZJx4vM')
 for await (const meta of store.list({ limit: 10, tags: ['published'] })) {
   console.log(meta.version)
 }
+
+// Streaming reads/writes (only for codecs that support it; Store<User> errors at type level)
+const handle_result = await store.get_latest_handle()  // SnapshotHandle<T> with value() / bytes() / stream()
+const meta2 = await store.put_stream(readableStream)
 \`\`\`
 
 ## Codecs
 
 \`\`\`typescript
 const jsonCodec = json_codec(z.object({ name: z.string() }))  // JSON with Zod validation
-const textCodec = text_codec()    // Plain UTF-8 text
-const binaryCodec = binary_codec() // Raw binary pass-through
+const textCodec = text_codec()    // Plain UTF-8 text + streaming
+const binaryCodec = binary_codec() // Raw binary pass-through + streaming
+const gzipLayer = gzip_codec()    // Bytes->bytes layer; streaming both ways
+const aesLayer = encrypt_codec(key)  // AES-GCM bytes->bytes layer; encode_stream only
 
-// Custom codec
-type Codec<T> = { content_type: ContentType; encode: (v: T) => Uint8Array; decode: (b: Uint8Array) => T }
+// Compose a head codec with N byte-transformer layers
+const codec = compose(json_codec(EventSchema), gzip_codec())  // JSON over gzip
+
+// Custom codec — encode/decode are async since 0.4.0
+type Codec<T> = {
+  content_type: ContentType
+  encode: (v: T) => Promise<Uint8Array>
+  decode: (b: Uint8Array) => Promise<T>
+  encode_stream?: (v: T) => ReadableStream<Uint8Array>
+  decode_stream?: (b: ReadableStream<Uint8Array>) => ReadableStream<T>
+}
+\`\`\`
+
+## Streaming
+
+\`\`\`typescript
+// SnapshotHandle - lazy access to a snapshot; stream() is 'never' for non-streamable codecs
+type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends string | Uint8Array
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
+// Read: get_handle / get_latest_handle return { meta, handle }
+const r = await corpus.stores.logs.get_latest_handle()
+if (!r.ok) throw r.error
+const stream = await r.value.handle.stream()
+
+// Write: put_stream accepts a ReadableStream<T>; corpus buffers internally for content-hashing
+await corpus.stores.uploads.put_stream(response.body)
+
+// Streamability: gzip yes; encrypt encode-only (auth tag); json never (Zod needs full doc)
 \`\`\`
 
 ## Observations
@@ -358,6 +396,18 @@ type SnapshotMeta = {
 }
 
 type Snapshot<T> = { meta: SnapshotMeta; data: T }
+
+type StreamableValue = string | Uint8Array
+
+type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends StreamableValue
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
+type BytesCodec = Codec<Uint8Array>
 
 type SnapshotPointer = {
   store_id: string; version: string
