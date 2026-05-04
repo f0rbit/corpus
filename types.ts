@@ -177,6 +177,39 @@ export type Snapshot<T = unknown> = {
   data: T
 }
 
+/**
+ * Value types that can be chunked across a `ReadableStream`.
+ *
+ * Streaming reads/writes are only meaningful for byte- or text-shaped payloads;
+ * structured `T` (e.g. `User`) cannot be streamed without a chunked decoder
+ * (NDJSON, etc.) which is out of scope for the v1 streaming API.
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type StreamableValue = string | Uint8Array
+
+/**
+ * Lazy handle returned by `Store.get_handle` / `Store.get_latest_handle`.
+ *
+ * - `value()` decodes the stored bytes through the codec into the typed value.
+ * - `bytes()` returns the literal stored bytes (post-encode, pre-decode — i.e.
+ *   the actual R2 / file payload, including any wrapper layers like gzip).
+ * - `stream()` yields decoded chunks and is only present at the type level when
+ *   `T extends StreamableValue`. The runtime impl is also gated on the codec
+ *   exposing `decode_stream`.
+ *
+ * @category Types
+ * @group Snapshot Types
+ */
+export type SnapshotHandle<T> = {
+  value: () => Promise<Result<T, CorpusError>>
+  bytes: () => Promise<Result<Uint8Array, CorpusError>>
+  stream: T extends StreamableValue
+    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
+    : never
+}
+
 /** @internal */
 export type DataHandle = {
   stream: () => ReadableStream<Uint8Array>
@@ -337,9 +370,14 @@ export type Store<T> = {
   put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
   get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
+  get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
+  get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
   get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>
   list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>
   delete: (version: string) => Promise<Result<void, CorpusError>>
+  put_stream: T extends StreamableValue
+    ? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+    : never
 }
 
 export type PutOpts = {

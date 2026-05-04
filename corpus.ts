@@ -3,10 +3,10 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, Result, CorpusError, DataKeyContext, ObservationsClient } from './types.js';
+import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient } from './types.js';
 import type { ObservationTypeDef, SnapshotPointer } from './observations/types.js';
 import { ok, err } from './types.js';
-import { compute_hash, generate_version } from './utils.js';
+import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from './utils.js';
 import { create_pointer, resolve_path, apply_span } from './observations/utils.js';
 
 /**
@@ -44,7 +44,7 @@ import { create_pointer, resolve_path, apply_span } from './observations/utils.j
  */
 export function create_store<T>(backend: Backend, definition: StoreDefinition<string, T>): Store<T> {
   const { id, codec, data_key_fn } = definition
-  
+
   function emit(event: Parameters<NonNullable<Backend['on_event']>>[0]) {
     backend.on_event?.(event)
   }
@@ -56,13 +56,150 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return `${ctx.store_id}/${ctx.content_hash}`
   }
 
-  return {
+  async function do_put(bytes: Uint8Array, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    const version = generate_version()
+    const content_hash = await compute_hash(bytes)
+    const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
+
+    // deduplication: reuse existing data_key if content already exists
+    const existing = await backend.metadata.find_by_hash(id, content_hash)
+    const deduplicated = existing !== null
+    const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
+
+    if (!deduplicated) {
+      const data_result = await backend.data.put(data_key, bytes)
+      if (!data_result.ok) {
+        emit({ type: 'error', error: data_result.error })
+        return data_result
+      }
+    }
+
+    emit({ type: 'data_put', store_id: id, version, size_bytes: bytes.length, deduplicated })
+
+    const meta: SnapshotMeta = {
+      store_id: id,
+      version,
+      parents: opts?.parents ?? [],
+      created_at: new Date(),
+      invoked_at: opts?.invoked_at,
+      content_hash,
+      content_type: codec.content_type,
+      size_bytes: bytes.length,
+      data_key,
+      tags: opts?.tags,
+    }
+
+    const meta_result = await backend.metadata.put(meta)
+    if (!meta_result.ok) {
+      emit({ type: 'error', error: meta_result.error })
+      return meta_result
+    }
+
+    emit({ type: 'snapshot_put', store_id: id, version, content_hash, deduplicated })
+    return ok(meta)
+  }
+
+  function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
+    const handle: any = {
+      async value(): Promise<Result<T, CorpusError>> {
+        const bytes = await data_handle.bytes()
+        try {
+          return ok(await codec.decode(bytes))
+        } catch (cause) {
+          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          emit({ type: 'error', error })
+          return err(error)
+        }
+      },
+      async bytes(): Promise<Result<Uint8Array, CorpusError>> {
+        return ok(await data_handle.bytes())
+      },
+    }
+
+    if (codec.decode_stream) {
+      const decode_stream = codec.decode_stream
+      handle.stream = async (): Promise<Result<ReadableStream<T>, CorpusError>> => {
+        try {
+          return ok(decode_stream(data_handle.stream()))
+        } catch (cause) {
+          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          emit({ type: 'error', error })
+          return err(error)
+        }
+      }
+    }
+
+    return handle as SnapshotHandle<T>
+  }
+
+  async function get_handle_impl(version: string): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+    const meta_result = await backend.metadata.get(id, version)
+    if (!meta_result.ok) {
+      emit({ type: 'snapshot_get', store_id: id, version, found: false })
+      return meta_result
+    }
+
+    const meta = meta_result.value
+    const data_result = await backend.data.get(meta.data_key)
+    if (!data_result.ok) {
+      emit({ type: 'error', error: data_result.error })
+      return data_result
+    }
+
+    emit({ type: 'snapshot_get', store_id: id, version, found: true })
+    return ok({ meta, handle: build_handle(data_result.value) })
+  }
+
+  async function get_latest_handle_impl(): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+    const meta_result = await backend.metadata.get_latest(id)
+    if (!meta_result.ok) return meta_result
+
+    const meta = meta_result.value
+    const data_result = await backend.data.get(meta.data_key)
+    if (!data_result.ok) {
+      emit({ type: 'error', error: data_result.error })
+      return data_result
+    }
+
+    return ok({ meta, handle: build_handle(data_result.value) })
+  }
+
+  async function put_stream_impl(stream: ReadableStream<T>, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    if (!codec.encode_stream) {
+      const error: CorpusError = { kind: 'invalid_config', message: 'codec does not support encode_stream' }
+      emit({ type: 'error', error })
+      return err(error)
+    }
+
+    let encoded: Uint8Array
+    try {
+      // codec.encode_stream takes a value (T), not a stream — so we adapt by encoding
+      // each consumer-provided chunk independently and concatenating the byte outputs.
+      // Per plan §2.6 option (c): buffer encoded output for hashing, since corpus
+      // content-addresses by SHA-256 of the encoded bytes and there's no streaming
+      // SHA-256 in the standard runtime.
+      const encoded_chunks: Uint8Array[] = []
+      const reader = stream.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        encoded_chunks.push(await stream_to_bytes(codec.encode_stream(value)))
+      }
+      encoded = concat_bytes(encoded_chunks)
+    } catch (cause) {
+      const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+      emit({ type: 'error', error })
+      return err(error)
+    }
+
+    return do_put(encoded, opts)
+  }
+
+  const store: any = {
     id,
     codec,
 
-    async put(data, opts): Promise<Result<SnapshotMeta, CorpusError>> {
-      const version = generate_version()
-      
+    async put(data: T, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
       let bytes: Uint8Array
       try {
         bytes = await codec.encode(data)
@@ -72,109 +209,42 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
         return err(error)
       }
 
-      const content_hash = await compute_hash(bytes)
-      const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
-      
-      // deduplication: reuse existing data_key if content already exists
-      const existing = await backend.metadata.find_by_hash(id, content_hash)
-      const deduplicated = existing !== null
-      const data_key = deduplicated ? existing.data_key : make_data_key(key_ctx)
-
-      if (!deduplicated) {
-        const data_result = await backend.data.put(data_key, bytes)
-        if (!data_result.ok) {
-          emit({ type: 'error', error: data_result.error })
-          return data_result
-        }
-      }
-
-      emit({ type: 'data_put', store_id: id, version, size_bytes: bytes.length, deduplicated })
-
-      const meta: SnapshotMeta = {
-        store_id: id,
-        version,
-        parents: opts?.parents ?? [],
-        created_at: new Date(),
-        invoked_at: opts?.invoked_at,
-        content_hash,
-        content_type: codec.content_type,
-        size_bytes: bytes.length,
-        data_key,
-        tags: opts?.tags,
-      }
-
-      const meta_result = await backend.metadata.put(meta)
-      if (!meta_result.ok) {
-        emit({ type: 'error', error: meta_result.error })
-        return meta_result
-      }
-
-      emit({ type: 'snapshot_put', store_id: id, version, content_hash, deduplicated })
-      return ok(meta)
+      return do_put(bytes, opts)
     },
 
-    async get(version): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-      const meta_result = await backend.metadata.get(id, version)
-      if (!meta_result.ok) {
-        emit({ type: 'snapshot_get', store_id: id, version, found: false })
-        return meta_result
-      }
+    async get(version: string): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+      const handle_result = await get_handle_impl(version)
+      if (!handle_result.ok) return handle_result
 
-      const meta = meta_result.value
-      const data_result = await backend.data.get(meta.data_key)
-      if (!data_result.ok) {
-        emit({ type: 'error', error: data_result.error })
-        return data_result
-      }
+      const value_result = await handle_result.value.handle.value()
+      if (!value_result.ok) return value_result
 
-      const bytes = await data_result.value.bytes()
-      let data: T
-      try {
-        data = await codec.decode(bytes)
-      } catch (cause) {
-        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
-        emit({ type: 'error', error })
-        return err(error)
-      }
-
-      emit({ type: 'snapshot_get', store_id: id, version, found: true })
-      return ok({ meta, data })
+      return ok({ meta: handle_result.value.meta, data: value_result.value })
     },
 
     async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-      const meta_result = await backend.metadata.get_latest(id)
-      if (!meta_result.ok) {
-        return meta_result
-      }
+      const handle_result = await get_latest_handle_impl()
+      if (!handle_result.ok) return handle_result
 
-      const meta = meta_result.value
-      const data_result = await backend.data.get(meta.data_key)
-      if (!data_result.ok) {
-        return data_result
-      }
+      const value_result = await handle_result.value.handle.value()
+      if (!value_result.ok) return value_result
 
-      const bytes = await data_result.value.bytes()
-      let data: T
-      try {
-        data = await codec.decode(bytes)
-      } catch (cause) {
-        const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
-        emit({ type: 'error', error })
-        return err(error)
-      }
-
-      return ok({ meta, data })
+      return ok({ meta: handle_result.value.meta, data: value_result.value })
     },
 
-    async get_meta(version): Promise<Result<SnapshotMeta, CorpusError>> {
+    get_handle: get_handle_impl,
+    get_latest_handle: get_latest_handle_impl,
+    put_stream: put_stream_impl,
+
+    async get_meta(version: string): Promise<Result<SnapshotMeta, CorpusError>> {
       return backend.metadata.get(id, version)
     },
 
-    list(opts) {
+    list(opts?: Parameters<Store<T>['list']>[0]) {
       return backend.metadata.list(id, opts)
     },
 
-    async delete(version): Promise<Result<void, CorpusError>> {
+    async delete(version: string): Promise<Result<void, CorpusError>> {
       const meta_result = await backend.metadata.get(id, version)
       if (!meta_result.ok) {
         return meta_result
@@ -189,6 +259,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       return ok(undefined)
     },
   }
+
+  return store as Store<T>
 }
 
 /**

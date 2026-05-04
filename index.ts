@@ -13,6 +13,8 @@ export type {
 	ParentRef,
 	SnapshotMeta,
 	Snapshot,
+	SnapshotHandle,
+	StreamableValue,
 	DataHandle,
 	MetadataClient,
 	DataClient,
