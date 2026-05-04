@@ -89,6 +89,9 @@ Discriminated union with `kind` field:
 - `hash_mismatch` - Content corruption (expected, actual)
 - `validation_error` - Schema validation failed (cause, message)
 - `observation_not_found` - Observation doesn't exist (id)
+- `transaction_aborted` - Transaction body returned err(), threw, or apply_batch failed (reason: 'returned_err' | 'threw' | 'apply_batch_failed', cause?)
+- `partial_commit` - Sequential fallback couldn't fully roll back (ops_completed, ops_failed, cause)
+- `concurrent_modification` - Reserved for forward-compat; no built-in backend produces this currently (store_id, version)
 
 ```typescript
 if (!result.ok && result.error.kind === 'not_found') {
@@ -196,6 +199,57 @@ for await (const obs of corpus.observations.query({ type: 'entity_mention' })) {
   console.log(obs.content)
 }
 ```
+
+## Transactions
+
+Cross-store atomic puts via `corpus.transaction(async tx => ...)`. Body must return a Result; returning err() or throwing aborts. Mutations buffer and commit atomically when the backend supports `apply_batch`, otherwise sequentially with compensating deletes (best-effort).
+
+```typescript
+const result = await corpus.transaction(async (tx) => {
+  const event = await tx.put(corpus.stores.timeline, payload)
+  if (!event.ok) return event
+  const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
+    parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
+  })
+  if (!idx.ok) return idx
+  return ok({ event_version: event.value.version })
+})
+// result: Result<{ value: R, commits: SnapshotMeta[], observations: Observation[] }, CorpusError>
+
+// Handle surface
+type TransactionHandle = {
+  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>  // read-your-writes
+  delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>      // tombstones in-tx
+  observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
+  observation_delete: (id: string) => Promise<Result<void, CorpusError>>
+}
+
+// Backend opt-in
+type BatchOp =
+  | { type: 'meta_put'; meta: SnapshotMeta }
+  | { type: 'meta_delete'; store_id: string; version: string }
+  | { type: 'data_put'; data_key: string; bytes: Uint8Array }
+  | { type: 'observation_put'; row: ObservationRow }
+  | { type: 'observation_delete'; id: string }
+
+type Backend = {
+  // ...
+  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
+}
+```
+
+Per-backend guarantees:
+- **memory**: full atomic (snapshot + rollback on throw, sync ops)
+- **file**: per-store metadata atomic via rename; cross-file batch NOT atomic — mid-flight crash → `partial_commit`. Recoverable via `recover(root_dir)` from `@f0rbit/corpus/file` at startup.
+- **cloudflare**: D1 metadata atomic via `db.batch`; R2 has no multi-object atomicity — failures after R2 puts but before D1 commit leave content-addressed orphan blobs.
+- **layered**: forwards to bottom write layer only; cache layers fill lazily on subsequent reads.
+
+Gotchas:
+- No isolation between concurrent transactions. Same-instance nesting → `invalid_config`. Cross-instance concurrent calls race — corpus is not a transactional database.
+- No timeout (use `Promise.race`), no optimistic concurrency check, no retry helper — all on the consumer.
+- Sequential-fallback path returns `invalid_config` for `observation_put` / `observation_delete` ops — backends with observations must ship `apply_batch`. All built-in backends do.
+- `tx.delete` writes a tombstone so `tx.get` of the same version returns `not_found` even if it's still committed in the live backend.
 
 ## Backends
 
@@ -372,6 +426,9 @@ type CorpusError =
   | { kind: 'invalid_config'; message: string }
   | { kind: 'validation_error'; cause: Error; message: string }
   | { kind: 'observation_not_found'; id: string }
+  | { kind: 'transaction_aborted'; reason: 'returned_err' | 'threw' | 'apply_batch_failed'; cause?: Error }
+  | { kind: 'partial_commit'; ops_completed: number; ops_failed: number; cause: Error }
+  | { kind: 'concurrent_modification'; store_id: string; version: string }
 ```
 
 ## Common Patterns

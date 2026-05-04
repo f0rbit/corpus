@@ -25,11 +25,13 @@ For reference, here's what you're assembling into:
 type Backend = {
   metadata: MetadataClient
   data: DataClient
+  observations?: ObservationsClient
   on_event?: EventHandler
+  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
 }
 ```
 
-See [Backend Types](/corpus/api/backends/types) for the full `MetadataClient` and `DataClient` interfaces.
+See [Backend Types](/corpus/api/backends/types) for the full `MetadataClient` and `DataClient` interfaces. The optional `apply_batch` hook is covered in [Optional `apply_batch` hook](#optional-apply_batch-hook) below.
 
 ## Implementing MetadataStorage
 
@@ -222,6 +224,123 @@ What you get from the wrapper:
 - **Error wrapping**: Catches throws and converts them to `Result<T, CorpusError>` with `kind: 'storage_error'`
 - **Event emission**: Emits `meta_get`, `meta_put`, `data_get`, `data_put`, etc.
 - **Deduplication tracking**: `deduplicated: true` on events when content hash matches
+
+## Optional `apply_batch` hook
+
+`corpus.transaction()` (see [Transactions](/corpus/guides/transactions/)) buffers ops inside the body and submits them in one shot at commit time. Backends opt into atomic application by exporting an `apply_batch` method; backends that don't fall back to a sequential best-effort path inside `corpus.transaction()`.
+
+### Signature
+
+```typescript
+type Backend = {
+  // ...
+  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
+}
+```
+
+`BatchOp` is a discriminated union covering every mutation a transaction can produce:
+
+```typescript
+type BatchOp =
+  | { type: 'meta_put'; meta: SnapshotMeta }
+  | { type: 'meta_delete'; store_id: string; version: string }
+  | { type: 'data_put'; data_key: string; bytes: Uint8Array }
+  | { type: 'observation_put'; row: ObservationRow }
+  | { type: 'observation_delete'; id: string }
+```
+
+Ops arrive in the order the body emitted them. The implementation is free to reorder internally (e.g. write all data blobs before metadata) but the post-commit state must match a serial application of the original order.
+
+### Contract
+
+`apply_batch` must be **all-or-nothing from a reader's perspective**:
+
+- On success, return `ok(undefined)`. Every op in the batch is visible to subsequent reads.
+- On failure, return `err({ kind: 'transaction_aborted', reason: 'apply_batch_failed', cause })`. **No op** in the batch should be visible to subsequent reads. If your storage cannot guarantee this (e.g. the operation is not natively transactional and you've already written some ops), surface `partial_commit` honestly with `ops_completed` / `ops_failed` counts:
+
+```typescript
+return err({
+  kind: 'partial_commit',
+  ops_completed: 3,
+  ops_failed: 2,
+  cause,
+})
+```
+
+Throwing from inside `apply_batch` is a contract violation — wrap external calls and translate failures to `Result`.
+
+### Fallback semantics when `apply_batch` is absent
+
+`corpus.transaction()` runs each op against the live backend in order. On the first failure, it issues compensating deletes for every op already applied, in reverse order:
+
+- `meta_put` → `metadata.delete`
+- `data_put` → `data.delete` (best-effort; absence is fine because data is content-addressed)
+- `observation_put` → `observations.delete`
+- `meta_delete` / `observation_delete` → **non-undoable** — surfaces `partial_commit` if any have already applied
+
+If a compensation also fails, the transaction returns `partial_commit`. Otherwise it returns `transaction_aborted` with `reason: 'apply_batch_failed'`.
+
+This is intentionally best-effort. **Backends with non-trivial atomicity needs — anything that touches multiple stores, observations, or external services — should ship `apply_batch`.** The fallback is a safety net for simple custom backends; consumers that mix observations into transactions need a real `apply_batch` (the fallback returns `invalid_config` for `observation_put` / `observation_delete` ops to avoid silently diverging the buffered observation id from a re-minted server-side id).
+
+### Worked example: Postgres adapter
+
+A Postgres-backed backend wrapping `pg`'s transaction helper:
+
+```typescript
+import type { BatchOp, Backend, CorpusError, Result } from '@f0rbit/corpus'
+import { ok, err } from '@f0rbit/corpus'
+
+export function create_postgres_backend(pool: Pool): Backend {
+  // ...metadata, data, observations, on_event wired up as elsewhere...
+
+  async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      for (const op of ops) {
+        switch (op.type) {
+          case 'meta_put':
+            await client.query(meta_insert_sql, meta_insert_params(op.meta))
+            break
+          case 'meta_delete':
+            await client.query(meta_delete_sql, [op.store_id, op.version])
+            break
+          case 'data_put':
+            await client.query(data_insert_sql, [op.data_key, op.bytes])
+            break
+          case 'observation_put':
+            await client.query(obs_insert_sql, obs_insert_params(op.row))
+            break
+          case 'observation_delete':
+            await client.query(obs_delete_sql, [op.id])
+            break
+        }
+      }
+
+      await client.query('COMMIT')
+      return ok(undefined)
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {})
+      return err({
+        kind: 'transaction_aborted',
+        reason: 'apply_batch_failed',
+        cause: cause instanceof Error ? cause : new Error(String(cause)),
+      })
+    } finally {
+      client.release()
+    }
+  }
+
+  return { metadata, data, observations, on_event, apply_batch }
+}
+```
+
+Postgres is the easy case: `BEGIN` / `COMMIT` / `ROLLBACK` give true atomicity for free. The harder cases — multi-bucket object storage, cross-database writes — generally don't have that primitive and have to surface `partial_commit` honestly.
+
+<Aside type="tip">
+  See `backend/cloudflare.ts` for a hybrid example: D1's `db.batch()` gives atomic SQL, but R2 has no multi-object atomicity, so the impl writes R2 first (orphan-tolerant because content-addressed) and only then submits the D1 batch.
+</Aside>
 
 ## Observations Support (Optional)
 
