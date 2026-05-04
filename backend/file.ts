@@ -142,7 +142,11 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			const path = data_path(data_key);
 			const file = Bun.file(path);
 			if (!(await file.exists())) return null;
-			return new Uint8Array(await file.arrayBuffer());
+			return {
+				bytes: async () => new Uint8Array(await file.arrayBuffer()),
+				stream: () => file.stream(),
+				size: file.size,
+			};
 		},
 
 		async put(data_key, data) {

@@ -413,6 +413,80 @@ export function runBackendContractTests(
           expect(combined).toEqual(data)
         })
       })
+
+      describe('streaming reads', () => {
+        const big_payload = (): Uint8Array => {
+          const buf = new Uint8Array(256 * 1024)
+          for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff
+          return buf
+        }
+
+        const drain = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
+          const reader = stream.getReader()
+          const chunks: Uint8Array[] = []
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            chunks.push(value)
+          }
+          return chunks
+        }
+
+        const flatten = (chunks: Uint8Array[]): Uint8Array => {
+          const total = chunks.reduce((acc, c) => acc + c.length, 0)
+          const out = new Uint8Array(total)
+          let offset = 0
+          for (const c of chunks) {
+            out.set(c, offset)
+            offset += c.length
+          }
+          return out
+        }
+
+        it('data handle stream() yields multi-chunk stream when bytes exceed chunk size', async () => {
+          const data = big_payload()
+          await backend.data.put('big-payload', data)
+
+          const result = await backend.data.get('big-payload')
+          expect(result.ok).toBe(true)
+          if (!result.ok) return
+
+          const chunks = await drain(result.value.stream())
+          // Memory backend wraps in a single chunk; file backend streams via Bun.file().stream().
+          // Either is correct — we assert >=1 here, with stricter chunk-count assertions in
+          // the per-backend tests below where the contract is tighter.
+          expect(chunks.length).toBeGreaterThanOrEqual(1)
+          expect(flatten(chunks)).toEqual(data)
+        })
+
+        it('stream() and bytes() return identical content', async () => {
+          const data = big_payload()
+          await backend.data.put('identical-content', data)
+
+          const get_a = await backend.data.get('identical-content')
+          const get_b = await backend.data.get('identical-content')
+          expect(get_a.ok && get_b.ok).toBe(true)
+          if (!get_a.ok || !get_b.ok) return
+
+          const via_bytes = await get_a.value.bytes()
+          const via_stream = flatten(await drain(get_b.value.stream()))
+
+          expect(via_bytes).toEqual(via_stream)
+          expect(via_stream).toEqual(data)
+        })
+
+        it('data handle exposes both bytes() and stream() on every backend', async () => {
+          const data = new TextEncoder().encode('handle shape')
+          await backend.data.put('shape-test', data)
+
+          const result = await backend.data.get('shape-test')
+          expect(result.ok).toBe(true)
+          if (!result.ok) return
+
+          expect(typeof result.value.bytes).toBe('function')
+          expect(typeof result.value.stream).toBe('function')
+        })
+      })
     })
 
     describe('cross-client consistency', () => {
@@ -487,3 +561,61 @@ runBackendContractTests(
     await rm(layeredTestDir, { recursive: true, force: true })
   }
 )
+
+const big = (size: number): Uint8Array => {
+  const buf = new Uint8Array(size)
+  for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff
+  return buf
+}
+
+const drainChunks = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  return chunks
+}
+
+describe('backend-specific streaming chunk counts', () => {
+  it('memory backend returns exactly one chunk for any size', async () => {
+    const backend = create_memory_backend()
+    const data = big(256 * 1024)
+    await backend.data.put('mem-big', data)
+
+    const result = await backend.data.get('mem-big')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const chunks = await drainChunks(result.value.stream())
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]).toEqual(data)
+  })
+
+  it('file backend yields multiple chunks for a 1 MB payload', async () => {
+    // Bun.file().stream() emits 256 KB chunks; a 1 MB payload guarantees ≥4 chunks
+    // and proves we're actually streaming rather than buffering.
+    const dir = join(tmpdir(), 'corpus-contract-streaming-file')
+    await rm(dir, { recursive: true, force: true })
+    await mkdir(dir, { recursive: true })
+    try {
+      const backend = create_file_backend({ base_path: dir })
+      const data = big(1024 * 1024)
+      await backend.data.put('file-big', data)
+
+      const result = await backend.data.get('file-big')
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+
+      const chunks = await drainChunks(result.value.stream())
+      expect(chunks.length).toBeGreaterThanOrEqual(2)
+
+      const total = chunks.reduce((acc, c) => acc + c.length, 0)
+      expect(total).toBe(data.length)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

@@ -25,12 +25,69 @@ export type MetadataStorage = {
   find_by_hash: (store_id: string, hash: string) => Promise<SnapshotMeta | null>;
 };
 
+/**
+ * Adapter-side handle returned by `DataStorage.get`. Lives next to
+ * `DataStorage` (not in `types.ts`) because it's part of the backend
+ * extension surface — `types.ts:DataHandle` is the consumer-facing
+ * shape exposed by `DataClient.get`.
+ */
+export type DataStorageHandle = {
+  bytes: () => Promise<Uint8Array>;
+  /** Optional native stream. If absent, `create_data_client` falls back to a one-chunk wrapper around `bytes()`. */
+  stream?: () => ReadableStream<Uint8Array>;
+  size?: number;
+};
+
 export type DataStorage = {
+  get: (data_key: string) => Promise<DataStorageHandle | null>;
+  put: (data_key: string, data: Uint8Array) => Promise<void>;
+  delete: (data_key: string) => Promise<void>;
+  exists: (data_key: string) => Promise<boolean>;
+};
+
+/**
+ * Wraps a legacy bytes-returning storage in the new `DataStorage` shape.
+ * Migration helper for custom backends written against the pre-0.4.0 contract:
+ *
+ * ```ts
+ * create_data_client(wrap_bytes_storage(my_storage), emit)
+ * ```
+ *
+ * The wrapped `get` produces a `DataStorageHandle` whose `bytes()` returns the
+ * stored bytes and whose `stream()` wraps them in a one-chunk `ReadableStream`.
+ */
+export type BytesStorage = {
   get: (data_key: string) => Promise<Uint8Array | null>;
   put: (data_key: string, data: Uint8Array) => Promise<void>;
   delete: (data_key: string) => Promise<void>;
   exists: (data_key: string) => Promise<boolean>;
 };
+
+export function wrap_bytes_storage(storage: BytesStorage): DataStorage {
+  return {
+    async get(data_key) {
+      const bytes = await storage.get(data_key);
+      if (!bytes) return null;
+      return {
+        bytes: async () => bytes,
+        stream: () => one_chunk_stream(bytes),
+        size: bytes.byteLength,
+      };
+    },
+    put: storage.put,
+    delete: storage.delete,
+    exists: storage.exists,
+  };
+}
+
+function one_chunk_stream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
 
 type Emit = (event: CorpusEvent) => void;
 
@@ -110,27 +167,21 @@ export function create_metadata_client(
 export function create_data_client(storage: DataStorage, emit: Emit): DataClient {
   return {
     async get(data_key): Promise<Result<DataHandle, CorpusError>> {
-      const bytes = await storage.get(data_key);
+      const handle = await storage.get(data_key);
       emit({
         type: "data_get",
         store_id: to_fallback(first(data_key.split("/")), data_key),
         version: data_key,
-        found: !!bytes,
+        found: !!handle,
       });
 
-      if (!bytes) {
+      if (!handle) {
         return err({ kind: "not_found", store_id: data_key, version: "" });
       }
 
       return ok({
-        stream: () =>
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(bytes);
-              controller.close();
-            },
-          }),
-        bytes: async () => bytes,
+        stream: handle.stream ?? (() => one_chunk_stream_lazy(handle.bytes)),
+        bytes: handle.bytes,
       });
     },
 
@@ -149,4 +200,15 @@ export function create_data_client(storage: DataStorage, emit: Emit): DataClient
       return storage.exists(data_key);
     },
   };
+}
+
+function one_chunk_stream_lazy(
+  bytes: () => Promise<Uint8Array>
+): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    async start(controller) {
+      controller.enqueue(await bytes());
+      controller.close();
+    },
+  });
 }
