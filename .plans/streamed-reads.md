@@ -165,6 +165,10 @@ export function compose<T>(
 
 **Streamability as an inferred bit:** `compose` doesn't return a special `StreamableCodec<T>` type — it just conditionally includes `decode_stream` on the returned codec. TypeScript's structural inference picks this up and `SnapshotHandle.stream` becomes available iff every layer had `decode_stream`. No explicit branding needed.
 
+**Encode-through-layers asymmetry (Phase 1 implementation note, 2026-05-05):** the `Codec<T>['encode_stream']: (value: T) => ReadableStream<Uint8Array>` signature is value-to-stream, not stream-to-stream. For a layer (where `T = Uint8Array`), this makes pure stream piping through layers impossible — each layer's `encode_stream` takes a `Uint8Array`, not a `ReadableStream`. The Phase 1 `compose()` impl buffers between layers on encode (collects each upstream output to bytes, then invokes the next layer's `encode_stream` with those bytes). Decode-through-layers is genuinely stream-piped because `Codec<Uint8Array>['decode_stream']` is `(ReadableStream<Uint8Array>) => ReadableStream<Uint8Array>` — already stream-to-stream.
+
+This is a real limitation, not an implementation bug. When Phase 4's `gzip_codec()` lands, the buffer-between-layers behaviour means encode-side compression doesn't stream through a `compose(text_codec(), gzip_codec())` chain — the gzip layer materialises the full text-encoded bytes before compressing. Acceptable for v0.4.0 (Phase 3 `put_stream` per §2.6 buffers internally for content-hashing anyway). If this becomes a real bottleneck, the fix is to add a layer-specific stream-to-stream method on `BytesCodec` (e.g. `pipe_encode_stream?: (input: ReadableStream<Uint8Array>) => ReadableStream<Uint8Array>`) and have `compose()` prefer it when present. Tracked here for Phase 4 follow-up.
+
 ### 2.4 Per-backend streaming behaviour
 
 | Backend | Native streaming? | Implementation |
