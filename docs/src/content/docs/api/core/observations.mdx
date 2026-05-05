@@ -212,6 +212,37 @@ type ObservationQueryOpts = {
 }
 ```
 
+### Cursor-Based Pagination
+
+The `cursor` field enables efficient pagination through large observation result sets without offset-based iteration:
+
+```ts
+// First page: no cursor
+let cursor: string | undefined = undefined
+const page_size = 50
+
+for await (const obs of corpus.observations.query({
+  type: 'entity_mention',
+  limit: page_size,
+  cursor: cursor
+})) {
+  console.log(obs.id, obs.content)
+  cursor = obs.id // Use the last observation's ID as next cursor
+}
+
+// Next iteration with new cursor will continue from that point
+for await (const obs of corpus.observations.query({
+  type: 'entity_mention',
+  limit: page_size,
+  cursor: cursor  // Resume from last ID
+})) {
+  console.log(obs.id, obs.content)
+  cursor = obs.id
+}
+```
+
+The cursor is opaque (typically an observation ID from the previous result set). Pass it in the next query to resume pagination without re-scanning earlier results. This is more efficient than offset-based pagination for large datasets.
+
 ### ObservationPutOpts
 
 Options for creating a new observation.

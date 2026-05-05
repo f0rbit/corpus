@@ -20,7 +20,32 @@ Codecs define how data is serialized for storage and deserialized on retrieval. 
     <div class="card-title">binary_codec</div>
     <div class="card-description">Raw bytes for files and blobs</div>
   </div>
+  <div class="card">
+    <div class="card-title">gzip_codec</div>
+    <div class="card-description">Gzip byte-transformer layer</div>
+  </div>
+  <div class="card">
+    <div class="card-title">encrypt_codec</div>
+    <div class="card-description">AES-GCM byte-transformer layer</div>
+  </div>
+  <div class="card">
+    <div class="card-title">compose</div>
+    <div class="card-description">Chain a head codec with byte-transformer layers</div>
+  </div>
 </div>
+
+<Aside type="caution" title="Async codec interface — since 0.4.0">
+  `Codec<T>.encode` and `Codec<T>.decode` now return `Promise<...>`. Sync codec implementations are no longer accepted.
+
+  **Migration:** wrap the body of an existing sync codec in `async` (one-line change). Built-in codecs were updated in 0.4.0 — consumers using only `store.put` / `store.get` see no break. Consumers calling `codec.encode` / `codec.decode` directly need `await`.
+
+  ```ts
+  // before
+  encode: (value) => new TextEncoder().encode(value)
+  // after
+  encode: async (value) => new TextEncoder().encode(value)
+  ```
+</Aside>
 
 ## json_codec
 
@@ -163,6 +188,129 @@ if (result.ok) {
 
 ---
 
+## compose
+
+```ts
+function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T>
+```
+
+Chain a head codec with N byte-transforming layers (gzip, encrypt, base64, ...). Encode runs left-to-right; decode runs right-to-left.
+
+The leftmost codec defines the value type `T`. Subsequent layers are `BytesCodec` (i.e. `Codec<Uint8Array>`). The composed codec inherits the head's `content_type` — wrapper layers don't change semantic type.
+
+### Usage
+
+```ts
+import { compose, json_codec, gzip_codec, define_store } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const EventSchema = z.object({ id: z.string(), payload: z.unknown() })
+
+const codec = compose(json_codec(EventSchema), gzip_codec())
+const events = define_store('events', codec)
+```
+
+### Streamability inference
+
+`compose()` does not return a special `StreamableCodec<T>` — it just conditionally includes `encode_stream` / `decode_stream` on the result. Both are present iff every layer (head + all wrappers) exposes the corresponding stream method:
+
+```ts
+compose(text_codec(), gzip_codec()).decode_stream  // defined
+compose(json_codec(s), gzip_codec()).decode_stream // undefined — json_codec lacks decode_stream
+compose(text_codec(), encrypt_codec(key)).decode_stream // undefined — encrypt_codec omits decode_stream
+```
+
+This propagates to the [`Store<T>` type](/corpus/api/streaming#compile-time-guarantees): adding a non-streamable layer disables `Store.put_stream` / `SnapshotHandle.stream` for that store.
+
+<Aside type="caution" title="Encode buffers between layers">
+  Decode pipes streams natively through layers. Encode does not — the `encode_stream` signature is value-to-stream (`(value: T) => ReadableStream<Uint8Array>`), not stream-to-stream, so each layer materialises its upstream output before invoking the next. For `compose(text_codec(), gzip_codec())`, the gzip layer waits for the full text-encoded bytes before compressing.
+
+  This is acceptable for v0.4.0 because `Store.put_stream` already buffers internally for content-hashing. Tracked as a future optimisation in `.plans/streamed-reads.md` §2.3.
+</Aside>
+
+---
+
+## gzip_codec
+
+```ts
+function gzip_codec(): BytesCodec
+```
+
+A `BytesCodec` that compresses on encode and decompresses on decode via the standard `CompressionStream` / `DecompressionStream` APIs (Workers, Bun, Node 18+; no polyfill).
+
+Use as a layer in `compose(...)` — the head codec defines the value type; `gzip_codec()` transforms the bytes left by the upstream encoder.
+
+### Usage
+
+```ts
+import { compose, json_codec, gzip_codec, define_store } from '@f0rbit/corpus'
+
+const codec = compose(json_codec(EventSchema), gzip_codec())
+const events = define_store('events', codec)
+```
+
+Both `encode_stream` and `decode_stream` are present, so a `compose(text_codec(), gzip_codec())` chain is fully streamable. With `json_codec`, only the buffered (non-streaming) path is available because `json_codec` itself doesn't ship `decode_stream`.
+
+### Content Type
+
+`application/gzip` (overridden by the head codec's `content_type` once composed)
+
+---
+
+## encrypt_codec
+
+```ts
+function encrypt_codec(key: CryptoKey): BytesCodec
+```
+
+A `BytesCodec` that encrypts on encode and decrypts on decode via WebCrypto AES-GCM. A fresh 12-byte IV is generated per encode call and prepended to the ciphertext for self-contained decoding — no caller-side IV management.
+
+### Usage
+
+```ts
+import { compose, json_codec, encrypt_codec, define_store } from '@f0rbit/corpus'
+
+const key = await crypto.subtle.generateKey(
+  { name: 'AES-GCM', length: 256 },
+  true,
+  ['encrypt', 'decrypt']
+)
+
+const codec = compose(json_codec(SecretSchema), encrypt_codec(key))
+const secrets = define_store('secrets', codec)
+```
+
+### Streaming notes
+
+- `encode_stream` is present (single-chunk wrapper around `encode`). True chunked encryption is not implemented — AES-GCM authenticates the whole ciphertext via a tag at the end, and standard WebCrypto exposes only the one-shot form.
+- `decode_stream` is **intentionally omitted**. AES-GCM must verify the auth tag before any plaintext is safe to release; yielding chunks early would leak unauthenticated data. Including `encrypt_codec()` in a composition disables streaming decode for the whole pipeline — by design.
+
+### Deduplication tradeoff
+
+A random IV per encode means identical plaintexts produce different ciphertexts each time. Content-hash deduplication operates on the *encoded* bytes, so a `compose(json_codec(S), encrypt_codec(key))` pipeline cannot dedup identical plaintexts.
+
+This is the correct security tradeoff. Opt-in deterministic encryption is a footgun — it leaks plaintext equality through ciphertext equality. If you need dedup with encryption, layer encryption on top of an already-content-addressed system rather than asking the encryption layer to be deterministic.
+
+### Content Type
+
+`application/octet-stream` (overridden by the head codec's `content_type` once composed)
+
+---
+
+## Streamability summary
+
+| Codec | encode_stream | decode_stream |
+|---|---|---|
+| `json_codec(schema)` | – | – |
+| `text_codec()` | yes | yes |
+| `binary_codec()` | yes | yes |
+| `gzip_codec()` | yes | yes |
+| `encrypt_codec(key)` | yes | – |
+
+A composed codec carries a stream method only when every layer carries it. See [Streaming](/corpus/api/streaming) for how streamability surfaces through `Store.get_handle` / `Store.put_stream`.
+
+---
+
 ## Custom Codecs
 
 Create your own codec by implementing the `Codec<T>` interface:
@@ -170,21 +318,25 @@ Create your own codec by implementing the `Codec<T>` interface:
 ```ts
 type Codec<T> = {
   content_type: ContentType
-  encode: (value: T) => Uint8Array
-  decode: (bytes: Uint8Array) => T
+  encode: (value: T) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<T>
+  encode_stream?: (value: T) => ReadableStream<Uint8Array>
+  decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>
 }
 ```
+
+`encode` and `decode` are async (since 0.4.0). The two stream methods are optional — ship them when the format chunks naturally (text, raw bytes, gzip). Omit them when chunking is unsafe or incoherent (Zod-validated JSON, AEAD decode).
 
 ### MessagePack Example
 
 ```ts
 import { encode, decode } from '@msgpack/msgpack'
 
-function msgpack_codec<T>(schema: ZodLike<T>): Codec<T> {
+function msgpack_codec<T>(schema: Parser<T>): Codec<T> {
   return {
     content_type: 'application/msgpack',
-    encode: (value) => encode(value),
-    decode: (bytes) => schema.parse(decode(bytes)),
+    encode: async (value) => encode(value),
+    decode: async (bytes) => schema.parse(decode(bytes)),
   }
 }
 ```
@@ -195,8 +347,8 @@ function msgpack_codec<T>(schema: ZodLike<T>): Codec<T> {
 function xml_codec(): Codec<string> {
   return {
     content_type: 'text/xml',
-    encode: (value) => new TextEncoder().encode(value),
-    decode: (bytes) => new TextDecoder().decode(bytes),
+    encode: async (value) => new TextEncoder().encode(value),
+    decode: async (bytes) => new TextDecoder().decode(bytes),
   }
 }
 ```
@@ -210,16 +362,28 @@ function xml_codec(): Codec<string> {
 ```ts
 type Codec<T> = {
   content_type: ContentType
-  encode: (value: T) => Uint8Array
-  decode: (bytes: Uint8Array) => T
+  encode: (value: T) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<T>
+  encode_stream?: (value: T) => ReadableStream<Uint8Array>
+  decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>
 }
 ```
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `content_type` | `ContentType` | MIME type for the encoded data |
-| `encode` | `(T) => Uint8Array` | Serialize value to bytes |
-| `decode` | `(Uint8Array) => T` | Deserialize bytes to value |
+| `encode` | `(T) => Promise<Uint8Array>` | Serialize value to bytes (async since 0.4.0) |
+| `decode` | `(Uint8Array) => Promise<T>` | Deserialize bytes to value (async since 0.4.0) |
+| `encode_stream` | `(T) => ReadableStream<Uint8Array>` | Optional. Chunked encode — required for `Store.put_stream`. |
+| `decode_stream` | `(ReadableStream<Uint8Array>) => ReadableStream<T>` | Optional. Chunked decode — required for `SnapshotHandle.stream()`. |
+
+### BytesCodec
+
+```ts
+type BytesCodec = Codec<Uint8Array>
+```
+
+A codec layer that transforms bytes → bytes (gzip, encrypt, base64, ...). The parameter type for `compose()` layers — the head codec defines `T`, subsequent layers are byte transformers.
 
 ### ContentType
 
@@ -243,3 +407,5 @@ type ContentType =
 | `json_codec` | Structured data | Zod schema | Most application data |
 | `text_codec` | Strings | None | Logs, notes, markup |
 | `binary_codec` | Raw bytes | None | Files, images, blobs |
+| `gzip_codec` | Bytes layer | None | Wrap any codec with gzip compression via `compose()` |
+| `encrypt_codec` | Bytes layer | Auth-tag (GCM) | Wrap any codec with AES-GCM encryption via `compose()` |

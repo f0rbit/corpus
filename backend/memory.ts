@@ -87,7 +87,18 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 
 	const data_storage: DataStorage = {
 		async get(data_key) {
-			return data_store.get(data_key) ?? null;
+			const bytes = data_store.get(data_key);
+			if (!bytes) return null;
+			return {
+				bytes: async () => bytes,
+				stream: () => new ReadableStream({
+					start(controller) {
+						controller.enqueue(bytes);
+						controller.close();
+					},
+				}),
+				size: bytes.byteLength,
+			};
 		},
 
 		async put(data_key, data) {

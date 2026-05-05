@@ -1,6 +1,6 @@
 ---
 title: Utility Functions
-description: Extended utilities for Result types and concurrency control in Corpus.
+description: Extended utilities for Result types, concurrency control, hashing, and versioning in Corpus.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -711,6 +711,55 @@ function parallel_map<T, R>(
 - Results are returned in the same order as inputs
 - If any mapper throws, the entire operation rejects
 - Uses `Semaphore` internally to limit concurrency
+
+---
+
+## Hashing & Versioning
+
+These two helpers underpin Corpus's content-addressable storage and lexicographic version ordering. Both are exposed for callers that want to pre-compute hashes (e.g. to short-circuit a `put`) or generate compatible version strings outside of a `put` call.
+
+### `compute_hash(data)`
+
+Computes the SHA-256 hash of binary data and returns it as a lowercase 64-character hex string.
+
+```typescript
+import { compute_hash } from '@f0rbit/corpus'
+
+const bytes = new TextEncoder().encode('Hello, world!')
+const hash = await compute_hash(bytes)
+// => '315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3'
+```
+
+**Signature:**
+```typescript
+function compute_hash(data: Uint8Array): Promise<string>
+```
+
+Use case: pre-compute the hash of a payload and check the store for an existing snapshot with that `content_hash` before issuing a write — useful when the source bytes are large and you want to avoid even encoding through the codec on a cache hit.
+
+---
+
+### `generate_version()`
+
+Returns a unique, lexicographically sortable version string. Format is a base64url-encoded big-endian timestamp, with an optional `.N` suffix when multiple versions are generated inside the same millisecond.
+
+```typescript
+import { generate_version } from '@f0rbit/corpus'
+
+const v1 = generate_version() // => 'AZJx4vM'
+const v2 = generate_version() // => 'AZJx4vM.1' (same ms)
+const v3 = generate_version() // => 'AZJx4vN' (next ms)
+
+// Lexicographic sort matches chronological order
+[v3, v1, v2].sort() // => [v1, v2, v3]
+```
+
+**Signature:**
+```typescript
+function generate_version(): string
+```
+
+You normally don't call this directly — `store.put()` generates a version automatically. Use it when constructing `SnapshotMeta` manually (e.g. when migrating data into Corpus from another system) or when you need a version string ahead of the write to reference it elsewhere.
 
 ---
 

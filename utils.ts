@@ -3,7 +3,7 @@
  * @description Utility functions for hashing, versioning, and codecs.
  */
 
-import type { Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
+import type { BytesCodec, Codec, CorpusEvent, EventHandler, SnapshotMeta, ListOpts, ParentRef, ContentType, Parser } from './types.js';
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -118,8 +118,8 @@ export function generate_version(): string {
 export function json_codec<T>(schema: Parser<T>): Codec<T> {
 	return {
 		content_type: "application/json",
-		encode: (value) => new TextEncoder().encode(JSON.stringify(value)),
-		decode: (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
+		encode: async (value) => new TextEncoder().encode(JSON.stringify(value)),
+		decode: async (bytes) => schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
 	};
 }
 
@@ -148,8 +148,18 @@ export function json_codec<T>(schema: Parser<T>): Codec<T> {
 export function text_codec(): Codec<string> {
 	return {
 		content_type: "text/plain",
-		encode: (value) => new TextEncoder().encode(value),
-		decode: (bytes) => new TextDecoder().decode(bytes),
+		encode: async (value) => new TextEncoder().encode(value),
+		decode: async (bytes) => new TextDecoder().decode(bytes),
+		encode_stream: (value) => {
+			const stream = new ReadableStream<string>({
+				start(controller) {
+					controller.enqueue(value)
+					controller.close()
+				}
+			})
+			return stream.pipeThrough(new TextEncoderStream())
+		},
+		decode_stream: (bytes) => bytes.pipeThrough(new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>),
 	};
 }
 
@@ -179,9 +189,95 @@ export function text_codec(): Codec<string> {
 export function binary_codec(): Codec<Uint8Array> {
 	return {
 		content_type: "application/octet-stream",
-		encode: (value) => value,
-		decode: (bytes) => bytes,
+		encode: async (value) => value,
+		decode: async (bytes) => bytes,
+		encode_stream: (value) => new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(value)
+				controller.close()
+			}
+		}),
+		decode_stream: (bytes) => bytes,
 	};
+}
+
+/**
+ * Compose a head codec with N byte-transforming layers (gzip, encrypt, base64, …).
+ *
+ * Encode runs left-to-right (`head.encode(v)` → `layers[0].encode(bytes)` → … → final bytes).
+ * Decode runs right-to-left (final bytes → `layers[n-1].decode(bytes)` → … → `head.decode(bytes)`).
+ *
+ * `content_type` comes from the head — wrapper layers don't change semantic type.
+ *
+ * Streamability is structural: `encode_stream` / `decode_stream` are present on the
+ * returned codec only when the head and every layer expose the corresponding stream
+ * method. Dropping a non-streamable layer (e.g. an AEAD `decode`) into a composition
+ * disables streaming for the whole pipeline.
+ *
+ * @category Codecs
+ * @group Codec Combinators
+ *
+ * @example
+ * ```ts
+ * const codec = compose(json_codec(UserSchema), gzip_codec())
+ * // codec.decode_stream is undefined — json_codec lacks decode_stream.
+ *
+ * const text_gz = compose(text_codec(), gzip_codec())
+ * // text_gz.decode_stream is defined.
+ * ```
+ */
+export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
+	if (layers.length === 0) return head
+
+	const decode_streamable = !!head.decode_stream && layers.every(l => l.decode_stream)
+	const encode_streamable = !!head.encode_stream && layers.every(l => l.encode_stream)
+
+	const codec: Codec<T> = {
+		content_type: head.content_type,
+		async encode(value) {
+			let bytes = await head.encode(value)
+			for (const layer of layers) bytes = await layer.encode(bytes)
+			return bytes
+		},
+		async decode(bytes) {
+			for (let i = layers.length - 1; i >= 0; i--) bytes = await layers[i]!.decode(bytes)
+			return head.decode(bytes)
+		},
+	}
+
+	if (encode_streamable) {
+		codec.encode_stream = (value) => {
+			let stream = head.encode_stream!(value)
+			for (const layer of layers) {
+				const layer_in = stream
+				const layer_fn = layer.encode_stream!
+				stream = new ReadableStream<Uint8Array>({
+					async start(controller) {
+						const buffered = await stream_to_bytes(layer_in)
+						const layer_out = layer_fn(buffered)
+						const reader = layer_out.getReader()
+						while (true) {
+							const { done, value: chunk } = await reader.read()
+							if (done) break
+							controller.enqueue(chunk)
+						}
+						controller.close()
+					}
+				})
+			}
+			return stream
+		}
+	}
+
+	if (decode_streamable) {
+		codec.decode_stream = (stream) => {
+			let bytes_stream = stream
+			for (let i = layers.length - 1; i >= 0; i--) bytes_stream = layers[i]!.decode_stream!(bytes_stream)
+			return head.decode_stream!(bytes_stream)
+		}
+	}
+
+	return codec
 }
 
 /**
