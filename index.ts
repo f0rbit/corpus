@@ -23,6 +23,7 @@ export type {
 	DataClient,
 	ListOpts,
 	Backend,
+	BatchOp,
 	Codec,
 	BytesCodec,
 	Parser,
@@ -38,6 +39,8 @@ export type {
 	CorpusEvent,
 	EventHandler,
 	ObservationsClient,
+	TransactionHandle,
+	TransactionResult,
 } from './types.js';
 
 export { ok, err, define_store } from './types.js';

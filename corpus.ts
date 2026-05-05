@@ -3,11 +3,12 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, Corpus, CorpusBuilder, StoreDefinition, Store, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient } from './types.js';
-import type { ObservationTypeDef, SnapshotPointer } from './observations/types.js';
+import type { Backend, BatchOp, Corpus, CorpusBuilder, StoreDefinition, Store, Snapshot, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient, PutOpts, TransactionHandle, TransactionResult } from './types.js';
+import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from './observations/types.js';
 import { ok, err } from './types.js';
 import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from './utils.js';
-import { create_pointer, resolve_path, apply_span } from './observations/utils.js';
+import { create_pointer, resolve_path, apply_span, generate_observation_id } from './observations/utils.js';
+import { create_observation_row } from './observations/storage.js';
 
 /**
  * Creates a typed Store instance bound to a Backend.
@@ -330,15 +331,206 @@ export function create_corpus(): CorpusBuilder<{}> {
       }
 
       const b = backend
-      
+
       const stores: Record<string, Store<any>> = {}
+      const definitions_by_id: Record<string, StoreDefinition<string, any>> = {}
       for (const def of definitions) {
         stores[def.id] = create_store(b, def)
+        definitions_by_id[def.id] = def
       }
 
       const observations_client = observation_types.length > 0 && 'observations' in b
         ? (b as Backend & { observations: ObservationsClient }).observations
         : undefined
+
+      let in_transaction = false
+
+      async function transaction_impl<R>(
+        body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
+      ): Promise<Result<TransactionResult<R>, CorpusError>> {
+        if (in_transaction) {
+          return err({ kind: 'invalid_config', message: 'nested transactions are not supported' })
+        }
+        in_transaction = true
+
+        // op buffer + read-your-writes caches
+        const ops: BatchOp[] = []
+        const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
+        const buffered_data = new Map<string, Uint8Array>()          // key: data_key
+        const buffered_observations = new Map<string, Observation>() // key: id
+        const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
+        const commits: SnapshotMeta[] = []
+        const observations: Observation[] = []
+
+        function meta_key(store_id: string, version: string): string {
+          return `${store_id}:${version}`
+        }
+
+        function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
+          const prefix = `${store_id}:`
+          for (const [k, m] of buffered_meta) {
+            if (k.startsWith(prefix) && m.content_hash === content_hash) return m
+          }
+          return undefined
+        }
+
+        const handle: TransactionHandle = {
+          async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+            const def = definitions_by_id[store.id]
+            if (!def) {
+              return err({ kind: 'invalid_config', message: `store '${store.id}' is not registered on this corpus` })
+            }
+
+            let bytes: Uint8Array
+            try {
+              bytes = await store.codec.encode(data)
+            } catch (cause) {
+              return err({ kind: 'encode_error', cause: cause as Error })
+            }
+
+            const version = generate_version()
+            const content_hash = await compute_hash(bytes)
+
+            // dedup against buffer first, then live backend
+            let existing_data_key: string | undefined =
+              find_buffered_by_hash(store.id, content_hash)?.data_key
+            if (!existing_data_key) {
+              const live = await b.metadata.find_by_hash(store.id, content_hash)
+              if (live) existing_data_key = live.data_key
+            }
+
+            const data_key = existing_data_key
+              ?? (def.data_key_fn
+                ? def.data_key_fn({ store_id: store.id, version, content_hash, tags: opts?.tags })
+                : `${store.id}/${content_hash}`)
+
+            if (!existing_data_key) {
+              ops.push({ type: 'data_put', data_key, bytes })
+              buffered_data.set(data_key, bytes)
+            }
+
+            const meta: SnapshotMeta = {
+              store_id: store.id,
+              version,
+              parents: opts?.parents ?? [],
+              created_at: new Date(),
+              invoked_at: opts?.invoked_at,
+              content_hash,
+              content_type: store.codec.content_type,
+              size_bytes: bytes.length,
+              data_key,
+              tags: opts?.tags,
+            }
+
+            ops.push({ type: 'meta_put', meta })
+            buffered_meta.set(meta_key(store.id, version), meta)
+            commits.push(meta)
+            return ok(meta)
+          },
+
+          async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
+            const key = meta_key(store.id, version)
+            if (tombstoned_meta.has(key)) {
+              return err({ kind: 'not_found', store_id: store.id, version })
+            }
+            const buffered = buffered_meta.get(key)
+            if (buffered) {
+              const bytes = buffered_data.get(buffered.data_key)
+              if (bytes) {
+                try {
+                  const value = await store.codec.decode(bytes)
+                  return ok({ meta: buffered, data: value })
+                } catch (cause) {
+                  return err({ kind: 'decode_error', cause: cause as Error })
+                }
+              }
+              // dedup hit on live data — fall through to backend read by data_key
+              const live = await b.data.get(buffered.data_key)
+              if (!live.ok) return live
+              try {
+                const value = await store.codec.decode(await live.value.bytes())
+                return ok({ meta: buffered, data: value })
+              } catch (cause) {
+                return err({ kind: 'decode_error', cause: cause as Error })
+              }
+            }
+            return store.get(version)
+          },
+
+          async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
+            const key = meta_key(store.id, version)
+            ops.push({ type: 'meta_delete', store_id: store.id, version })
+            buffered_meta.delete(key)
+            tombstoned_meta.add(key)
+            return ok(undefined)
+          },
+
+          async observe<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
+            const validation = type.schema.safeParse(opts.content)
+            if (!validation.success) {
+              return err({ kind: 'validation_error', cause: validation.error, message: validation.error.message })
+            }
+            const id = generate_observation_id()
+            const row = create_observation_row(id, type.name, opts.source, validation.data, {
+              confidence: opts.confidence,
+              observed_at: opts.observed_at,
+              derived_from: opts.derived_from,
+            })
+            ops.push({ type: 'observation_put', row })
+            const observation: Observation<T> = {
+              id,
+              type: type.name,
+              source: opts.source,
+              content: validation.data,
+              ...(opts.confidence !== undefined && { confidence: opts.confidence }),
+              ...(opts.observed_at && { observed_at: opts.observed_at }),
+              created_at: new Date(row.created_at),
+              ...(opts.derived_from && { derived_from: opts.derived_from }),
+            }
+            buffered_observations.set(id, observation as Observation)
+            observations.push(observation as Observation)
+            return ok(observation)
+          },
+
+          async observation_delete(id: string): Promise<Result<void, CorpusError>> {
+            ops.push({ type: 'observation_delete', id })
+            buffered_observations.delete(id)
+            return ok(undefined)
+          },
+        }
+
+        let body_result: Result<R, CorpusError>
+        try {
+          body_result = await body(handle)
+        } catch (cause) {
+          in_transaction = false
+          return err({ kind: 'transaction_aborted', reason: 'threw', cause: cause as Error })
+        }
+
+        if (!body_result.ok) {
+          in_transaction = false
+          return err({ kind: 'transaction_aborted', reason: 'returned_err', cause: corpus_error_to_native(body_result.error) })
+        }
+
+        // commit phase
+        const commit_result = b.apply_batch
+          ? await b.apply_batch(ops)
+          : await sequential_apply_with_compensation(b, ops)
+
+        in_transaction = false
+        if (!commit_result.ok) {
+          if (commit_result.error.kind === 'partial_commit') {
+            return commit_result
+          }
+          return err({
+            kind: 'transaction_aborted',
+            reason: 'apply_batch_failed',
+            cause: corpus_error_to_native(commit_result.error),
+          })
+        }
+
+        return ok({ value: body_result.value, commits, observations })
+      }
 
       async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
         const store = stores[pointer.store_id]
@@ -379,9 +571,125 @@ export function create_corpus(): CorpusBuilder<{}> {
         create_pointer,
         resolve_pointer: resolve_pointer_impl,
         is_superseded: is_superseded_impl,
+        transaction: transaction_impl,
       } as Corpus<any>
     },
   }
 
   return builder as CorpusBuilder<{}>
+}
+
+/**
+ * Render a CorpusError as a native Error suitable for use as `cause` on
+ * downstream errors. Preserves the discriminated `kind` in the message
+ * without losing structured information.
+ */
+function corpus_error_to_native(e: CorpusError): Error {
+  // pull the original cause if present, otherwise synthesise one from the kind
+  if ('cause' in e && e.cause instanceof Error) return e.cause
+  return new Error(`[${e.kind}] ${'message' in e ? e.message : JSON.stringify(e)}`)
+}
+
+/**
+ * Fallback commit path for backends without `apply_batch`. Applies ops in
+ * order against the live backend; on the first failure, attempts compensating
+ * deletes for already-applied ops. Returns `partial_commit` if any
+ * compensation also fails.
+ */
+async function sequential_apply_with_compensation(
+  backend: Backend,
+  ops: BatchOp[]
+): Promise<Result<void, CorpusError>> {
+  const applied: BatchOp[] = []
+
+  for (const op of ops) {
+    const apply_result = await apply_single_op(backend, op)
+    if (apply_result.ok) {
+      applied.push(op)
+      continue
+    }
+
+    // compensate already-applied ops in reverse order. meta_delete /
+    // observation_delete ops cannot be undone (the deleted record's full
+    // content isn't in the buffer for reinsertion) — if any applied op is
+    // non-undoable, surface partial_commit honestly.
+    let compensation_failed = false
+    let compensation_cause: Error | undefined
+    for (let i = applied.length - 1; i >= 0; i--) {
+      const applied_op = applied[i]!
+      if (applied_op.type === 'meta_delete' || applied_op.type === 'observation_delete') {
+        compensation_failed = true
+        continue
+      }
+      const undo = await compensate_op(backend, applied_op)
+      if (!undo.ok) {
+        compensation_failed = true
+        compensation_cause = compensation_cause ?? corpus_error_to_native(undo.error)
+      }
+    }
+
+    if (compensation_failed) {
+      return err({
+        kind: 'partial_commit',
+        ops_completed: applied.length,
+        ops_failed: ops.length - applied.length,
+        cause: compensation_cause ?? corpus_error_to_native(apply_result.error),
+      })
+    }
+
+    return err({
+      kind: 'transaction_aborted',
+      reason: 'apply_batch_failed',
+      cause: corpus_error_to_native(apply_result.error),
+    })
+  }
+
+  return ok(undefined)
+}
+
+async function apply_single_op(backend: Backend, op: BatchOp): Promise<Result<void, CorpusError>> {
+  switch (op.type) {
+    case 'meta_put':
+      return backend.metadata.put(op.meta)
+    case 'meta_delete':
+      return backend.metadata.delete(op.store_id, op.version)
+    case 'data_put':
+      return backend.data.put(op.data_key, op.bytes)
+    case 'observation_put':
+      // Sequential fallback for observations is incomplete — backends
+      // implementing apply_batch handle observation_put / observation_delete
+      // ops directly with their buffered ids. Custom backends without
+      // apply_batch that also use observations should implement apply_batch.
+      // For Phase 1 we surface this as invalid_config rather than silently
+      // diverging the buffered id from a re-minted client-side id.
+      return err({
+        kind: 'invalid_config',
+        message: 'observation ops in transactions require backend.apply_batch',
+      })
+    case 'observation_delete':
+      return err({
+        kind: 'invalid_config',
+        message: 'observation ops in transactions require backend.apply_batch',
+      })
+  }
+}
+
+async function compensate_op(backend: Backend, op: BatchOp): Promise<Result<void, CorpusError>> {
+  switch (op.type) {
+    case 'meta_put':
+      return backend.metadata.delete(op.meta.store_id, op.meta.version)
+    case 'data_put':
+      // content-addressed and idempotent — best-effort delete; absence is fine
+      return backend.data.delete(op.data_key)
+    case 'observation_put': {
+      if (!backend.observations) return ok(undefined)
+      const result = await backend.observations.delete(op.row.id)
+      if (!result.ok && result.error.kind === 'observation_not_found') return ok(undefined)
+      return result
+    }
+    case 'meta_delete':
+    case 'observation_delete':
+      // unreachable: caller treats these as non-undoable upstream
+      return ok(undefined)
+  }
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
-import type { Backend, SnapshotMeta } from '../../types'
+import { z } from 'zod'
+import type { Backend, Corpus, SnapshotMeta, Store } from '../../types'
+import { create_corpus, define_store, json_codec, ok, err } from '../../index'
+import { define_observation_type } from '../../observations'
 
 export type BackendFactory = () => Backend | Promise<Backend>
 export type CleanupFn = () => void | Promise<void>
@@ -507,6 +510,192 @@ export function runBackendContractTests(
 
         const bytes = await dataResult.value.bytes()
         expect(bytes).toEqual(data)
+      })
+    })
+
+    // Transaction contract — only meaningful for backends that ship apply_batch.
+    // The test suite gates on `backend.apply_batch != null` at run time so future
+    // backends pick it up automatically by adding the method.
+    describe('transaction contract', () => {
+      const ItemSchema = z.object({ id: z.string() })
+      type Item = z.infer<typeof ItemSchema>
+      const NoteSchema = z.object({ text: z.string() })
+      type Note = z.infer<typeof NoteSchema>
+
+      const SentimentType = define_observation_type(
+        'sentiment',
+        z.object({ subject: z.string(), score: z.number() })
+      )
+
+      type TxStores = { items: Store<Item>; notes: Store<Note> }
+      const make_corpus = (b: Backend): Corpus<TxStores> =>
+        create_corpus()
+          .with_backend(b)
+          .with_store(define_store('items', json_codec(ItemSchema)))
+          .with_store(define_store('notes', json_codec(NoteSchema)))
+          .with_observations([SentimentType])
+          .build() as Corpus<TxStores>
+
+      it('atomic success across multiple stores', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const result = await corpus.transaction(async (tx) => {
+          const a = await tx.put(corpus.stores.items, { id: 'a' })
+          if (!a.ok) return a
+          const b = await tx.put(corpus.stores.notes, { text: 'hello' })
+          if (!b.ok) return b
+          return ok({ a: a.value.version, b: b.value.version })
+        })
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.value.commits).toHaveLength(2)
+
+        const got_a = await corpus.stores.items.get(result.value.value.a)
+        expect(got_a.ok).toBe(true)
+        if (got_a.ok) {
+          expect(got_a.value.data.id).toBe('a')
+          expect(got_a.value.meta.content_hash).toBeString()
+        }
+
+        const got_b = await corpus.stores.notes.get(result.value.value.b)
+        expect(got_b.ok).toBe(true)
+        if (got_b.ok) {
+          expect(got_b.value.data.text).toBe('hello')
+          expect(got_b.value.meta.content_hash).toBeString()
+        }
+      })
+
+      it('atomic abort: body returns err() leaves no writes visible', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const result = await corpus.transaction(async (tx) => {
+          await tx.put(corpus.stores.items, { id: 'rolled-back-a' })
+          await tx.put(corpus.stores.notes, { text: 'rolled-back-b' })
+          return err({ kind: 'invalid_config' as const, message: 'intentional' })
+        })
+
+        expect(result.ok).toBe(false)
+        if (result.ok) return
+        expect(result.error.kind).toBe('transaction_aborted')
+
+        const items_latest = await corpus.stores.items.get_latest()
+        expect(items_latest.ok).toBe(false)
+        const notes_latest = await corpus.stores.notes.get_latest()
+        expect(notes_latest.ok).toBe(false)
+      })
+
+      it('body throws → transaction_aborted with reason: threw', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const result = await corpus.transaction(async (tx) => {
+          await tx.put(corpus.stores.items, { id: 'before-throw' })
+          throw new Error('boom')
+        })
+
+        expect(result.ok).toBe(false)
+        if (result.ok) return
+        expect(result.error.kind).toBe('transaction_aborted')
+        if (result.error.kind !== 'transaction_aborted') return
+        expect(result.error.reason).toBe('threw')
+
+        const latest = await corpus.stores.items.get_latest()
+        expect(latest.ok).toBe(false)
+      })
+
+      it('read-your-writes: tx.get sees buffered put before commit', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const observed = { captured: null as Item | null, outside_ok: true }
+        await corpus.transaction(async (tx) => {
+          const put = await tx.put(corpus.stores.items, { id: 'rw' })
+          if (!put.ok) return put
+
+          const inside = await tx.get(corpus.stores.items, put.value.version)
+          if (inside.ok) observed.captured = inside.value.data
+
+          const outside = await corpus.stores.items.get(put.value.version)
+          observed.outside_ok = outside.ok
+
+          return ok(undefined)
+        })
+
+        expect(observed.captured).toEqual({ id: 'rw' })
+        expect(observed.outside_ok).toBe(false)
+      })
+
+      it('tx.delete removes a previously committed snapshot atomically', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const initial = await corpus.stores.items.put({ id: 'doomed' })
+        expect(initial.ok).toBe(true)
+        if (!initial.ok) return
+
+        const result = await corpus.transaction(async (tx) => {
+          const before = await tx.get(corpus.stores.items, initial.value.version)
+          expect(before.ok).toBe(true)
+
+          const deleted = await tx.delete(corpus.stores.items, initial.value.version)
+          if (!deleted.ok) return deleted
+
+          // read-your-writes: after tx.delete, tx.get must see the tombstone
+          const after_in_tx = await tx.get(corpus.stores.items, initial.value.version)
+          expect(after_in_tx.ok).toBe(false)
+          if (!after_in_tx.ok) expect(after_in_tx.error.kind).toBe('not_found')
+
+          return ok(undefined)
+        })
+
+        expect(result.ok).toBe(true)
+        const after = await corpus.stores.items.get_meta(initial.value.version)
+        expect(after.ok).toBe(false)
+      })
+
+      it('tx.observe + tx.put commit atomically', async () => {
+        if (!backend.apply_batch || !backend.observations) return
+        const corpus = make_corpus(backend)
+
+        const result = await corpus.transaction(async (tx) => {
+          const snap = await tx.put(corpus.stores.items, { id: 'snap' })
+          if (!snap.ok) return snap
+
+          const obs = await tx.observe(SentimentType, {
+            source: { store_id: 'items', version: snap.value.version },
+            content: { subject: 'snap', score: 0.5 },
+          })
+          if (!obs.ok) return obs
+
+          return ok({ version: snap.value.version, obs_id: obs.value.id })
+        })
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.value.commits).toHaveLength(1)
+        expect(result.value.observations).toHaveLength(1)
+
+        const snap = await corpus.stores.items.get(result.value.value.version)
+        expect(snap.ok).toBe(true)
+        const fetched = await corpus.observations!.get(result.value.value.obs_id)
+        expect(fetched.ok).toBe(true)
+      })
+
+      it('concurrent transaction() returns invalid_config', async () => {
+        if (!backend.apply_batch) return
+        const corpus = make_corpus(backend)
+
+        const result = await corpus.transaction(async (_tx) => {
+          const inner = await corpus.transaction(async () => ok(1))
+          expect(inner.ok).toBe(false)
+          if (!inner.ok) expect(inner.error.kind).toBe('invalid_config')
+          return ok(undefined)
+        })
+
+        expect(result.ok).toBe(true)
       })
     })
   })

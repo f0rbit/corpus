@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { corpus_observations, create_observations_client, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
-import type { Backend, CorpusError, DataClient, EventHandler, MetadataClient, Result, SnapshotMeta } from "../types.js";
+import type { Backend, BatchOp, CorpusError, DataClient, EventHandler, MetadataClient, Result, SnapshotMeta } from "../types.js";
 import { err, ok } from "../types.js";
 import { create_emitter, parse_snapshot_meta } from "../utils.js";
 
@@ -224,34 +224,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 
 		async put(meta): Promise<Result<void, CorpusError>> {
 			try {
-				await db
-					.insert(corpus_snapshots)
-					.values({
-						store_id: meta.store_id,
-						version: meta.version,
-						parents: JSON.stringify(meta.parents),
-						created_at: meta.created_at.toISOString(),
-						invoked_at: meta.invoked_at?.toISOString() ?? null,
-						content_hash: meta.content_hash,
-						content_type: meta.content_type,
-						size_bytes: meta.size_bytes,
-						data_key: meta.data_key,
-						tags: meta.tags ? JSON.stringify(meta.tags) : null,
-					})
-					.onConflictDoUpdate({
-						target: [corpus_snapshots.store_id, corpus_snapshots.version],
-						set: {
-							parents: JSON.stringify(meta.parents),
-							created_at: meta.created_at.toISOString(),
-							invoked_at: meta.invoked_at?.toISOString() ?? null,
-							content_hash: meta.content_hash,
-							content_type: meta.content_type,
-							size_bytes: meta.size_bytes,
-							data_key: meta.data_key,
-							tags: meta.tags ? JSON.stringify(meta.tags) : null,
-						},
-					});
-
+				await meta_insert_stmt(meta);
 				emit({ type: "meta_put", store_id: meta.store_id, version: meta.version });
 				return ok(undefined);
 			} catch (cause) {
@@ -263,8 +236,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 
 		async delete(store_id, version): Promise<Result<void, CorpusError>> {
 			try {
-				await db.delete(corpus_snapshots).where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)));
-
+				await meta_delete_stmt(store_id, version);
 				emit({ type: "meta_delete", store_id, version });
 				return ok(undefined);
 			} catch (cause) {
@@ -424,5 +396,126 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	const storage = create_cloudflare_storage(db);
 	const observations = create_observations_client(storage, metadata);
 
-	return { metadata, data, observations, on_event };
+	function meta_insert_stmt(meta: SnapshotMeta) {
+		const values = {
+			store_id: meta.store_id,
+			version: meta.version,
+			parents: JSON.stringify(meta.parents),
+			created_at: meta.created_at.toISOString(),
+			invoked_at: meta.invoked_at?.toISOString() ?? null,
+			content_hash: meta.content_hash,
+			content_type: meta.content_type,
+			size_bytes: meta.size_bytes,
+			data_key: meta.data_key,
+			tags: meta.tags ? JSON.stringify(meta.tags) : null,
+		};
+		return db
+			.insert(corpus_snapshots)
+			.values(values)
+			.onConflictDoUpdate({
+				target: [corpus_snapshots.store_id, corpus_snapshots.version],
+				set: {
+					parents: values.parents,
+					created_at: values.created_at,
+					invoked_at: values.invoked_at,
+					content_hash: values.content_hash,
+					content_type: values.content_type,
+					size_bytes: values.size_bytes,
+					data_key: values.data_key,
+					tags: values.tags,
+				},
+			});
+	}
+
+	function meta_delete_stmt(store_id: string, version: string) {
+		return db
+			.delete(corpus_snapshots)
+			.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)));
+	}
+
+	function obs_insert_stmt(row: typeof corpus_observations.$inferInsert) {
+		return db.insert(corpus_observations).values(row);
+	}
+
+	function obs_delete_stmt(id: string) {
+		return db.delete(corpus_observations).where(eq(corpus_observations.id, id));
+	}
+
+	/**
+	 * Apply a batch of ops atomically.
+	 *
+	 * Two-phase write: R2 data_put ops first (sequential, content-addressed so
+	 * idempotent on retry), then a single D1 `db.batch()` for every metadata
+	 * + observation op. D1's batch is a real SQLite transaction — all
+	 * statements succeed or none commit.
+	 *
+	 * On R2 failure we abort before touching D1 — no partial metadata. R2
+	 * objects already written remain as orphans. On D1 batch failure after
+	 * all R2 writes succeeded, the R2 objects are also orphans. A follow-up
+	 * `corpus.gc()` cleans them up by listing R2 objects not referenced by
+	 * any live `data_key` in D1 — out of scope here, tracked in README.
+	 *
+	 * TODO: integration test against `wrangler dev` — repo convention is
+	 * out-of-band manual testing for the Cloudflare backend, no D1/R2 mocks
+	 * in the suite.
+	 */
+	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+		// Step 1: R2 data_put ops, sequential to short-circuit on first failure.
+		for (const op of ops) {
+			if (op.type !== 'data_put') continue;
+			try {
+				await r2.put(op.data_key, op.bytes);
+			} catch (cause) {
+				return err({
+					kind: 'transaction_aborted',
+					reason: 'apply_batch_failed',
+					cause: cause instanceof Error ? cause : new Error(String(cause)),
+				});
+			}
+		}
+
+		// Step 2: build prepared statements for metadata + observation ops.
+		type Stmt =
+			| ReturnType<typeof meta_insert_stmt>
+			| ReturnType<typeof meta_delete_stmt>
+			| ReturnType<typeof obs_insert_stmt>
+			| ReturnType<typeof obs_delete_stmt>;
+		const stmts: Stmt[] = [];
+		for (const op of ops) {
+			switch (op.type) {
+				case 'meta_put':
+					stmts.push(meta_insert_stmt(op.meta));
+					break;
+				case 'meta_delete':
+					stmts.push(meta_delete_stmt(op.store_id, op.version));
+					break;
+				case 'observation_put':
+					stmts.push(obs_insert_stmt(op.row));
+					break;
+				case 'observation_delete':
+					stmts.push(obs_delete_stmt(op.id));
+					break;
+				case 'data_put':
+					break;
+			}
+		}
+
+		const [head, ...rest] = stmts;
+		if (head === undefined) {
+			return ok(undefined);
+		}
+
+		try {
+			await db.batch([head, ...rest] as readonly [Stmt, ...Stmt[]]);
+			return ok(undefined);
+		} catch (cause) {
+			return err({
+				kind: 'transaction_aborted',
+				reason: 'apply_batch_failed',
+				cause: cause instanceof Error ? cause : new Error(String(cause)),
+			});
+		}
+	}
+
+	return { metadata, data, observations, on_event, apply_batch };
 }

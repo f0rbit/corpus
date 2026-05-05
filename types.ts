@@ -11,6 +11,7 @@ import type {
   ObservationPutOpts,
   ObservationQueryOpts
 } from './observations/types.js';
+import type { ObservationRow } from './observations/schema.js';
 
 /**
  * Error types that can occur during Corpus operations.
@@ -51,6 +52,9 @@ export type CorpusError =
   | { kind: 'invalid_config'; message: string }
   | { kind: 'validation_error'; cause: Error; message: string }
   | { kind: 'observation_not_found'; id: string }
+  | { kind: 'transaction_aborted'; reason: 'returned_err' | 'threw' | 'apply_batch_failed'; cause?: Error }
+  | { kind: 'partial_commit'; ops_completed: number; ops_failed: number; cause: Error }
+  | { kind: 'concurrent_modification'; store_id: string; version: string }
 
 /**
  * A discriminated union representing either success or failure.
@@ -244,35 +248,52 @@ export type ListOpts = {
 }
 
 /**
+ * Wire format for atomic batches submitted to `Backend.apply_batch`.
+ *
+ * Built by the transaction handle in `corpus.ts` from the buffered ops in a
+ * `corpus.transaction()` body, then handed off to backends that support
+ * native atomic application (D1's `db.batch()`, in-memory snapshot+rollback,
+ * file staged-rename). Backends without `apply_batch` get a sequential
+ * fallback in `corpus.transaction()` instead.
+ *
+ * @category Types
+ * @group Transaction Types
+ */
+export type BatchOp =
+  | { type: 'meta_put'; meta: SnapshotMeta }
+  | { type: 'meta_delete'; store_id: string; version: string }
+  | { type: 'data_put'; data_key: string; bytes: Uint8Array }
+  | { type: 'observation_put'; row: ObservationRow }
+  | { type: 'observation_delete'; id: string }
+
+/**
  * Interface that storage backends implement.
- * 
+ *
  * A Backend provides two clients:
  * - `metadata` - For storing/retrieving snapshot metadata (versions, hashes, etc.)
  * - `data` - For storing/retrieving the actual binary content
- * 
+ *
  * Built-in backends:
  * - `create_memory_backend()` - In-memory, ephemeral storage
  * - `create_file_backend()` - Local filesystem persistence
  * - `create_cloudflare_backend()` - Cloudflare D1 + R2
  * - `create_layered_backend()` - Combines multiple backends
- * 
+ *
  * @category Types
  * @group Backend Types
- * @example
- * ```ts
- * // Custom backend implementation
- * const myBackend: Backend = {
- *   metadata: { get, put, delete, list, get_latest, get_children, find_by_hash },
- *   data: { get, put, delete, exists },
- *   on_event: (event) => console.log('Event:', event.type)
- * }
- * ```
  */
 export type Backend = {
   metadata: MetadataClient
   data: DataClient
   observations?: ObservationsClient
   on_event?: EventHandler
+  /**
+   * Apply ops atomically. If absent, `corpus.transaction()` falls back to
+   * sequential best-effort with compensating deletes. Backends with native
+   * batch support (D1's `db.batch`, in-memory snapshot+rollback, file
+   * staged-rename) implement this for real atomicity.
+   */
+  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
 }
 
 /**
@@ -475,6 +496,45 @@ export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
   build: () => Corpus<Stores>
 }
 
+/**
+ * Result of a successful `corpus.transaction()`.
+ *
+ * `commits` lists every metadata snapshot written, in `tx.put` order.
+ * `observations` lists every observation written, in `tx.observe` order.
+ * `value` is whatever the body returned via `ok(...)`.
+ *
+ * @category Types
+ * @group Transaction Types
+ */
+export type TransactionResult<R> = {
+  value: R
+  commits: SnapshotMeta[]
+  observations: Observation[]
+}
+
+/**
+ * Buffered handle passed to a `corpus.transaction()` callback.
+ *
+ * Mutating methods (`put`, `delete`, `observe`, `observation_delete`) append
+ * to an internal op buffer rather than touching the backend directly. `get`
+ * checks the buffer first for read-your-writes, then falls through to the
+ * live backend. Ops are submitted to the backend on body return — atomically
+ * via `Backend.apply_batch` if available, otherwise sequentially with
+ * compensating deletes.
+ *
+ * The handle is single-use: returning from the body locks it.
+ *
+ * @category Types
+ * @group Transaction Types
+ */
+export type TransactionHandle = {
+  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
+  delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>
+  observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
+  observation_delete: (id: string) => Promise<Result<void, CorpusError>>
+}
+
 export type Corpus<Stores extends Record<string, Store<any>> = Record<string, Store<any>>> = {
   stores: Stores
   metadata: MetadataClient
@@ -483,6 +543,18 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
   create_pointer: (store_id: string, version: string, path?: string, span?: { start: number; end: number }) => SnapshotPointer
   resolve_pointer: <T>(pointer: SnapshotPointer) => Promise<Result<T, CorpusError>>
   is_superseded: (pointer: SnapshotPointer) => Promise<boolean>
+  /**
+   * Run `body` as a single transaction. Mutations against `tx` are buffered
+   * and committed atomically (when the backend supports `apply_batch`) or
+   * sequentially with best-effort rollback.
+   *
+   * The body must return a `Result` — returning `err()` aborts the
+   * transaction. Throws are caught and wrapped as `transaction_aborted`.
+   * Nested calls to `corpus.transaction()` return `invalid_config`.
+   */
+  transaction: <R>(
+    body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
+  ) => Promise<Result<TransactionResult<R>, CorpusError>>
 }
 
 /**

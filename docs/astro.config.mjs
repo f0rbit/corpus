@@ -27,6 +27,7 @@ export default defineConfig({
             { label: 'Cloudflare Deployment', slug: 'guides/cloudflare' },
             { label: 'Events and Observability', slug: 'guides/events-and-observability' },
             { label: 'Observations', slug: 'guides/observations' },
+            { label: 'Transactions', slug: 'guides/transactions' },
             { label: 'Testing Patterns', slug: 'guides/testing' },
           ],
         },
