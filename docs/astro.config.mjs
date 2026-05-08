@@ -15,6 +15,15 @@ export default defineConfig({
         github: 'https://github.com/f0rbit/corpus',
       },
       customCss: ['./src/styles/custom.css'],
+      head: [
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'google-site-verification',
+            content: '3ilm2YAZDrg4jakb38CkhoubqHXKA_o4mMh4tFYCVls',
+          },
+        },
+      ],
       sidebar: [
         {
           label: 'Getting Started',
