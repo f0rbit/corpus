@@ -116,6 +116,37 @@ function run_version_set_tests(name: string, factory: BackendFactory, cleanup?: 
         expect(fetched.value.data).toEqual(manifest)
       })
 
+      it('round-trips manifest with template_ref set', async () => {
+        const manifest = make_manifest('pkg-a', {
+          template_ref: 'pipeline-templates/abc123def456',
+        })
+
+        const put = await version_sets.put(manifest)
+        expect(put.ok).toBe(true)
+        if (!put.ok) return
+
+        const fetched = await version_sets.store.get(put.value.version)
+        expect(fetched.ok).toBe(true)
+        if (!fetched.ok) return
+
+        expect(fetched.value.data.template_ref).toBe('pipeline-templates/abc123def456')
+        expect(fetched.value.data).toEqual(manifest)
+      })
+
+      it('round-trips manifest without template_ref (optional field)', async () => {
+        const manifest = make_manifest('pkg-a')
+
+        const put = await version_sets.put(manifest)
+        expect(put.ok).toBe(true)
+        if (!put.ok) return
+
+        const fetched = await version_sets.store.get(put.value.version)
+        expect(fetched.ok).toBe(true)
+        if (!fetched.ok) return
+
+        expect(fetched.value.data.template_ref).toBeUndefined()
+      })
+
       it('rejects manifests that fail schema validation on decode', async () => {
         const invalid = { ...make_manifest('pkg-a'), git_sha: 'too-short' } as VersionSetManifest
 

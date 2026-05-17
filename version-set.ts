@@ -62,6 +62,7 @@ export const VersionSetManifestSchema = z.object({
   env_manifest_ref: z.string(),
   infra_plan_ref: z.string(),
   grants_ref: z.string().optional(),
+  template_ref: z.string().optional(),
 })
 
 // Compile-time check that the schema's output matches the documented type.
