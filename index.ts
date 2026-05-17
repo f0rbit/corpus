@@ -16,6 +16,12 @@ export {
 	type VersionSetStoreOptions,
 } from './version-set.js';
 
+export {
+	pipeline_template_store,
+	type PipelineTemplateStore,
+	type PipelineTemplateStoreOptions,
+} from './pipeline-template.js';
+
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
 export type {

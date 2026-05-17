@@ -648,6 +648,17 @@ export type VersionSetManifest = {
   env_manifest_ref: string
   infra_plan_ref: string
   grants_ref?: string
+  /**
+   * Optional content-addressed reference to a compiled pipeline template
+   * blob — `pipeline-templates/<content_hash>`. Consumers (devpad's
+   * pipeline orchestrator) resolve this through `pipeline_template_store`
+   * to rehydrate the typed template snapshot.
+   *
+   * Optional for forward/backward compatibility — manifests written
+   * before this field existed continue to resolve via the consumer's
+   * built-in default template.
+   */
+  template_ref?: string
 }
 
 /**
