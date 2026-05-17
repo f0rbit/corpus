@@ -601,3 +601,68 @@ export type ObservationsClient = {
   delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>
   is_stale: (pointer: SnapshotPointer) => Promise<boolean>
 }
+
+/**
+ * Immutable manifest describing a deployable version of a package.
+ *
+ * A `VersionSetManifest` is a content-addressed tuple of references to the
+ * artifacts that make up a release: the worker bundle, optional static
+ * assets, a D1 migration plan, Durable Object migrations, an environment
+ * manifest, an infra plan, and an optional grants reference.
+ *
+ * Used by the `devpad/pipelines` deployment orchestrator to express a
+ * deploy candidate without committing it to any backend or tag-naming
+ * scheme — promotion to an environment is a separate snapshot referencing
+ * the same content with new tags.
+ *
+ * The runtime Zod schema lives in `version-set.ts` and is the source of
+ * truth — this type mirrors its shape. See `version_set_store` for the
+ * store factory that codecs + indexes manifests.
+ *
+ * @category Types
+ * @group Version Set Types
+ */
+export type VersionSetManifest = {
+  package: string
+  git_sha: string
+  created_at: string
+  builds: {
+    worker: {
+      artifact_ref: string
+      size_bytes: number
+      compatibility_date: string
+    }
+    assets?: {
+      artifact_ref?: string
+      version_affinity: 'pinned' | 'none'
+    }
+  }
+  migrations: {
+    d1_plan_ref?: string
+    do_migrations: Array<{
+      class_name: string
+      tag: string
+      kind: 'new_sqlite_classes' | 'new_classes' | 'renamed_classes' | 'deleted_classes' | 'transferred_classes'
+    }>
+  }
+  env_manifest_ref: string
+  infra_plan_ref: string
+  grants_ref?: string
+}
+
+/**
+ * Pointer to a stored `VersionSetManifest` snapshot.
+ *
+ * `version` is the corpus snapshot version, `package` is the partition key
+ * the store uses (matches `manifest.package`). Returned from
+ * `version_sets.lineage()` for each ancestor walked through the snapshot's
+ * `parents` chain.
+ *
+ * @category Types
+ * @group Version Set Types
+ */
+export type VersionSetRef = {
+  package: string
+  version: string
+  content_hash: string
+}

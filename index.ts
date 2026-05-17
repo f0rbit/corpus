@@ -9,6 +9,13 @@ export { json_codec, text_codec, binary_codec, compose, compute_hash, generate_v
 export { gzip_codec } from './codecs/gzip.js';
 export { encrypt_codec } from './codecs/encrypt.js';
 
+export {
+	version_set_store,
+	VersionSetManifestSchema,
+	type VersionSetStore,
+	type VersionSetStoreOptions,
+} from './version-set.js';
+
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
 export type {
@@ -41,6 +48,8 @@ export type {
 	ObservationsClient,
 	TransactionHandle,
 	TransactionResult,
+	VersionSetManifest,
+	VersionSetRef,
 } from './types.js';
 
 export { ok, err, define_store } from './types.js';
