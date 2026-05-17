@@ -94,6 +94,13 @@ Conventions:
 
 Drizzle is the source of truth (`schema.ts`, `observations/schema.ts`). The migration SQL is **inlined as a string constant** in `sst.ts` (`CORPUS_MIGRATION_SQL`) so consumers can run it programmatically against D1 without shipping migration files. When you change a table, update both the Drizzle schema AND the inlined SQL — they must stay in sync. There is intentionally no `drizzle-kit` migration history; corpus consumers own their own migration history.
 
+### Version sets
+
+The `version_set_store` factory lives in `version-set.ts`. The manifest schema (`VersionSetManifest`) is consumed by `~/dev/devpad/packages/pipelines/` and any package scaffolded by `devpad pipelines init`. Treat any change to the Zod schema as a breaking change across consumers.
+
+- *Zod `.default()` makes input ≠ output*: prefer a bidirectional `extends` assertion over `satisfies ZodType<T>` when the static type mirrors a schema with defaults. `.default()` widens the input type but narrows the output, so a direct `satisfies` against the inferred shape rejects schemas with defaults.
+- *Per-store partitioning via internal tag*: stores that need a per-partition `data_key_fn` (e.g. `version_set_store`) read the partition key from a tag the store sets on every `put`. Keep this tag set as a private convention of the store factory — consumers shouldn't have to know to set it themselves.
+
 ### Observations
 
 Observations are versioned annotations on snapshot pointers (store + version + optional JSONPath + span). They live in a separate Drizzle table and a separate client (`corpus.observations`). They're optional — only enabled when `observations` is wired into the backend. Internally, `observations/` is treated as its own subsystem with its own types and adapter interface — keep observation logic out of `backend/*.ts`.

@@ -1,0 +1,144 @@
+---
+title: Version Sets
+description: Immutable, content-addressed manifests tying together every artifact in a deployable release — worker bundle, D1 plan, assets, env, infra — with tag-only promotion to environments.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A **version set** is an immutable manifest that ties together every artifact making up a deployable version of a package: the worker bundle, optional static assets, a D1 migration plan, Durable Object migrations, an environment manifest, an infra plan, and an optional grants reference.
+
+The `version_set_store` factory wraps `define_store` with the right codec, partitioning, and a small API surface (`put`, `lineage`, `promote`) that captures the semantics deployment orchestrators care about.
+
+<Aside type="note">
+  Promotion to an environment is just a new snapshot with new tags pointing at the same content. No fresh blob is written — corpus' content-hash dedup makes promotion cheap and atomic.
+</Aside>
+
+## Manifest shape
+
+```typescript
+import { VersionSetManifestSchema, type VersionSetManifest } from '@f0rbit/corpus'
+
+// VersionSetManifestSchema is a Zod schema; VersionSetManifest is its type.
+//
+// {
+//   package: string
+//   git_sha: string                    // 40-char sha
+//   created_at: string                 // ISO-8601 datetime
+//   builds: {
+//     worker: { artifact_ref, size_bytes, compatibility_date }
+//     assets?: { artifact_ref?, version_affinity: 'pinned' | 'none' }
+//   }
+//   migrations: {
+//     d1_plan_ref?: string
+//     do_migrations: Array<{ class_name, tag, kind }>
+//   }
+//   env_manifest_ref: string
+//   infra_plan_ref: string
+//   grants_ref?: string
+// }
+```
+
+All cross-store references (`artifact_ref`, `d1_plan_ref`, `env_manifest_ref`, `infra_plan_ref`, `grants_ref`) are corpus versions in the form `<store>/<hash>` — the orchestrator resolves them at deploy time.
+
+## Creating a store
+
+```typescript
+import { create_memory_backend, version_set_store } from '@f0rbit/corpus'
+
+const backend = create_memory_backend()
+const version_sets = version_set_store(backend)
+```
+
+Optional `opts.id` overrides the default `'version-sets'` store id; `opts.description` is forwarded to the underlying `StoreDefinition`.
+
+## Putting a manifest
+
+```typescript
+const put = await version_sets.put({
+  package: 'anthropic-search',
+  git_sha: '0123456789abcdef0123456789abcdef01234567',
+  created_at: new Date().toISOString(),
+  builds: {
+    worker: {
+      artifact_ref: 'worker-bundles/abc',
+      size_bytes: 12345,
+      compatibility_date: '2025-05-01',
+    },
+  },
+  migrations: { do_migrations: [] },
+  env_manifest_ref: 'env-manifests/abc',
+  infra_plan_ref: 'infra-plans/abc',
+})
+
+if (put.ok) {
+  console.log('snapshot version:', put.value.version)
+  console.log('content hash:', put.value.content_hash)
+}
+```
+
+Data blobs are partitioned by package: the resulting `data_key` is `version-sets/<package>/<content_hash>`. Identical manifests dedupe to the same blob even when stored as separate snapshots (different versions, optionally different tags).
+
+## Promoting to an environment
+
+Promotion is a new snapshot referencing the same manifest content with new tags. The promoted snapshot's `parents` points back at the source for lineage.
+
+```typescript
+const promoted = await version_sets.promote(put.value.version, [
+  'env:production',
+  'shape:onebox',
+])
+
+if (promoted.ok) {
+  // same content_hash + data_key as the source — no fresh blob written
+  console.log(promoted.value.content_hash === put.value.content_hash) // true
+  console.log(promoted.value.parents) // [{ store_id: 'version-sets', version: <put.version>, role: 'promoted_from' }]
+}
+```
+
+The package tag (`pkg:<name>`) is preserved automatically — you only pass the new environment / shape tags.
+
+## Walking lineage
+
+`lineage(version)` walks the `parents` chain (self-store only — cross-store parents are ignored) and returns a list of `VersionSetRef`s starting at `version` and ending at the originating put.
+
+```typescript
+const initial = await version_sets.put(manifest)
+const staged = await version_sets.promote(initial.value.version, ['env:staging'])
+const prod   = await version_sets.promote(staged.value.version,   ['env:production'])
+
+const chain = await version_sets.lineage(prod.value.version)
+// chain.value: [
+//   { package, version: <prod>,    content_hash },
+//   { package, version: <staged>,  content_hash },
+//   { package, version: <initial>, content_hash },
+// ]
+```
+
+Use lineage when you need to answer "what was promoted to produce this prod release?" — the chain terminates at the first snapshot without a `version-sets` parent.
+
+## Storage layout
+
+The store partitions blobs by package via a custom `data_key_fn`:
+
+```
+<base>/
+  version-sets/
+    anthropic-search/
+      <content_hash_a>
+      <content_hash_b>
+    devpad/
+      <content_hash_c>
+```
+
+This means many packages can share a single backend without colliding on content hashes — the `<package>` segment in the key is the partition key.
+
+## Why not just `define_store` directly?
+
+You can. `version_set_store` is a convenience that:
+
+- Locks in the `VersionSetManifestSchema` codec
+- Wires the `data_key_fn` partitioning
+- Adds the `pkg:` tag on every put so the data_key partitioning works
+- Exposes `lineage` and `promote` as first-class operations instead of leaving them as ad-hoc `parents` math at every call site
+
+If you need lower-level access, `version_sets.store` is the underlying `Store<VersionSetManifest>` — `list`, `get_meta`, `delete`, transactions etc. all work as on any other store.
