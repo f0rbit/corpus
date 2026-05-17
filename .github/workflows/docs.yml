@@ -37,6 +37,9 @@ jobs:
 
       - name: Build documentation
         run: cd docs && bun run build
+        env:
+          PULSE_PROJECT_ID: ${{ vars.PULSE_PROJECT_ID }}
+          PULSE_INGEST_KEY: ${{ secrets.PULSE_INGEST_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

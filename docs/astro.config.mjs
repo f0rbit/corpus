@@ -23,6 +23,19 @@ export default defineConfig({
             content: '3ilm2YAZDrg4jakb38CkhoubqHXKA_o4mMh4tFYCVls',
           },
         },
+        ...(process.env.PULSE_PROJECT_ID && process.env.PULSE_INGEST_KEY ? [{
+          tag: 'script',
+          attrs: { type: 'module' },
+          content: `
+            import { createPulse } from 'https://esm.sh/@f0rbit/pulse-client@0.0.1';
+            window.__pulse = createPulse({
+              project_id: ${JSON.stringify(process.env.PULSE_PROJECT_ID)},
+              ingest_key: ${JSON.stringify(process.env.PULSE_INGEST_KEY)},
+              endpoint: ${JSON.stringify(process.env.PULSE_ENDPOINT || 'https://pulse.devpad.tools')},
+              auto_pageview: true,
+            });
+          `.trim(),
+        }] : []),
       ],
       sidebar: [
         {
