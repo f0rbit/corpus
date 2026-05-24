@@ -35,7 +35,8 @@
 		"result.ts",
 		"concurrency.ts",
 		"backend/*.ts",
-		"observations/*.ts"
+		"observations/*.ts",
+		"testing/*.ts"
 	],
 	"exclude": ["node_modules", "dist", "tests"]
 }

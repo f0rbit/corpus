@@ -1,0 +1,2136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Plan: corpus testing substrate</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+        --todo: #6e7681;
+        --doing: #d29922;
+        --done: #2ea043;
+        --blocked: #f85149;
+        --decision: #db61a2;
+      }
+      html, body {
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 2rem;
+      }
+      main { max-width: 1100px; margin: 0 auto; }
+      h1, h2, h3 {
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.3em;
+      }
+      h1 { font-size: 1.8rem; }
+      h2 { font-size: 1.4rem; margin-top: 2.5rem; }
+      h3 { font-size: 1.1rem; border: none; padding: 0; margin-top: 1.5rem; }
+      h4 {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin: 0 0 0.3em 0;
+      }
+      code, pre { font-family: "SF Mono", Menlo, monospace; font-size: 0.9em; }
+      code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
+      pre {
+        background: var(--panel);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.75em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .badge.todo { background: var(--todo); color: #fff; }
+      .badge.doing { background: var(--doing); color: #000; }
+      .badge.done { background: var(--done); color: #fff; }
+      .badge.blocked { background: var(--blocked); color: #fff; }
+      .badge.decision { background: var(--decision); color: #fff; }
+      .badge.recommended { background: var(--accent); color: #000; }
+      .root-cause {
+        background: var(--panel);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1rem 0;
+      }
+      .root-cause p { margin: 0.4em 0; }
+      .option {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+        opacity: 0.85;
+      }
+      .option.recommended {
+        opacity: 1;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent) inset;
+      }
+      .option > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .option h3 { margin: 0; flex: 1; }
+      .option h4 { margin-top: 0.9rem; }
+      .philosophy-score th:first-child,
+      .philosophy-score td:first-child { width: 35%; }
+      .philosophy-score td:nth-child(2) {
+        font-family: "SF Mono", Menlo, monospace;
+        font-weight: 600;
+        width: 60px;
+        text-align: center;
+      }
+      .recommendation {
+        background: rgba(88, 166, 255, 0.08);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1.5rem 0;
+      }
+      .recommendation h3 { margin-top: 0; border: none; padding: 0; }
+      .task {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+      .task > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .task h3 { margin: 0; flex: 1; }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.4em 1em;
+        font-size: 0.85em;
+        color: var(--muted);
+        margin: 0 0 0.75rem 0;
+      }
+      .meta dt { font-weight: 600; color: var(--text); }
+      .meta dd { margin: 0; }
+      .task section { margin-top: 0.75rem; }
+      .proof {
+        background: rgba(46, 160, 67, 0.08);
+        border-left: 3px solid var(--done);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .empty-proof {
+        background: rgba(110, 118, 129, 0.08);
+        border-left: 3px solid var(--todo);
+        padding: 0.5rem 0.75rem;
+        color: var(--muted);
+        font-style: italic;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary {
+        background: rgba(219, 97, 162, 0.08);
+        border-left: 3px solid var(--decision);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary ul { margin: 0.3em 0; padding-left: 1.5em; }
+      table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+      th, td {
+        padding: 0.5em 0.75em;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th { font-weight: 600; color: var(--muted); font-size: 0.8em; text-transform: uppercase; }
+      a { color: var(--accent); }
+      .phase {
+        margin: 2rem 0;
+        padding-left: 1rem;
+        border-left: 3px solid var(--accent);
+      }
+      svg.depgraph { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Plan: corpus testing substrate</h1>
+        <span class="badge todo">todo</span>
+        <p>Ship a property-based testing substrate inside <code>@f0rbit/corpus</code> exposed as a single <code>testing</code> namespace. Hybrid deriver (hand-rolled walker over <code>@traversable/zod-test</code> as leaf), Hedgehog-style <code>cover</code> assertions, error-path-exhaustive runtime laws, model-based <code>provider_equivalence</code>, and a <code>package.json</code> entry-point vending protocol so downstream packages (vault, pulse, devpad-pipelines) contribute arbitraries that compose automatically. Phase 1 pilots the substrate against corpus's own backend-contract suite — the densest cross-backend equivalence target in the ecosystem.</p>
+      </header>
+
+      <section id="root-cause">
+        <h2>Root cause</h2>
+        <div class="root-cause">
+          <p><strong>Stated goal:</strong> Build a property-based testing substrate inside <code>@f0rbit/corpus</code> under a <code>testing</code> namespace.</p>
+          <p><strong>Underlying need:</strong> ~30 projects share one <code>Result&lt;T, CorpusError&gt;</code>-shaped vocabulary but each codebase reinvents PBT: bespoke arbitraries, ad-hoc generators per error branch, no shared model-based test for the in-memory-vs-real Provider pattern that the design philosophy mandates. The cost is silent under-coverage of error paths (rate limits, transaction aborts, partial commits) and divergence between in-memory fakes and real backends — the exact bugs PBT is supposed to surface. What the user actually wants is a substrate that <em>composes</em> across the dependency graph so leaf packages stay small, error paths are <em>proven</em> to fire (not hoped to), and Provider equivalence is a one-liner.</p>
+          <p><strong>Why this matters:</strong> Solving the surface request as a thin <code>fc.Arbitrary</code> re-export buys nothing — the ecosystem already has fast-check. The leverage is in the registry-as-composition-mechanism (downstream packages' arbitraries flow up through the dependency graph), <code>cover</code> assertions that fail when labelled branches don't fire, and <code>error_path_exhaustive</code> driven by the Result error union — these three together convert "we hope our tests cover the unhappy paths" into a compile-time-checked, runtime-verified guarantee.</p>
+        </div>
+      </section>
+
+      <section id="alternatives">
+        <h2>Alternatives considered</h2>
+
+        <article class="option recommended" id="option-1">
+          <header>
+            <h3>Option 1: Hybrid deriver + hybrid registry key + fast-check shrinking + walk-on-init vending</h3>
+            <span class="badge recommended">recommended</span>
+          </header>
+          <p>Hand-rolled Zod walker for the common cases (object, array, union, branded, refinement) that delegates to <code>@traversable/zod-test</code> for esoteric leaves we don't want to maintain (z.bigint, z.date refinements, complex catch). Registry keyed by branded type symbols for identity-bearing domain types (UserId, AuthToken, Money, CorpusError variants) and by Zod schema instance identity (WeakMap-keyed) for everything else. Shrinking inherits from fast-check's native rose-tree — we wrap only the generator step in <code>compose</code> + <code>failure</code>, never the shrink path. Vending walks <code>node_modules</code> once on first <code>testing</code> import, reading <code>package.json</code>'s <code>"corpus": { "testing": "./dist/testing/register.js" }</code> key, dynamic-importing each, executing in undefined order (registry is order-independent).</p>
+
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Effect Schema</strong> — <code>Arbitrary.make(schema)</code> ships inside the schema package (not a separate deriver), single source of truth, schema = source for type + parse + arb. <a href="https://effect.website/docs/schema/arbitrary/">source</a></li>
+            <li><strong>Hypothesis (Python)</strong> — <code>st.register_type_strategy</code> + entry-points in <code>pyproject.toml</code> via the <code>"hypothesis"</code> key let downstream packages contribute arbitraries that registration-order-independently compose. We translate setuptools entry-points to <code>package.json</code> keys. <a href="https://hypothesis.readthedocs.io/en/latest/strategies.html#hypothesis.strategies.register_type_strategy">source</a></li>
+            <li><strong>fast-check 4.7</strong> — native rose-tree shrinking, <code>fc.commands</code> for model-based testing. Wrapping the shrink layer is documented as fragile; the release notes explicitly call out that derivers should stay at the generator layer. <a href="https://github.com/dubzzz/fast-check/releases/tag/v4.7.0">source</a></li>
+            <li><strong>@traversable/zod-test</strong> — only credible Zod v4 + fast-check 4 deriver currently maintained; we use it as the leaf primitive for the awkward cases we don't want to track upstream changes for. <a href="https://github.com/traversable/zod-test">source</a></li>
+            <li><strong>Hedgehog</strong> — integrated shrinking + <code>cover</code> assertions inside <code>Gen</code>; the precedent for "fail the test if a labelled branch fires &lt;N%". We borrow the assertion, not the integrated-shrinker architecture. <a href="https://hackage.haskell.org/package/hedgehog/docs/Hedgehog.html#v:cover">source</a></li>
+            <li><strong>Proptest (Rust)</strong> — <code>#[derive(Arbitrary)]</code> + <code>prop_compose!</code>. Our <code>testing.compose((draw) =&gt; ...)</code> is the JS analog; derivation falls out of the Zod walker. <a href="https://proptest-rs.github.io/proptest/proptest-derive/index.html">source</a></li>
+          </ul>
+
+          <h4>Pros</h4>
+          <ul>
+            <li>Single import surface (<code>testing.*</code>) and single source of truth (Zod schema or branded symbol — never duplicated).</li>
+            <li>Hand-rolled walker covers ~85% of cases corpus + downstream actually use (objects, unions, arrays, primitives, refinements); leaves the long tail to a maintained leaf. Avoids the <code>zod-fast-check</code> rot pattern (whole-system dependency on one unmaintained deriver).</li>
+            <li>Branded keys give compile-time error if you register two generators for the same domain type. Schema-identity keys let unbranded ad-hoc schemas register without ceremony.</li>
+            <li>Walk-on-init is order-independent; mirrors Hypothesis's proven model; no codegen step, no scaffolder coupling.</li>
+            <li>Inheriting fast-check shrinking means <code>compose</code> + <code>failure</code> wrappers stay ~50 LOC each; we never touch the rose-tree.</li>
+          </ul>
+
+          <h4>Cons</h4>
+          <ul>
+            <li>Hand-rolled walker is real code to maintain — ~600 LOC across object/array/union/primitive/branded handlers. Mitigated by delegating leaves to <code>@traversable/zod-test</code> and by Phase 1's pilot exercising the walker against corpus's own schemas (high signal).</li>
+            <li>Two registry-key paths (branded vs schema-identity) is conceptual surface area — testers must know which to use. Mitigated by the rule "if you have a branded type, key on the brand; otherwise key on the schema".</li>
+            <li>Walk-on-init pays a one-time <code>node_modules</code> traversal cost on first <code>testing</code> import. Bounded by reading only top-level <code>package.json</code>s + the declared paths; in practice &lt;50 ms even at the 30-package ecosystem scale.</li>
+          </ul>
+
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr><th>Principle</th><th>Score</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>5/5</td>
+                <td>Zod schema is the source for type + parse + arbitrary; branded symbol is the source for identity-bearing domain types. Walker derives, doesn't duplicate.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>5/5</td>
+                <td><code>testing.arbitrary&lt;Brand&gt;(symbol, gen)</code> is generic over the brand; registering a wrong-typed generator is a compile error. <code>testing.failure&lt;E, K extends E["kind"]&gt;</code> only accepts variants that exist in the union.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>5/5</td>
+                <td><code>law.error_path_exhaustive</code> walks the Result error union <em>at the type level</em> via mapped types — missing a registered failure case for a new error variant is a TS error at the call site, not a runtime miss.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td><code>testing.compose</code> infers via <code>draw</code>'s return type; <code>testing.arb(schema)</code> infers <code>fc.Arbitrary&lt;z.infer&lt;typeof schema&gt;&gt;</code>. Only annotation friction is at <code>law.provider_equivalence</code> where model + SUT must share an explicit op type.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td><code>law.provider_equivalence(InMemoryX, RealX, commands)</code> is the headline API. Substrate ships with corpus's memory backend as the canonical reference SUT for Phase 1.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-2">
+          <header>
+            <h3>Option 2: Pure delegation to @traversable/zod-test + schema-identity registry + codegen vending</h3>
+          </header>
+          <p>No hand-rolled walker — <code>testing.arb(schema)</code> is a thin wrapper around <code>@traversable/zod-test</code>'s deriver. Registry keyed only by Zod schema instance identity (WeakMap). Vending via build-time codegen: a <code>bun corpus testing codegen</code> step emits a <code>__corpus-testing-manifest.ts</code> file that statically imports every registrar. Pure bun-native, no <code>node_modules</code> walk at runtime.</p>
+
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>zod-fast-check</strong> — the cautionary tale; whole ecosystem depended on it, maintainer went quiet, ecosystem stuck on Zod v3 + fast-check 3 for 13+ months. <a href="https://github.com/DavidTimms/zod-fast-check/issues/78">source</a></li>
+            <li><strong>Drizzle Kit</strong> — codegen-first migration tooling; bun-native, no runtime introspection. <a href="https://orm.drizzle.team/kit-docs/overview">source</a></li>
+            <li><strong>Effect Schema</strong> — schema-identity-keyed annotations (<code>arbitrary</code> annotation on schema). <a href="https://effect.website/docs/schema/annotations/">source</a></li>
+          </ul>
+
+          <h4>Pros</h4>
+          <ul>
+            <li>Smallest substrate code surface (~150 LOC for <code>testing.arb</code>).</li>
+            <li>Codegen vending is static — TS sees every registration at compile time; dead imports get tree-shaken.</li>
+            <li>No <code>node_modules</code> traversal at runtime.</li>
+          </ul>
+
+          <h4>Cons</h4>
+          <ul>
+            <li><strong>Single point of failure on an external dependency that has no compatibility guarantee.</strong> If <code>@traversable/zod-test</code> stalls on Zod v5, the entire corpus testing story stalls. Repeats the <code>zod-fast-check</code> failure mode.</li>
+            <li>No branded-key path means identity-bearing types (UserId, Money, CorpusError variants) can't be registered without inventing a synthetic Zod schema as a key — awkward and duplicative.</li>
+            <li>Codegen step is friction: every <code>bun test</code> needs the manifest regenerated, or stale manifest = silent test pass on missing registration. Adds a hook to <code>bun test</code> or a pre-test script downstream packages all have to remember.</li>
+            <li>Codegen leaks the substrate into every consumer's build — they all need the <code>corpus testing</code> CLI.</li>
+          </ul>
+
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr><th>Principle</th><th>Score</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>4/5</td>
+                <td>Schema is the source; but branded domain types need a fake-schema work-around that duplicates the brand.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>3/5</td>
+                <td>Schema-identity keys lose brand information at the registry boundary; recoverable via generics but more friction.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>4/5</td>
+                <td>Codegen catches missing registrations at compile time — but only after running codegen. Forgetting to run it = silent miss.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td>Inference fine through <code>arb(schema)</code>; degrades at branded boundaries.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>Same as Option 1 — <code>provider_equivalence</code> works identically.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-3">
+          <header>
+            <h3>Option 3: Own deriver + branded-only registry + custom shrinker wrapper + explicit load_from</h3>
+          </header>
+          <p>Hand-roll the entire Zod walker (no <code>@traversable/zod-test</code>). Registry keyed only by branded type symbols — schemas without brands must declare a brand to register. Wrap fast-check's shrinker in our own rose-tree composition layer so <code>compose</code>+<code>failure</code> preserve shrinking through nested registrations. No automatic vending — downstream packages call <code>testing.load_from("@org/pkg")</code> explicitly from a test setup file.</p>
+
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Hedgehog</strong> — integrated shrinker inside <code>Gen</code>; this is what you'd build if you copied Hedgehog's architecture wholesale. <a href="https://hackage.haskell.org/package/hedgehog">source</a></li>
+            <li><strong>QuickCheck</strong> — separate <code>Arbitrary</code> + <code>shrink</code> typeclasses; precedent for owning the shrink layer. <a href="https://hackage.haskell.org/package/QuickCheck">source</a></li>
+            <li><strong>Effect Schema</strong> — branded types are first-class via <code>Schema.brand</code>. <a href="https://effect.website/docs/schema/projections/#branding">source</a></li>
+          </ul>
+
+          <h4>Pros</h4>
+          <ul>
+            <li>Maximum control — no external deriver dependency to rot.</li>
+            <li>Custom shrinker can compose through arbitrary user-defined <code>compose</code> chains coherently.</li>
+            <li>Explicit <code>load_from</code> is debuggable — no magic <code>node_modules</code> walk to misbehave under monorepo hoisting.</li>
+          </ul>
+
+          <h4>Cons</h4>
+          <ul>
+            <li>Walker is 4× the LOC of Option 1 (~2400 LOC vs 600) — every Zod feature (catch, transform, pipe, brand on intersection, recursive z.lazy) must be re-implemented from scratch. Maintenance liability.</li>
+            <li>Custom shrinker is the most fragile thing you can ship in a PBT library — fast-check's rose-tree took years to get right. Re-implementing earns nothing the user can feel.</li>
+            <li>Branded-only registry forces every domain type to declare a brand, even single-use test schemas. Ceremony that punishes the common case.</li>
+            <li>Explicit <code>load_from</code> means dependency graph composition is manual — every downstream package's test setup recapitulates the dep tree. Loses the "richness from the dependency graph" property the user explicitly called out.</li>
+          </ul>
+
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr><th>Principle</th><th>Score</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>3/5</td>
+                <td>Brand IS the source — but unbranded ad-hoc schemas can't participate, forcing duplication elsewhere.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>5/5</td>
+                <td>Brands everywhere = maximum type narrowness.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>4/5</td>
+                <td>Strong at the registration boundary; weaker because manual <code>load_from</code> means typos in package names are runtime errors.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>3/5</td>
+                <td>Custom shrinker introduces internal type machinery that bleeds into <code>compose</code>'s public signature — friction.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>Same as Option 1.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-4">
+          <header>
+            <h3>Option 4: Thin fast-check re-export + no registry + no vending + helper laws only</h3>
+          </header>
+          <p>Conservative / "defer": <code>testing</code> namespace re-exports <code>fast-check</code>'s API directly, ships hand-written <code>law.round_trip</code> / <code>law.idempotent</code> / <code>law.provider_equivalence</code> / <code>law.error_path_exhaustive</code> as helpers, but no registry, no vending, no Zod deriver. Each test writes its own arbitraries by hand or imports from a manually maintained shared file.</p>
+
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>fast-check</strong> — the library itself, used directly by most JS projects. <a href="https://fast-check.dev/">source</a></li>
+            <li><strong>jsverify / testcheck-js</strong> — historical thin wrappers; both stalled because the value-add was too thin. <a href="https://github.com/jsverify/jsverify">source</a></li>
+          </ul>
+
+          <h4>Pros</h4>
+          <ul>
+            <li>Lowest implementation cost (~400 LOC total).</li>
+            <li>Zero new abstractions — if you know fast-check you know everything.</li>
+            <li>Phase 1 ships in a week.</li>
+          </ul>
+
+          <h4>Cons</h4>
+          <ul>
+            <li><strong>Solves the surface request, not the root cause.</strong> The user explicitly called out the registry-as-composition-mechanism as the leverage point. Without it the substrate buys ~30 lines of dedup over each project writing their own laws.</li>
+            <li>No <code>cover</code> assertion = no proof that error branches fire. The "every exception case is tested" guarantee evaporates.</li>
+            <li>No vending = pulse's tests have to know vault's arbitraries by name, copy-import them, and update on every change. The ecosystem stays N² in dependency edges.</li>
+          </ul>
+
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr><th>Principle</th><th>Score</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>2/5</td>
+                <td>No registry means arbitraries are duplicated across consumer packages.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>3/5</td>
+                <td>Inherits fast-check's typing — fine but doesn't add domain narrowness.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>2/5</td>
+                <td>No <code>error_path_exhaustive</code> = adding a new <code>CorpusError</code> variant doesn't fail any test by default.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td>fast-check's inference is fine.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>4/5</td>
+                <td>Laws helper for <code>provider_equivalence</code> exists, but each test wires the model+SUT pair manually.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <section class="recommendation">
+          <h3>Recommendation: Option 1</h3>
+          <p>Option 1 averages 4.8/5 vs Option 2 at 4.0, Option 3 at 4.0, Option 4 at 3.0 — and the average understates Option 1's lead because the principles it scores 5/5 on (single source of truth, compiler-catches-bugs) are exactly the ones the user's root cause hinges on. The hybrid deriver dodges the <code>zod-fast-check</code>-style single-point-of-failure that sinks Option 2, the hybrid registry keeps both identity-bearing domain types and ad-hoc schemas ergonomic where Option 3's brand-only model forces ceremony, and walk-on-init vending gives the dependency-graph composition Option 4 explicitly sacrifices. The pilot phase against corpus's own backend-contract suite is the right forcing function — multi-backend equivalence is the densest test of <code>provider_equivalence</code>, <code>cover</code>, and the model-based API, all on the project that hosts the substrate.</p>
+        </section>
+      </section>
+
+      <section id="affected-areas">
+        <h2>Affected areas</h2>
+        <table>
+          <thead>
+            <tr><th>Path</th><th>Change</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>testing/index.ts</code></td><td>new — public <code>testing</code> namespace barrel</td></tr>
+            <tr><td><code>testing/arb.ts</code></td><td>new — Zod walker + <code>@traversable/zod-test</code> leaf delegation</td></tr>
+            <tr><td><code>testing/registry.ts</code></td><td>new — branded-symbol + schema-identity hybrid registry</td></tr>
+            <tr><td><code>testing/compose.ts</code></td><td>new — Hypothesis-style composite generator</td></tr>
+            <tr><td><code>testing/cover.ts</code></td><td>new — Hedgehog-style coverage assertion</td></tr>
+            <tr><td><code>testing/failure.ts</code></td><td>new — per-error-variant generator registration</td></tr>
+            <tr><td><code>testing/laws/round-trip.ts</code></td><td>new — encode/decode round-trip law</td></tr>
+            <tr><td><code>testing/laws/idempotent.ts</code></td><td>new — idempotence law helper</td></tr>
+            <tr><td><code>testing/laws/functor.ts</code></td><td>new — Result functor laws (map/map_err/pipe)</td></tr>
+            <tr><td><code>testing/laws/provider-equivalence.ts</code></td><td>new — model-based <code>fc.asyncCommands</code> wrapper</td></tr>
+            <tr><td><code>testing/laws/error-path-exhaustive.ts</code></td><td>new — Result-union-driven exhaustive error-path law</td></tr>
+            <tr><td><code>testing/commands.ts</code></td><td>new — typed re-export of <code>fc.asyncCommands</code> bound to <code>Result</code> ops</td></tr>
+            <tr><td><code>testing/vending/walker.ts</code></td><td>new — <code>node_modules</code> walk + <code>package.json</code> <code>corpus.testing</code> key reader</td></tr>
+            <tr><td><code>testing/vending/auto-load.ts</code></td><td>new — first-import side effect that triggers walker</td></tr>
+            <tr><td><code>testing/register.ts</code></td><td>new — corpus's own registrar (CorpusError variants, SnapshotMeta, BatchOp arbitraries)</td></tr>
+            <tr><td><code>tests/property/backend-equivalence.test.ts</code></td><td>new — Phase 1 pilot: <code>provider_equivalence</code> across all 4 backends</td></tr>
+            <tr><td><code>tests/property/corpus-error-paths.test.ts</code></td><td>new — Phase 2 pilot: <code>error_path_exhaustive</code> against a real corpus operation</td></tr>
+            <tr><td><code>tests/property/result-functor.test.ts</code></td><td>new — Phase 3 pilot: Result functor laws</td></tr>
+            <tr><td><code>tests/property/backend-equivalence-model.test.ts</code></td><td>new — Phase 3 pilot: cross-backend model-based equivalence</td></tr>
+            <tr><td><code>index.ts</code></td><td>modify — add <code>export * as testing from './testing/index.js'</code></td></tr>
+            <tr><td><code>package.json</code></td><td>modify — add <code>./testing</code> export, add <code>fast-check ^4.7</code> + <code>@traversable/zod-test</code> deps, add <code>"corpus": { "testing": "./dist/testing/register.js" }</code> self-registration key</td></tr>
+            <tr><td><code>AGENTS.md</code></td><td>modify — add Testing substrate section</td></tr>
+            <tr><td><code>docs/src/content/docs/testing/</code></td><td>new — MDX docs for the substrate API</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture-decisions">
+        <h2>Architecture decisions</h2>
+        <p>Non-obvious calls within the chosen approach. None require user weigh-in — flagged here as audit trail.</p>
+        <ul>
+          <li><strong>Subpath, not subpackage.</strong> Corpus is a single-package library (per AGENTS.md). Testing lives at <code>testing/</code> at the repo root, exposed via a new <code>./testing</code> entry in <code>package.json</code> <code>exports</code>. Consumers import as <code>import { testing } from "@f0rbit/corpus"</code> for the namespace, or <code>import * as testing from "@f0rbit/corpus/testing"</code> if they want only the testing surface without pulling the rest of corpus into a hot import path. The namespace re-export from the main barrel preserves the user's "single import surface" requirement.</li>
+          <li><strong>fast-check is a <code>dependency</code>, not <code>peerDependencies</code>.</strong> Corpus is the only place fast-check is configured. Downstream packages don't import fast-check directly — they go through <code>testing.*</code>. This means corpus pins the fast-check major version for the entire ecosystem. <code>@traversable/zod-test</code> is also a regular dependency for the same reason.</li>
+          <li><strong>Registry is a module-level singleton with a reset hook for tests.</strong> <code>testing.__reset_registry_for_tests()</code> is exported but namespaced under <code>__</code> to signal "do not use in normal tests". Required because the registry's walk-on-init side effect is observable; without a reset hook, registry behaviour tests are flaky.</li>
+          <li><strong>Vending walker reads only top-level <code>package.json</code>s of declared dependencies</strong> (not transitive). Order: walk <code>process.cwd()/package.json</code>'s direct deps (incl. devDeps), each resolved via <code>require.resolve</code>'s package root, read each <code>package.json</code>, follow the <code>corpus.testing</code> key. Transitive registration happens because each package's registrar can register on behalf of its own deps. This avoids the O(N²) hoisted-monorepo walk.</li>
+          <li><strong>The <code>cover</code> assertion uses fast-check's built-in <code>fc.statistics</code> mechanism</strong> rather than re-implementing labelled-branch counting. We wrap <code>fc.assert</code> with a post-run hook that compares observed proportions against the declared minimum and throws if any label is below threshold. ~150 LOC, no shrink-path involvement.</li>
+          <li><strong><code>error_path_exhaustive</code> is type-driven, not value-driven.</strong> The function under test must return <code>Promise&lt;Result&lt;T, E&gt;&gt;</code> where <code>E</code> is a tagged union (<code>{ kind: "..." } | ...</code>). The law extracts the set of <code>kind</code> values via a mapped type at the call site, looks up each in the registry, and asserts each registered generator produces the matching variant. Missing variant = TS error at call site. Unregistered variant at runtime = test failure with a clear message ("no failure generator registered for kind 'rate_limited' — call <code>testing.failure(YourError, 'rate_limited', ...)</code> in your test setup or registrar").</li>
+          <li><strong>Provider equivalence model is bring-your-own.</strong> We don't ship a generic model class — the substrate accepts a model object that implements the same interface as the SUT, plus an array of <code>fc.AsyncCommand</code>s. Phase 1's pilot defines the canonical corpus example (model = memory backend's Maps, SUT = each real backend); downstream packages copy that pattern.</li>
+          <li><strong>Auto-load is idempotent and lazy.</strong> First access to any <code>testing.*</code> export triggers the walker once; subsequent accesses skip. Tests that need to override registration order can call <code>testing.__reset_registry_for_tests()</code> + manual <code>testing.load_from(...)</code>.</li>
+          <li><strong>Phase 5 scaffolder integration is documentation + a single template file</strong> — we do not modify <code>devpad pipelines init</code> from the corpus repo. The plan ships a <code>testing/register.ts</code> template under <code>docs/templates/</code> that the devpad scaffolder copies. Cross-repo coupling stays one-way (devpad reads from corpus templates, not the reverse).</li>
+        </ul>
+      </section>
+
+      <section id="phases">
+        <h2>Phases</h2>
+
+        <svg class="depgraph" width="900" height="220" viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Phase dependency graph">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#58a6ff"/>
+            </marker>
+          </defs>
+          <g font-family="-apple-system, sans-serif" font-size="12" fill="#c9d1d9">
+            <rect x="20" y="80" width="140" height="60" rx="6" fill="#161b22" stroke="#58a6ff"/>
+            <text x="90" y="105" text-anchor="middle" font-weight="600">Phase 1</text>
+            <text x="90" y="123" text-anchor="middle" fill="#8b949e">Foundations</text>
+
+            <rect x="200" y="80" width="140" height="60" rx="6" fill="#161b22" stroke="#58a6ff"/>
+            <text x="270" y="105" text-anchor="middle" font-weight="600">Phase 2</text>
+            <text x="270" y="123" text-anchor="middle" fill="#8b949e">Error paths</text>
+
+            <rect x="380" y="80" width="140" height="60" rx="6" fill="#161b22" stroke="#58a6ff"/>
+            <text x="450" y="105" text-anchor="middle" font-weight="600">Phase 3</text>
+            <text x="450" y="123" text-anchor="middle" fill="#8b949e">Laws + model</text>
+
+            <rect x="560" y="80" width="140" height="60" rx="6" fill="#161b22" stroke="#58a6ff"/>
+            <text x="630" y="105" text-anchor="middle" font-weight="600">Phase 4</text>
+            <text x="630" y="123" text-anchor="middle" fill="#8b949e">Vending</text>
+
+            <rect x="740" y="80" width="140" height="60" rx="6" fill="#161b22" stroke="#58a6ff"/>
+            <text x="810" y="105" text-anchor="middle" font-weight="600">Phase 5</text>
+            <text x="810" y="123" text-anchor="middle" fill="#8b949e">Tooling</text>
+
+            <line x1="160" y1="110" x2="200" y2="110" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+            <line x1="340" y1="110" x2="380" y2="110" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+            <line x1="520" y1="110" x2="560" y2="110" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+            <line x1="700" y1="110" x2="740" y2="110" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+            <text x="450" y="30" text-anchor="middle" fill="#8b949e">Phases are strictly sequential; tasks within a phase may parallelise where marked</text>
+            <text x="450" y="180" text-anchor="middle" fill="#8b949e">Each arrow = commit + PR gate (verification coder runs at end of phase)</text>
+          </g>
+        </svg>
+
+        <section class="phase" id="phase-1">
+          <h3>Phase 1: Foundations — <code>testing.arb</code>, <code>testing.compose</code>, registry, pilot</h3>
+          <p>Stand up the substrate's core: Zod-driven arbitrary derivation, the hybrid registry, the composite generator, and a pilot property test against a single corpus backend's round-trip. Phase 1 proves the deriver works against corpus's real schemas (SnapshotMeta, BatchOp, VersionSetManifest) before anything else is built on it.</p>
+
+          <article class="task" id="task-1-1">
+            <header>
+              <h3>Task 1.1: Wire dependencies and entry points</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>package.json</code>, <code>tsconfig.build.json</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~30</dd>
+              <dt>Dependencies</dt>
+              <dd>none</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (foundation)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Corpus is single-package (per <code>~/dev/corpus/AGENTS.md</code>). All source lives at repo root. Public entry points are declared in <code>package.json</code>'s <code>exports</code> map; current entries are <code>.</code>, <code>./file</code>, <code>./cloudflare</code>, <code>./types</code>, <code>./schema</code>. We are adding <code>./testing</code> as a new entry point and bumping deps. The build is <code>tsc -p tsconfig.build.json</code> emitting to <code>dist/</code>; whatever path we add to <code>exports</code> must have a corresponding entry file at the root that <code>tsc</code> compiles.</p>
+              <p>Two new deps go into <code>dependencies</code> (not <code>peerDependencies</code>) per the architecture decision: <code>fast-check ^4.7</code> and <code>@traversable/zod-test</code> at latest compatible version. Zod stays in <code>peerDependencies</code> at <code>^3</code> as-is.</p>
+              <p>Also add the self-registration key to corpus's own <code>package.json</code> so the vending walker (built in Phase 4) finds corpus's registrar: <code>"corpus": { "testing": "./dist/testing/register.js" }</code>. This is a no-op until Phase 4 lands but ships in Phase 1 to avoid touching <code>package.json</code> twice.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Add to <code>dependencies</code>: <code>"fast-check": "^4.7.0"</code>, <code>"@traversable/zod-test": "^0.0.18"</code> (or current latest — verify via <code>bun pm view</code>).</li>
+                <li>Add to <code>exports</code>:
+                  <pre>"./testing": {
+  "types": "./dist/testing/index.d.ts",
+  "import": "./dist/testing/index.js",
+  "require": "./dist/testing/index.js"
+}</pre>
+                </li>
+                <li>Add top-level key:
+                  <pre>"corpus": { "testing": "./dist/testing/register.js" }</pre>
+                </li>
+                <li>Run <code>bun install</code> to refresh the lockfile.</li>
+                <li>Confirm <code>tsconfig.build.json</code> includes the new <code>testing/</code> subtree (likely already covered by the root <code>include</code> — verify).</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun install &amp;&amp; bun run typecheck</pre>
+              <p>Expected: install succeeds, typecheck passes. <code>bun pm ls fast-check</code> shows <code>fast-check@4.x</code>. <code>jq '.exports."./testing"' package.json</code> returns the new object.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>fast-check is in <code>dependencies</code>, NOT <code>peerDependencies</code> (architecture decision).</li>
+                  <li>Zod is unchanged — still in <code>peerDependencies</code> at <code>^3</code>.</li>
+                  <li><code>exports</code> entry has all three subfields (<code>types</code>, <code>import</code>, <code>require</code>) matching the existing entries' shape.</li>
+                  <li><code>"corpus": { "testing": "..." }</code> key is at top level, not nested under another key.</li>
+                  <li>No version pin on <code>fast-check</code> tighter than caret (must allow minor upgrades).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code> (feat(testing): foundations).</li>
+                <li><code>dependencies</code> in <code>package.json</code>: <code>"fast-check": "^4.7.0"</code>, <code>"@traversable/zod-test": "^0.0.28"</code>. <code>zod</code> stays in <code>peerDependencies</code> at <code>^3</code>.</li>
+                <li><code>exports["./testing"]</code> declared with all three subfields (<code>types</code>, <code>import</code>, <code>require</code>) pointing at <code>./dist/testing/index.{d.ts,js}</code>, matching the shape of existing entries.</li>
+                <li>Top-level <code>"corpus": { "testing": "./dist/testing/register.js" }</code> hook present for Phase 4 vending walker.</li>
+                <li><code>tsconfig.build.json</code> <code>include</code> updated to cover <code>testing/*.ts</code>; <code>bun run build</code> emits <code>dist/testing/{arb,compose,index,register,registry,types}.{js,d.ts}</code>.</li>
+                <li><code>bun install</code> + <code>bun run typecheck</code> clean.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-2">
+            <header>
+              <h3>Task 1.2: Hybrid registry (branded + schema-identity)</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/registry.ts</code>, <code>testing/types.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~220</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (other Phase 1 tasks depend on this)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>The registry stores <code>fc.Arbitrary&lt;T&gt;</code> instances keyed two ways:</p>
+              <ol>
+                <li><strong>Branded symbol</strong> — for identity-bearing domain types. The brand is a <code>unique symbol</code> declared by the consumer, paired at the type level with a TS branded type (<code>type UserId = string &amp; { readonly __brand: unique symbol }</code>). Implementation uses <code>Map&lt;symbol, fc.Arbitrary&lt;unknown&gt;&gt;</code>.</li>
+                <li><strong>Zod schema instance</strong> — for ad-hoc schemas. Keyed via <code>WeakMap&lt;z.ZodType, fc.Arbitrary&lt;unknown&gt;&gt;</code> so schemas can be garbage-collected and identity comparison is referential.</li>
+              </ol>
+              <p>The public API surface for this task is:</p>
+              <pre>// testing/types.ts
+export type ArbBrand&lt;T&gt; = symbol &amp; { readonly __arb_type?: (x: T) =&gt; void }
+export type FailureKey&lt;E extends { kind: string }&gt; = E["kind"]
+
+// testing/registry.ts
+export function arbitrary&lt;T&gt;(key: ArbBrand&lt;T&gt;, gen: fc.Arbitrary&lt;T&gt;): void
+export function arbitrary&lt;S extends z.ZodType&gt;(schema: S, gen: fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;): void
+export function lookup&lt;T&gt;(key: ArbBrand&lt;T&gt;): fc.Arbitrary&lt;T&gt; | undefined
+export function lookup&lt;S extends z.ZodType&gt;(schema: S): fc.Arbitrary&lt;z.infer&lt;S&gt;&gt; | undefined
+export function failure&lt;E extends { kind: string }, K extends E["kind"]&gt;(
+  brand: ArbBrand&lt;E&gt;,
+  variant: K,
+  gen: fc.Arbitrary&lt;Extract&lt;E, { kind: K }&gt;&gt;
+): void
+export function lookup_failure&lt;E extends { kind: string }&gt;(
+  brand: ArbBrand&lt;E&gt;,
+  variant: E["kind"]
+): fc.Arbitrary&lt;E&gt; | undefined
+export function __reset_registry_for_tests(): void</pre>
+              <p>Failure registrations live in a separate <code>Map&lt;symbol, Map&lt;string, fc.Arbitrary&lt;unknown&gt;&gt;&gt;</code> indexed by <code>[error_brand, variant_kind]</code>. The phantom <code>__arb_type</code> property on <code>ArbBrand&lt;T&gt;</code> is purely structural — it carries <code>T</code> at the type level without runtime overhead.</p>
+              <p>Result types come from <code>./types.ts</code> at repo root (NOT from <code>@f0rbit/corpus</code> — see <code>AGENTS.md</code> rule about importing within this repo).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/types.ts</code> exporting <code>ArbBrand&lt;T&gt;</code> and <code>FailureKey&lt;E&gt;</code> as documented above.</li>
+                <li>Create <code>testing/registry.ts</code>:
+                  <ul>
+                    <li>Module-local state: <code>let brand_arbs = new Map&lt;symbol, fc.Arbitrary&lt;unknown&gt;&gt;()</code>, <code>let schema_arbs = new WeakMap&lt;z.ZodType, fc.Arbitrary&lt;unknown&gt;&gt;()</code>, <code>let failures = new Map&lt;symbol, Map&lt;string, fc.Arbitrary&lt;unknown&gt;&gt;&gt;()</code>.</li>
+                    <li>Overloaded <code>arbitrary</code> function — discriminate on <code>typeof key === "symbol"</code>.</li>
+                    <li>Overloaded <code>lookup</code> function — same discrimination.</li>
+                    <li><code>failure</code> registers under nested map.</li>
+                    <li><code>__reset_registry_for_tests</code> reassigns all three to fresh empty maps.</li>
+                  </ul>
+                </li>
+                <li>Use snake_case for variables/functions per corpus convention. Use tabs for indentation in source (see existing files). Return Result types only where appropriate — registry operations are sync void/lookup, no Result needed.</li>
+                <li>Add unit tests at <code>tests/unit/testing-registry.test.ts</code> covering: register-then-lookup for both key types, duplicate registration overwrites (or errors — pick overwrites with a deprecation warning via <code>console.warn</code>), <code>lookup</code> returns <code>undefined</code> for unregistered keys, <code>failure</code> + <code>lookup_failure</code> round-trip, <code>__reset_registry_for_tests</code> clears all three maps.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-registry.test.ts &amp;&amp; bun run typecheck</pre>
+              <p>Expected: ~10 tests passing, typecheck clean.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>No <code>any</code> in public signatures — overloads + generics carry types end-to-end.</li>
+                  <li>Internal maps are typed <code>Map&lt;..., fc.Arbitrary&lt;unknown&gt;&gt;</code> not <code>Map&lt;..., any&gt;</code>. The <code>unknown</code> is narrowed at lookup via the overload.</li>
+                  <li><code>__reset_registry_for_tests</code> is exported (needed by other tests) but the <code>__</code> prefix flags it.</li>
+                  <li>Schema-identity WeakMap is correct — schemas can be GC'd. A plain Map would leak.</li>
+                  <li>Duplicate registration: pick the documented behaviour (overwrite + warn) and stick to it; the adversary should verify the warn fires.</li>
+                  <li>Imports: <code>import type { Arbitrary } from "fast-check"</code> and <code>import type { z } from "zod"</code> — type-only where possible (verbatimModuleSyntax is on).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code>.</li>
+                <li><code>testing/types.ts</code> exports <code>ArbBrand&lt;T&gt;</code> (phantom <code>__arb_type</code>) and <code>FailureKey&lt;E&gt;</code> as specified.</li>
+                <li><code>testing/registry.ts</code>: module-local <code>brand_arbs: Map&lt;symbol, fc.Arbitrary&lt;unknown&gt;&gt;</code>, <code>schema_arbs: WeakMap&lt;z.ZodType, fc.Arbitrary&lt;unknown&gt;&gt;</code>, <code>failures: Map&lt;symbol, Map&lt;string, fc.Arbitrary&lt;unknown&gt;&gt;&gt;</code>. Overloaded <code>arbitrary</code> and <code>lookup</code> dispatch on <code>typeof key === "symbol"</code>. Duplicate registration overwrites with <code>console.warn</code> citing the key. <code>__reset_registry_for_tests()</code> reassigns all three to fresh empty containers.</li>
+                <li>Tests: <code>tests/unit/testing-registry.test.ts</code> — 13 tests, all pass (21 expect calls, 28ms). Covers register-then-lookup for both key types, WeakMap GC-friendly identity, duplicate-overwrite + warning, undefined for unregistered keys, <code>failure</code> + <code>lookup_failure</code> round-trip across multiple variants, and <code>__reset_registry_for_tests</code> clears all three maps.</li>
+                <li>No <code>any</code> in signatures; the <code>unknown</code> stored in internal maps is narrowed by the lookup overloads.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-3">
+            <header>
+              <h3>Task 1.3: Zod walker — <code>testing.arb</code></h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/arb.ts</code>, <code>tests/unit/testing-arb.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~450</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-1-4 (compose is independent)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>The walker translates a Zod schema into an <code>fc.Arbitrary</code>. It first checks the registry (schema-identity lookup) — if a generator is registered for this schema, return it. Otherwise dispatch on Zod's <code>_def.typeName</code> (<code>ZodObject</code>, <code>ZodArray</code>, <code>ZodUnion</code>, <code>ZodLiteral</code>, etc.) to produce arbitraries for the common cases. Esoteric leaves (<code>ZodBigInt</code> with refinements, <code>ZodDate</code> ranges, <code>ZodCatch</code>, <code>ZodPipe</code>, <code>ZodLazy</code> with cycles) delegate to <code>@traversable/zod-test</code>'s <code>generator(schema)</code>.</p>
+              <p>Signature:</p>
+              <pre>export function arb&lt;S extends z.ZodType&gt;(schema: S): fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</pre>
+              <p>Cases the hand-rolled walker handles directly:</p>
+              <ul>
+                <li><code>ZodString</code>: <code>fc.string()</code>, honour <code>.min</code>/<code>.max</code>/<code>.uuid</code>/<code>.email</code>/<code>.regex</code> via fast-check's <code>fc.stringMatching</code> + filters.</li>
+                <li><code>ZodNumber</code>: <code>fc.float</code>/<code>fc.integer</code> based on <code>.int()</code>, honour <code>.min</code>/<code>.max</code>.</li>
+                <li><code>ZodBoolean</code>: <code>fc.boolean()</code>.</li>
+                <li><code>ZodLiteral</code>: <code>fc.constant(literal_value)</code>.</li>
+                <li><code>ZodEnum</code>/<code>ZodNativeEnum</code>: <code>fc.constantFrom(...values)</code>.</li>
+                <li><code>ZodObject</code>: <code>fc.record({ key: arb(child), ... })</code>, recurse.</li>
+                <li><code>ZodArray</code>: <code>fc.array(arb(element), { minLength, maxLength })</code>.</li>
+                <li><code>ZodTuple</code>: <code>fc.tuple(arb(each))</code>.</li>
+                <li><code>ZodUnion</code>/<code>ZodDiscriminatedUnion</code>: <code>fc.oneof(arb(each))</code>.</li>
+                <li><code>ZodOptional</code>/<code>ZodNullable</code>: <code>fc.option(arb(inner))</code> with appropriate nil.</li>
+                <li><code>ZodBranded</code>: <code>arb(unwrap)</code> — brand is type-level only.</li>
+                <li><code>ZodDefault</code>: <code>arb(inner)</code> (we generate the input shape; the default never fires).</li>
+                <li><code>ZodRecord</code>: <code>fc.dictionary(key_arb, arb(value))</code>.</li>
+                <li><code>ZodIntersection</code>: <code>fc.tuple(arb(left), arb(right)).map(([l, r]) =&gt; ({ ...l, ...r }))</code>.</li>
+              </ul>
+              <p>Everything else falls through to <code>@traversable/zod-test</code>'s <code>generator(schema)</code>. Wrap that call in <code>try_catch</code> from <code>../result.js</code> (NOT from <code>@f0rbit/corpus</code>) and if it throws, surface a clear error: "testing.arb: unsupported schema kind 'X' and @traversable/zod-test threw — register a generator manually via testing.arbitrary(schema, ...) at the test setup".</p>
+              <p>Zod typeName discrimination is via <code>schema._def.typeName</code> which is a <code>"ZodObject" | "ZodArray" | ...</code> string. Use exhaustive switch with <code>noFallthroughCasesInSwitch</code> (already on in <code>tsconfig.json</code>) catching it.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/arb.ts</code>. Import <code>z</code> from <code>"zod"</code>, <code>fc</code> from <code>"fast-check"</code>, <code>{ generator as traversable_generator }</code> from <code>"@traversable/zod-test"</code>, <code>{ lookup }</code> from <code>"./registry.js"</code>.</li>
+                <li>Export <code>arb&lt;S extends z.ZodType&gt;(schema: S): fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</code>.</li>
+                <li>Step 1: <code>const registered = lookup(schema); if (registered) return registered as fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</code>.</li>
+                <li>Step 2: <code>switch (schema._def.typeName)</code> — handle the ~14 cases above with recursive <code>arb(child_schema)</code> calls.</li>
+                <li>Step 3: default case → delegate to <code>traversable_generator(schema)</code>, wrap in try/catch, surface error with actionable message.</li>
+                <li>Add tests at <code>tests/unit/testing-arb.test.ts</code> covering: each primitive case, recursion into nested object/array, union picks all branches over enough samples, branded passes through, registered schema short-circuits the walker (use <code>testing.arbitrary(schema, fc.constant("registered"))</code> then check <code>arb(schema)</code> produces "registered").</li>
+                <li>Add one integration-shaped test using corpus's actual <code>VersionSetManifestSchema</code> from <code>../../version-set.ts</code>: <code>arb(VersionSetManifestSchema)</code> + 100 runs, each parsed back through the schema must succeed (round-trip via <code>schema.safeParse</code>).</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-arb.test.ts &amp;&amp; bun run typecheck</pre>
+              <p>Expected: all unit tests pass, the VersionSetManifestSchema round-trip property passes 100/100 runs, typecheck clean.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>No <code>any</code> in <code>arb</code>'s signature — generic over <code>S</code>, returns <code>fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</code>.</li>
+                  <li>Internal <code>as fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</code> casts are present (unavoidable at the registry boundary because the registry stores <code>fc.Arbitrary&lt;unknown&gt;</code>) but should be the ONLY <code>as</code> in the file. Adversary flags any other.</li>
+                  <li>Switch on <code>_def.typeName</code> is exhaustive — adding a new Zod kind should not silently fall through to <code>traversable_generator</code>; it should be a code change. Use a <code>const _exhaustive: never = ...</code> default? — discuss in PR; preferred: explicit <code>default: return traversable_generator(...)</code> with a <code>// SAFETY: leaf delegation</code> comment.</li>
+                  <li>The VersionSetManifestSchema test uses the actual export from <code>../../version-set.ts</code>, not a stub. If a future schema change breaks the walker, this test catches it.</li>
+                  <li>Error message on traversable failure names the specific unsupported kind and points at the manual-registration escape hatch.</li>
+                  <li>Recursion termination on <code>ZodLazy</code> with self-references — verify fast-check's depth limit (<code>fc.maxDepth</code>) is respected via <code>fc.letrec</code> for lazy cycles; do NOT recurse unbounded.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code>.</li>
+                <li><code>testing/arb.ts</code> dispatches via <code>instanceof</code> (NOT <code>_def.typeName</code>) so each branch narrows the schema type natively. Single <code>as fc.Arbitrary&lt;z.infer&lt;S&gt;&gt;</code> at the registry-lookup boundary; no other escape hatches in the file.</li>
+                <li>Hand-roll-only — <code>@traversable/zod-test</code> fallback deferred. The package declares <code>zod@4</code> as a peer (corpus is <code>zod@3</code>) and its <code>@traversable/zod-types</code> peer is missing from the install graph, so the original plan's delegation path was non-functional. Dep retained in <code>package.json</code> as a hook for the zod 4 migration; not imported. Unsupported kinds throw with an actionable message pointing at <code>testing.arbitrary(schema, gen)</code>.</li>
+                <li><code>ZodDiscriminatedUnion</code> branch checked BEFORE <code>ZodUnion</code> (it is not a <code>ZodUnion</code>). <code>ZodObject._def.shape</code> read as a thunk (<code>_def.shape()</code>). <code>ZodLazy</code> bounded via <code>fc.letrec</code> PLUS <code>fc.oneof({ depthSize: "small", maxDepth: 3 })</code>.</li>
+                <li>fast-check 4.x adaptations: <code>fc.hexaString</code> removed → replaced with <code>fc.stringMatching(/^[a-f0-9]{N}$/)</code>. <code>fc.emailAddress()</code> not used (Zod's stricter <code>.email()</code> regex rejects RFC-5322 outputs); custom tighter arbitrary supplied. <code>fc.date()</code> clamped to avoid BC-era timestamps that Zod's <code>.datetime()</code> regex rejects.</li>
+                <li>Tests: <code>tests/unit/testing-arb.test.ts</code> — 31 tests, all pass (17 top-level expect calls + property assertions, 86ms). Covers every primitive, recursion into nested objects/arrays, union branch coverage, branded passthrough, registered-schema short-circuit, and the integration test against the real <code>VersionSetManifestSchema</code> (100 round-trips, all parse cleanly).</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-4">
+            <header>
+              <h3>Task 1.4: Composite generator — <code>testing.compose</code></h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/compose.ts</code>, <code>tests/unit/testing-compose.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~120</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-1-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Hypothesis-style composite generator. The user calls:</p>
+              <pre>const order_arb = testing.compose((draw) =&gt; {
+  const id = draw(testing.arb(OrderIdSchema))
+  const item_count = draw(fc.integer({ min: 1, max: 10 }))
+  const items = draw(fc.array(testing.arb(ItemSchema), { minLength: item_count, maxLength: item_count }))
+  return { id, items }
+})</pre>
+              <p>Signature:</p>
+              <pre>type Draw = &lt;T&gt;(arb: fc.Arbitrary&lt;T&gt;) =&gt; T
+export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt;</pre>
+              <p>Implementation uses fast-check's built-in <code>fc.gen</code> (introduced in fast-check 3.x, refined in 4.x). <code>fc.gen</code> gives a synchronous <code>draw</code> callback inside a generator function; we wrap it 1:1, preserving shrinking automatically because <code>fc.gen</code> internally records draws for shrinking. This is the "let fast-check's rose-tree do its job" path from the architecture decisions.</p>
+              <p>fast-check 4.x exposes this as <code>fc.gen()</code> returning a generator-bound arbitrary; verify exact name (<code>fc.gen</code> vs <code>fc.context</code>) against installed version. Reference: fast-check 4.7 release notes.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/compose.ts</code> exporting <code>compose</code> as documented.</li>
+                <li>Implementation: thin wrapper around <code>fc.gen</code> — pass the user fn directly. If fast-check's API name differs in 4.7, use the equivalent (consult <code>node_modules/fast-check/lib/types/index.d.ts</code>).</li>
+                <li>Tests at <code>tests/unit/testing-compose.test.ts</code>:
+                  <ul>
+                    <li>Dependent generation works (draw an int <code>n</code>, then draw an array of length <code>n</code> — assert <code>items.length === n</code> across 100 runs).</li>
+                    <li>Shrinking works: deliberately fail when <code>items.length &gt; 3</code>, check fast-check shrinks <code>items.length</code> down to 4 (the smallest counterexample).</li>
+                    <li>Nesting works: <code>compose</code> inside <code>compose</code> shrinks coherently.</li>
+                  </ul>
+                </li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-compose.test.ts</pre>
+              <p>Expected: 4–6 tests pass. Shrink-coherence test inspects fast-check's reported counterexample, not just pass/fail.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li><code>Draw</code> type is <code>&lt;T&gt;(arb: fc.Arbitrary&lt;T&gt;) =&gt; T</code> — generic, never <code>any</code>.</li>
+                  <li>Shrink path is fast-check's, not ours. Confirm by failing a property and inspecting that the reported counterexample is shrunk (not the first-failing example).</li>
+                  <li>Test that draws <em>inside</em> a <code>compose</code> can themselves be <code>compose</code>'d arbitraries — nested composition.</li>
+                  <li>If <code>fc.gen</code> is unavailable in installed fast-check version, fail loudly at task time — don't reimplement.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code>.</li>
+                <li><code>testing/compose.ts</code> is a thin wrapper around <code>fc.gen()</code> (line 33: <code>fc.gen().map((gen_value) =&gt; ...)</code>). Preserves fast-check's native shrinking rose-tree — no custom shrink layer.</li>
+                <li><code>Draw</code> type: <code>&lt;T&gt;(arb: fc.Arbitrary&lt;T&gt;) =&gt; T</code> — generic, no <code>any</code>.</li>
+                <li>Tests: <code>tests/unit/testing-compose.test.ts</code> — 4 tests, all pass (334 expect calls, 32ms). Covers dependent generation (draw <code>n</code>, then array of length <code>n</code>; <code>items.length === n</code> across 100 runs), shrink coherence (deliberately failing predicate; fast-check's shrunk counterexample is the minimal violation, not the first failure), nested composition (compose-in-compose shrinks coherently), and basic non-dependent draws.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-5">
+            <header>
+              <h3>Task 1.5: <code>testing</code> namespace barrel + corpus registrar stub</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/index.ts</code>, <code>testing/register.ts</code>, <code>index.ts</code> (modify)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~80</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-2, task-1-3, task-1-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Expose the <code>testing</code> namespace at two import paths:</p>
+              <ul>
+                <li><code>import { testing } from "@f0rbit/corpus"</code> — namespace re-export from main barrel.</li>
+                <li><code>import * as testing from "@f0rbit/corpus/testing"</code> — direct entry point (faster cold import).</li>
+              </ul>
+              <p><code>testing/register.ts</code> is corpus's own registrar — it registers arbitraries for corpus types that downstream packages will need: <code>SnapshotMeta</code>, <code>BatchOp</code>, <code>CorpusError</code> (and its variant failures). For Phase 1 it's a stub with one or two arbitraries plus the brand symbols declared; further failure-case registrations land in Phase 2.</p>
+              <p>The corpus error brand symbol convention: declare <code>export const CORPUS_ERROR_BRAND = Symbol("CorpusError") as ArbBrand&lt;CorpusError&gt;</code>. Downstream packages import this symbol and use it with <code>testing.failure(CORPUS_ERROR_BRAND, "not_found", ...)</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/index.ts</code> exporting: <code>arb</code> from <code>./arb.js</code>, <code>compose</code> from <code>./compose.js</code>, <code>arbitrary</code>/<code>lookup</code>/<code>failure</code>/<code>lookup_failure</code>/<code>__reset_registry_for_tests</code> from <code>./registry.js</code>, <code>type ArbBrand</code>/<code>type FailureKey</code> from <code>./types.js</code>. Also re-export <code>fc</code> from <code>"fast-check"</code> as a convenience so consumers don't need a separate import.</li>
+                <li>Create <code>testing/register.ts</code>:
+                  <ul>
+                    <li>Export <code>CORPUS_ERROR_BRAND</code>, <code>SNAPSHOT_META_BRAND</code>, <code>BATCH_OP_BRAND</code> branded symbols.</li>
+                    <li>Register an arbitrary for SnapshotMeta via <code>arbitrary(SNAPSHOT_META_BRAND, ...)</code>. The arbitrary should produce well-formed metadata (non-empty store_id, valid version string, content_hash matching <code>/^[a-f0-9]{64}$/</code> shape via <code>fc.hexaString({ minLength: 64, maxLength: 64 })</code>, etc.).</li>
+                    <li>Phase 1: leave <code>CorpusError</code> failure registrations empty (Phase 2 adds them).</li>
+                  </ul>
+                </li>
+                <li>Modify <code>index.ts</code>: add <code>export * as testing from "./testing/index.js"</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun run typecheck &amp;&amp; bun -e 'import("./index.ts").then(m =&gt; console.log(typeof m.testing.arb, typeof m.testing.compose))'</pre>
+              <p>Expected: typecheck clean; the inline script prints <code>function function</code>.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Both import paths work — verify with a quick <code>bun -e</code> for each.</li>
+                  <li>Re-exporting <code>fc</code> from the namespace doesn't pull fast-check into corpus's hot import path for non-testing consumers (it should only load when <code>testing</code> is accessed; verify via <code>bun build</code> tree-shaking).</li>
+                  <li>No circular import between <code>index.ts</code> ↔ <code>testing/register.ts</code>. Registrar must not import from corpus's main barrel — import directly from relative paths.</li>
+                  <li>Brand symbols are exported as <code>const</code> (so type narrowing preserves them) AND typed as <code>ArbBrand&lt;TheType&gt;</code> via <code>as</code> cast.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code>.</li>
+                <li><code>testing/index.ts</code> exposes the documented Phase 1 public surface: <code>arb</code>, <code>compose</code> (+ <code>Draw</code> type), <code>arbitrary</code>, <code>lookup</code>, <code>failure</code>, <code>lookup_failure</code>, <code>__reset_registry_for_tests</code>, <code>ArbBrand</code>, <code>FailureKey</code>, plus <code>fc</code> (fast-check default export re-exported as a convenience). Matches <code>dist/testing/index.d.ts</code>.</li>
+                <li><code>testing/register.ts</code> declares brand symbols: <code>CORPUS_ERROR_BRAND</code>, <code>SNAPSHOT_META_BRAND</code>, <code>BATCH_OP_BRAND</code> — all typed via <code>as ArbBrand&lt;TheType&gt;</code> cast on <code>Symbol(...)</code>. <code>SnapshotMeta</code> arbitrary is registered (intentional Phase 1 coverage gap: always emits <code>parents: []</code> and never emits <code>invoked_at</code> — Phase 2 / 3 widen).</li>
+                <li><code>index.ts</code> root barrel adds <code>export * as testing from "./testing/index.js"</code>. No circular import — registrar imports relative, not via main barrel.</li>
+                <li><code>bun run typecheck</code> clean; build emits all six <code>dist/testing/*.{js,d.ts}</code> files.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-6">
+            <header>
+              <h3>Task 1.6: Pilot — backend round-trip property test</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/property/backend-roundtrip.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~120</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-5</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Phase 1 closing pilot. Validates that the substrate works against corpus's real backend by writing a property test that exercises one backend's metadata round-trip via generated <code>SnapshotMeta</code> values from the registered arbitrary.</p>
+              <p>Property: for any generated <code>SnapshotMeta</code>, <code>backend.metadata.put(meta)</code> followed by <code>backend.metadata.get(meta.store_id, meta.version)</code> returns a <code>Result.ok</code> with a deep-equal meta (modulo Date precision — the test must compare via <code>created_at.getTime()</code>).</p>
+              <p>Use the memory backend (<code>create_memory_backend()</code> from <code>../../backend/memory.js</code>) for the pilot; it's the fastest and most deterministic. Cross-backend equivalence ships in Phase 3.</p>
+              <p>Import path: from <code>tests/property/backend-roundtrip.test.ts</code> use <code>../../testing/index.js</code> and <code>../../backend/memory.js</code> (per the AGENTS.md convention "do not import @f0rbit/corpus from inside this repo").</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>tests/property/</code> directory.</li>
+                <li>Create <code>tests/property/backend-roundtrip.test.ts</code>:
+                  <ul>
+                    <li>Import <code>fc</code>, <code>arb</code>, <code>lookup</code>, <code>SNAPSHOT_META_BRAND</code>.</li>
+                    <li>In <code>beforeAll</code>, manually load corpus's registrar (Phase 4 will automate this): <code>await import("../../testing/register.js")</code>.</li>
+                    <li><code>it("metadata put → get round-trip preserves all fields", async () =&gt; { await fc.assert(fc.asyncProperty(lookup(SNAPSHOT_META_BRAND)!, async (meta) =&gt; { const backend = create_memory_backend(); const put = await backend.metadata.put(meta); expect(put.ok).toBe(true); const got = await backend.metadata.get(meta.store_id, meta.version); expect(got.ok).toBe(true); if (!got.ok) return; expect(got.value.content_hash).toBe(meta.content_hash); /* ... */ })) })</code>.</li>
+                    <li>Run with <code>numRuns: 200</code> to get a meaningful sample.</li>
+                  </ul>
+                </li>
+                <li>If the property finds a shrunk counterexample (e.g. metadata with empty <code>store_id</code> breaks something), document the finding in the proof block and either fix the backend OR tighten the SnapshotMeta arbitrary to exclude the invalid shape — whichever matches the documented contract.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/property/backend-roundtrip.test.ts</pre>
+              <p>Expected: property passes 200/200 runs. If it fails, the counterexample is informative — record it in the proof block.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Test is in <code>tests/property/</code> (new convention) not <code>tests/unit/</code> or <code>tests/integration/</code> — so the existing test command picks it up but they're grouped logically.</li>
+                  <li>Uses real <code>create_memory_backend()</code>, not a mock.</li>
+                  <li>Property is meaningful: a round-trip that just checks <code>ok: true</code> is too weak — must compare fields.</li>
+                  <li><code>numRuns: 200</code> is the configured value, not the fast-check default (100).</li>
+                  <li>If property fails, the SHRUNK counterexample is the one investigated, not the first failing value.</li>
+                  <li>Verify <code>bun test</code> (no path arg) still picks up the new test directory — the existing config may need an update.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Commit: <code>97b7dc0</code>.</li>
+                <li>Test file lives at <code>tests/property/backend-roundtrip.test.ts</code> (new <code>tests/property/</code> sibling to <code>unit/</code> and <code>integration/</code> — picked up by <code>bun test</code> without config changes).</li>
+                <li>1 property test, 2401 expect calls, 205ms. Drives 200 fast-check-generated <code>SnapshotMeta</code> values through <code>create_memory_backend()</code>'s metadata <code>put → get</code> round-trip, comparing every field (<code>content_hash</code>, <code>version</code>, <code>store_id</code>, <code>created_at.getTime()</code>, <code>tags</code>, <code>parents</code>, optional <code>invoked_at</code>).</li>
+                <li><strong>0 counterexamples in 200 runs.</strong> No backend bug surfaced, no SnapshotMeta arbitrary tightening needed for Phase 1's coverage.</li>
+                <li>Registrar loaded manually in <code>beforeAll</code> via <code>await import("../../testing/register.js")</code> (Phase 4 vending walker automates this).</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-7">
+            <header>
+              <h3>Task 1.7: Verification — Phase 1 close-out</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>all of Phase 1, <code>AGENTS.md</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~50 (AGENTS.md updates + fix-ups)</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-1 .. task-1-6</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>verification</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Run the full test suite + typecheck, fill in proof blocks for tasks 1.1–1.6, write the Phase 1 AGENTS.md addendum (see <code>#agents-md-updates</code> section), commit, push, open PR, enter <code>pr-shepherd</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Run <code>bun test</code> and <code>bun run typecheck</code> — fix anything that broke.</li>
+                <li>Run the adversary checklist for each task 1.1–1.6. Specifically: no <code>any</code> anywhere in <code>testing/</code>; brand symbols correctly typed; <code>fc.gen</code> used (not reimplemented).</li>
+                <li>Fill in proof blocks in <code>.plans/corpus-testing-substrate.html</code> for tasks 1.1–1.6 with: commit SHA, test count, key counterexample (if Task 1.6 surfaced one).</li>
+                <li>Set Phase 1 task badges to <code>done</code>.</li>
+                <li>Write the AGENTS.md "Testing substrate" section per <code>#agents-md-updates</code> below — append to the existing AGENTS.md, do NOT replace.</li>
+                <li>Commit atomically (load <code>git-workflow</code> skill). Title: <code>feat(testing): foundations — arb, compose, registry, pilot</code>.</li>
+                <li>Push branch, open PR via <code>gh pr create</code>, return PR number.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build</pre>
+              <p>Expected: full suite green, typecheck clean, build emits <code>dist/testing/*</code> files.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>No regressions in pre-existing tests (compare test count to <code>main</code>).</li>
+                  <li><code>dist/testing/index.d.ts</code> exists and exposes the documented public surface.</li>
+                  <li><code>AGENTS.md</code> Testing section is appended, not inserted into an unrelated location.</li>
+                  <li>Plan proof blocks reference actual commit SHAs and test output excerpts, not placeholders.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <ul>
+                <li>Code commit: <code>97b7dc0</code> — <code>feat(testing): foundations — arb, compose, registry, pilot</code>.</li>
+                <li>Close-out commit (this commit): plan proofs + AGENTS.md Testing substrate section.</li>
+                <li><code>bun test</code>: 630 pass, 0 fail, 4135 expect calls across 24 files (~1054ms). Baseline on <code>main</code> is 581 → delta is +49, matching the new additions exactly (registry 13 + arb 31 + compose 4 + backend-roundtrip 1).</li>
+                <li><code>bun run typecheck</code> clean.</li>
+                <li><code>bun run build</code> clean — emits all <code>dist/testing/{arb,compose,index,register,registry,types}.{js,d.ts}</code>.</li>
+                <li>Source <code>any</code> scan (<code>grep -rn ": any\| any\[\]\|&lt;any&gt;\|as any" testing/ --include="*.ts"</code>): zero hits.</li>
+                <li>Adversary checks for tasks 1.1–1.6 verified: <code>fc.gen</code> used (compose.ts:33); brand symbols typed as <code>ArbBrand&lt;T&gt;</code> (register.ts:28/34/40); exports shape matches existing entries; <code>"corpus": { "testing": ... }</code> at top level; no version pin tighter than caret on fast-check.</li>
+                <li>AGENTS.md "Testing substrate" section appended under <code>Conventions</code>, after the Observations section and before Documentation — existing Gotchas section untouched.</li>
+              </ul>
+            </section>
+          </article>
+        </section>
+        <section class="phase" id="phase-2">
+          <h3>Phase 2: Error-path layer — <code>failure</code>, <code>cover</code>, <code>error_path_exhaustive</code></h3>
+          <p>Layer the error-path guarantee on top of Phase 1. <code>testing.failure</code> registers per-variant generators against an error brand. <code>testing.cover</code> wraps <code>fc.assert</code> with a coverage-statistics post-check. <code>testing.law.error_path_exhaustive</code> drives the Result error union — adding a new <code>CorpusError</code> kind breaks the test until a failure generator is registered for it. Pilot: drive a real corpus operation through every <code>CorpusError</code> variant.</p>
+
+          <article class="task" id="task-2-1">
+            <header>
+              <h3>Task 2.1: <code>testing.cover</code> — Hedgehog-style coverage assertion</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/cover.ts</code>, <code>tests/unit/testing-cover.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~200</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-2-2</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Signature:</p>
+              <pre>export function cover_property&lt;T&gt;(
+  arb: fc.Arbitrary&lt;T&gt;,
+  predicate: (sample: T) =&gt; boolean | Promise&lt;boolean&gt;,
+  opts: { labels: Array&lt;{ name: string; min_percent: number; matches: (sample: T) =&gt; boolean }&gt;; numRuns?: number }
+): Promise&lt;void&gt;</pre>
+              <p>Behaviour: run <code>fc.asyncProperty(arb, predicate)</code> via <code>fc.assert</code> with <code>numRuns</code> (default 200). Wrap the inner predicate so each sample updates per-label hit counts. After the property completes successfully, check each label's <code>(hits / numRuns) * 100 &gt;= min_percent</code>. If any label falls below, throw a <code>CoverageError</code> with a clear message listing all labels' observed proportions vs minimums. If the property itself fails, fast-check's normal failure-with-counterexample fires first.</p>
+              <p>Reference: Hedgehog's <code>cover</code> combinator semantics (Hackage docs).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/cover.ts</code> exporting <code>cover_property</code> and a <code>CoverageError extends Error</code> class.</li>
+                <li>Implementation: build a hit-count map, wrap predicate, await <code>fc.assert(fc.asyncProperty(...), { numRuns })</code>. After success, iterate labels; on shortfall, throw <code>CoverageError</code> with a multiline message listing each label, observed proportion, and minimum.</li>
+                <li>Re-export <code>cover_property</code> as <code>cover</code> from <code>testing/index.ts</code>.</li>
+                <li>Tests: property passes + all labels met → no throw; property passes but one label below minimum → throws <code>CoverageError</code>; property fails → fast-check's failure surfaces (not coverage); deterministic seed → stable percentages.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-cover.test.ts</pre>
+              <p>Expected: 5–7 tests pass.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Hit counting happens inside the predicate wrapper, not in fast-check internals.</li>
+                  <li>Coverage check fires only after property success; if property fails, no shortfall report.</li>
+                  <li><code>CoverageError</code> message lists ALL labels (met + unmet) with met ones flagged "OK".</li>
+                  <li>No <code>any</code> in <code>cover_property</code>'s signature.</li>
+                  <li>Default <code>numRuns</code> documented in JSDoc.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-2">
+            <header>
+              <h3>Task 2.2: <code>testing.failure</code> integration + CorpusError registrations</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/failure.ts</code>, <code>testing/register.ts</code> (modify), <code>tests/unit/testing-failure.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~250</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-2-1</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Phase 1 declared the <code>failure</code>/<code>lookup_failure</code> registry primitives. This task adds the user-facing wrapper and registers generators for every variant of <code>CorpusError</code> in corpus's own registrar.</p>
+              <p>CorpusError variants (from <code>types.ts:45-57</code>): <code>not_found</code>, <code>already_exists</code>, <code>storage_error</code>, <code>decode_error</code>, <code>encode_error</code>, <code>hash_mismatch</code>, <code>invalid_config</code>, <code>validation_error</code>, <code>observation_not_found</code>, <code>transaction_aborted</code>, <code>partial_commit</code>, <code>concurrent_modification</code> (12 total).</p>
+              <p><code>testing/failure.ts</code> re-exports the registry's <code>failure</code> primitive with better JSDoc, plus <code>list_registered_variants&lt;E extends { kind: string }&gt;(brand): readonly E["kind"][]</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/failure.ts</code>: re-export <code>failure</code> from registry, add <code>list_registered_variants</code>.</li>
+                <li>Modify <code>testing/register.ts</code> to register one generator per CorpusError variant via <code>failure(CORPUS_ERROR_BRAND, "...", compose(...))</code>.</li>
+                <li>Update <code>testing/index.ts</code> exports.</li>
+                <li>Tests at <code>tests/unit/testing-failure.test.ts</code>: each variant looks up; <code>list_registered_variants</code> returns all 12; duplicate registration overwrites + warns.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-failure.test.ts</pre>
+              <p>Expected: 14+ tests pass.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>All 12 CorpusError variants registered — count against the source union.</li>
+                  <li>Each generated value has <code>kind</code> matching its registration key (sample 10 per variant).</li>
+                  <li><code>list_registered_variants</code> typed <code>readonly E["kind"][]</code>, not <code>string[]</code>.</li>
+                  <li>Generators use <code>compose</code> + <code>arb</code>, not raw <code>fc.record</code>.</li>
+                  <li><code>cause</code> field is an <code>Error</code> instance, not a string.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-3">
+            <header>
+              <h3>Task 2.3: <code>testing.law.error_path_exhaustive</code></h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/laws/error-path-exhaustive.ts</code>, <code>testing/laws/index.ts</code>, <code>tests/unit/testing-law-error-path.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~300</dd>
+              <dt>Dependencies</dt>
+              <dd>task-2-1, task-2-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>The headline law. Signature:</p>
+              <pre>export async function error_path_exhaustive&lt;Args extends readonly unknown[], T, E extends { kind: string }&gt;(
+  fn: (...args: Args) =&gt; Promise&lt;Result&lt;T, E&gt;&gt;,
+  opts: {
+    error_brand: ArbBrand&lt;E&gt;
+    provoke: { [K in E["kind"]]: (failure: Extract&lt;E, { kind: K }&gt;) =&gt; Args }
+    only?: readonly E["kind"][]
+    numRuns?: number
+  }
+): Promise&lt;void&gt;</pre>
+              <p>For each variant kind: look up registered failure generator, run <code>fc.asyncProperty</code> calling <code>fn(...opts.provoke[failure.kind](failure))</code> and asserting <code>!result.ok &amp;&amp; result.error.kind === failure.kind</code>.</p>
+              <p>Compile-time guarantee: <code>provoke</code>'s key set is <code>{ [K in E["kind"]]: ... }</code> — adding a variant without updating <code>provoke</code> is a TS error.</p>
+              <p>Runtime guarantee: missing registered generator throws a clear "no generator for variant X — register via testing.failure(brand, 'X', ...)" error.</p>
+              <p>Result type imported from <code>../../types.js</code> (within-repo convention).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/laws/</code> directory + <code>error-path-exhaustive.ts</code> implementing the signature.</li>
+                <li>Create <code>testing/laws/index.ts</code> exporting <code>error_path_exhaustive</code>.</li>
+                <li>Update <code>testing/index.ts</code> with <code>export * as law from "./laws/index.js"</code>.</li>
+                <li>Tests: tiny example fn + 2-variant error type; happy path; <code>// @ts-expect-error</code> on missing provoke key; runtime error on unregistered variant.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-law-error-path.test.ts &amp;&amp; bun run typecheck</pre>
+              <p>Expected: tests pass; <code>@ts-expect-error</code> verified.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li><code>provoke</code> typed with mapped <code>{ [K in E["kind"]]: ... }</code> — full coverage enforced.</li>
+                  <li>Missing failure generator at runtime produces error naming brand + variant + exact <code>testing.failure(...)</code> call.</li>
+                  <li>Per-variant property runs are independent.</li>
+                  <li>No <code>any</code> in public signature.</li>
+                  <li>Result imported from <code>../../types.js</code>, not <code>@f0rbit/corpus</code>.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-4">
+            <header>
+              <h3>Task 2.4: Pilot — corpus error-path exhaustive test</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/property/corpus-error-paths.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~180</dd>
+              <dt>Dependencies</dt>
+              <dd>task-2-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Drive <code>error_path_exhaustive</code> against <code>store.get(version)</code> on the memory backend. Variants it can surface:</p>
+              <ul>
+                <li><code>not_found</code> — version never put.</li>
+                <li><code>decode_error</code> — pre-seed backend with bytes that don't match the store's codec.</li>
+                <li><code>hash_mismatch</code> — pre-seed metadata with content_hash that doesn't match data's actual hash.</li>
+              </ul>
+              <p>For variants the op can't surface (<code>concurrent_modification</code>, <code>partial_commit</code>, etc.), use <code>only</code> to scope.</p>
+              <p>The pilot doubles as a runnable spec for which variants <code>store.get</code> emits.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>tests/property/corpus-error-paths.test.ts</code>.</li>
+                <li>Set up corpus + memory backend + json_codec'd store.</li>
+                <li>Define <code>get_store_version</code> with a <code>SetupSpec</code> argument describing how to provoke each error.</li>
+                <li>Call <code>testing.law.error_path_exhaustive(...)</code> with <code>only: ["not_found", "decode_error", "hash_mismatch"]</code>.</li>
+                <li>Temporarily break one <code>provoke</code> entry → confirm test fails loudly → revert. Document in proof.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/property/corpus-error-paths.test.ts</pre>
+              <p>Expected: three variants each fire across 200 runs; test passes.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Uses real <code>create_corpus</code> + <code>create_memory_backend</code>.</li>
+                  <li>"Temporarily break provoke" experiment recorded in proof.</li>
+                  <li><code>only</code> used appropriately — no quiet skipping.</li>
+                  <li><code>hash_mismatch</code> setup uses real bytes + real metadata.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-5">
+            <header>
+              <h3>Task 2.5: Verification — Phase 2 close-out</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>all of Phase 2, <code>AGENTS.md</code> (append)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~40</dd>
+              <dt>Dependencies</dt>
+              <dd>task-2-1 .. task-2-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>verification</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Standard close-out per Phase 1 pattern. Suite + typecheck, adversary, fill proof, append AGENTS.md, commit, PR, pr-shepherd.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li><code>bun test</code> + <code>bun run typecheck</code>; fix.</li>
+                <li>Adversary checklists 2.1–2.4.</li>
+                <li>Fill proof.</li>
+                <li>AGENTS.md append.</li>
+                <li>Commit + PR. Title: <code>feat(testing): error-path layer — failure, cover, error_path_exhaustive</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build</pre>
+              <p>Expected: full suite green.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>All 12 CorpusError variants have failure generators.</li>
+                  <li>Phase 2 pilot catches deliberate provoke break (recorded).</li>
+                  <li>No regressions vs Phase 1.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-3">
+          <h3>Phase 3: Laws + model-based testing</h3>
+          <p>Fill in <code>round_trip</code>, <code>idempotent</code>, <code>functor</code> law helpers, then deliver <code>provider_equivalence</code> via <code>fc.asyncCommands</code>. Pilot: cross-backend equivalence — memory, file, layered — must agree on random op sequences against a shared model.</p>
+
+          <article class="task" id="task-3-1">
+            <header>
+              <h3>Task 3.1: <code>law.round_trip</code> + <code>law.idempotent</code></h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/laws/round-trip.ts</code>, <code>testing/laws/idempotent.ts</code>, <code>tests/unit/testing-laws-basic.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~180</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-3-2, task-3-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p><code>round_trip(arb, encode, decode, opts?)</code>: <code>decode(encode(x)) === x</code>. <code>idempotent(arb, op, opts?)</code>: <code>op(op(x)) === op(x)</code>. Default equality is <code>Bun.deepEquals</code>. Both async-compatible.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create both files with the documented signatures.</li>
+                <li>Re-export from <code>testing/laws/index.ts</code>.</li>
+                <li>Tests: round-trip JSON encode/decode + idempotent string <code>.trim()</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-laws-basic.test.ts</pre>
+              <p>Expected: 4–6 tests pass.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Default <code>equals</code> is <code>Bun.deepEquals</code>, not <code>===</code>.</li>
+                  <li>Both accept sync or async functions.</li>
+                  <li>No <code>any</code>.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-2">
+            <header>
+              <h3>Task 3.2: <code>law.functor</code> for Result types</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/laws/functor.ts</code>, <code>tests/property/result-functor.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~200</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-3-1, task-3-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Identity + composition laws against a user-provided <code>{ map, equals }</code> functor instance. Pilot wires against <code>pipe(...).map(...)</code> from <code>result.ts</code> (Result has no top-level <code>map</code>; access via pipe chain).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/laws/functor.ts</code> with identity + composition properties.</li>
+                <li>Re-export.</li>
+                <li>Pilot at <code>tests/property/result-functor.test.ts</code>: generate <code>Result&lt;number, string&gt;</code> with 50/50 ok/err split via <code>fc.oneof</code>; generate functions via <code>fc.func</code>; 200 runs.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/property/result-functor.test.ts</pre>
+              <p>Expected: identity + composition both pass 200/200.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Tests both ok and err branches — coverage ≥20% each.</li>
+                  <li>Uses corpus's actual <code>pipe</code> / Result, not a stub.</li>
+                  <li>Any new public Result combinator documented in AGENTS.md.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-3">
+            <header>
+              <h3>Task 3.3: <code>testing.commands</code> + <code>law.provider_equivalence</code></h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/commands.ts</code>, <code>testing/laws/provider-equivalence.ts</code>, <code>tests/unit/testing-commands.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~350</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-3-1, task-3-2</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Headline killer feature. <code>testing.commands</code> is a typed re-export of <code>fc.commands</code> / <code>fc.asyncCommands</code>. <code>law.provider_equivalence</code> runs the same command sequence against a model + N SUTs, asserting per-step that <code>ok</code> flags agree, ok-values are equal under user equality, err-kinds match.</p>
+              <p>Signature:</p>
+              <pre>export async function provider_equivalence&lt;Model, S&gt;(opts: {
+  model: () =&gt; Model | Promise&lt;Model&gt;
+  providers: ReadonlyArray&lt;{ label: string; build: () =&gt; S | Promise&lt;S&gt; }&gt;
+  commands: ReadonlyArray&lt;fc.AsyncCommand&lt;Model, S&gt;&gt;
+  equivalence: { results_agree: (model_r: unknown, sut_r: unknown) =&gt; boolean }
+  numRuns?: number
+  maxCommands?: number
+}): Promise&lt;void&gt;</pre>
+              <p>Per-run: fresh model + fresh instance per provider; run the same shrinkable command sequence against each via <code>fc.asyncCommands</code>; compare results per command. Divergence shrinks to a minimal command sequence.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/commands.ts</code> re-exporting <code>fc.commands</code> + <code>fc.asyncCommands</code> + types.</li>
+                <li>Create <code>testing/laws/provider-equivalence.ts</code>; per-command equivalence check.</li>
+                <li>Re-export.</li>
+                <li>Tests: trivial counter model with one correct SUT + one OffByOne SUT — <code>provider_equivalence</code> finds + shrinks; correct-pair passes 200/200.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-commands.test.ts</pre>
+              <p>Expected: bug-finder shrinks to minimal counterexample; correct pair passes 200/200.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Provider build runs fresh per property run — verify in code.</li>
+                  <li>Equivalence fires per-command, not just at end.</li>
+                  <li>Shrunk counterexample for OffByOne is minimal (1–2 commands), recorded.</li>
+                  <li>Type-level constraint: all commands share Model/S generics.</li>
+                  <li><code>fc.asyncCommands</code> rename = compile error, not runtime.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-4">
+            <header>
+              <h3>Task 3.4: Pilot — cross-backend equivalence test</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/property/backend-equivalence.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~350</dd>
+              <dt>Dependencies</dt>
+              <dd>task-3-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Plan's crown-jewel pilot. Backends: <code>create_memory_backend()</code>, <code>create_file_backend(tmpDir)</code> in <code>tests/.tmp/</code>, <code>create_layered_backend({ memory, file })</code>. Cloudflare deferred (needs miniflare).</p>
+              <p>Model: plain object with two <code>Map</code>s (metadata + data bytes). Commands: <code>PutMeta</code>, <code>GetMeta</code>, <code>DeleteMeta</code>, <code>ListMeta</code>, <code>PutData</code>, <code>GetData</code>, <code>DeleteData</code>, <code>ExistsData</code>.</p>
+              <p>Equivalence: <code>ok</code> agrees; on ok value structural-equal modulo Date precision; on err <code>error.kind</code> matches; <code>list</code> uses set equality. 200 runs × max 30 commands.</p>
+              <p>Layered backend has documented cache asymmetry (AGENTS.md gotcha) — equivalence must reflect that or scope commands to non-tx writes.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create test file; define model + 8 commands using <code>testing.compose</code> + <code>testing.arb</code>.</li>
+                <li>Equivalence functions per the rules above.</li>
+                <li>Call <code>provider_equivalence({ model, providers: [memory, file, layered], commands, equivalence, numRuns: 200, maxCommands: 30 })</code>.</li>
+                <li>On divergence: investigate; fix the backend bug OR document the intentional difference in equivalence. Cite SHA in proof.</li>
+                <li>Clean <code>tests/.tmp/</code> between runs.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/property/backend-equivalence.test.ts</pre>
+              <p>Expected: 200 runs × 30 commands × 3 backends agree with model. Any divergence resolved or documented.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Cleans <code>tests/.tmp/</code> between runs.</li>
+                  <li><code>list</code> equivalence is set-based.</li>
+                  <li>Any backend bug surfaced is a FINDING, not silently worked around. SHA in proof.</li>
+                  <li>≥6 distinct command types; coverage ≥5% each.</li>
+                  <li>Cloudflare exclusion documented at top of test.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-5">
+            <header>
+              <h3>Task 3.5: Verification — Phase 3 close-out</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>all of Phase 3, <code>AGENTS.md</code> (append)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~50</dd>
+              <dt>Dependencies</dt>
+              <dd>task-3-1 .. task-3-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>verification</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Standard close-out.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Suite + typecheck + build; fix.</li>
+                <li>Adversary checks.</li>
+                <li>Fill proof.</li>
+                <li>AGENTS.md append (provider_equivalence recipe).</li>
+                <li>Commit + PR. Title: <code>feat(testing): laws + model-based — round_trip, functor, provider_equivalence</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build</pre>
+              <p>Expected: full suite green.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>backend-equivalence test &lt;30 s.</li>
+                  <li>Bugs documented (fixed or in <code>#out-of-scope</code>).</li>
+                  <li>No regressions.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-4">
+          <h3>Phase 4: Vending protocol — <code>package.json</code> entry-point auto-loader</h3>
+          <p>Implement the <code>node_modules</code> walker that reads <code>"corpus": { "testing": "./..." }</code> keys from declared deps and dynamic-imports each. Auto-load on first <code>testing.*</code> registry access. Pilot: a fixture package contributes arbitraries, corpus's tests pick them up with zero manual wiring.</p>
+
+          <article class="task" id="task-4-1">
+            <header>
+              <h3>Task 4.1: Vending walker</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/vending/walker.ts</code>, <code>tests/unit/testing-walker.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~250</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-4-2</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Signature:</p>
+              <pre>export async function discover_registrars(opts?: { cwd?: string }): Promise&lt;Result&lt;RegistrarSpec[], DiscoveryError&gt;&gt;
+export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&lt;Result&lt;{ loaded: string[]; failed: Array&lt;{ package: string; cause: Error }&gt; }, never&gt;&gt;</pre>
+              <p>Behaviour: read <code>{cwd}/package.json</code>; for each direct dep (dependencies + devDependencies + peerDependencies), resolve via <code>import.meta.resolve(dep + "/package.json")</code>; read each, follow <code>corpus.testing</code> string key; include cwd itself. <code>load_registrars</code> dynamic-imports each spec, catching per-spec errors. No transitive walk. Uses <code>try_catch_async</code> from <code>../../result.js</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/vending/walker.ts</code>.</li>
+                <li>Tests: fixture under <code>tests/fixtures/vending/</code>; discover + load happy path; missing registrar file → <code>failed</code> entry; malformed package.json → <code>DiscoveryError</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-walker.test.ts</pre>
+              <p>Expected: 5–7 tests pass.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Walker never throws — Result.err or per-spec failed entry.</li>
+                  <li>Uses <code>import.meta.resolve</code>, not manual path concatenation.</li>
+                  <li>cwd package included (corpus self-registers).</li>
+                  <li>No transitive walk; documented.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-2">
+            <header>
+              <h3>Task 4.2: Auto-load on first registry access</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>testing/vending/auto-load.ts</code>, <code>testing/registry.ts</code> (modify), <code>tests/unit/testing-autoload.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~180</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Module-local <code>auto_load_promise: Promise&lt;void&gt; | null</code>; <code>ensure_loaded()</code> sets on first call. Wrap <code>lookup</code> + <code>lookup_failure</code> to await it. <code>__reset_registry_for_tests</code> resets the promise. Add public <code>load_from(package_name)</code> for explicit override.</p>
+              <p><strong>Within-phase refactor:</strong> <code>lookup</code> + <code>lookup_failure</code> change from sync to async. Update all Phase 1–3 callers to <code>await</code>. <code>arb(schema)</code> and <code>compose</code> do NOT trigger auto-load.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>testing/vending/auto-load.ts</code> with <code>ensure_loaded</code> + <code>load_from</code>.</li>
+                <li>Modify <code>testing/registry.ts</code>: make <code>lookup</code> + <code>lookup_failure</code> async, awaiting <code>ensure_loaded</code>.</li>
+                <li>Update <code>__reset_registry_for_tests</code> to reset the promise.</li>
+                <li>Update all existing callers — typecheck catches misses.</li>
+                <li>Tests: first lookup triggers walker (spy/marker); second lookup doesn't; reset re-walks; <code>load_from</code> works.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/unit/testing-autoload.test.ts &amp;&amp; bun test tests/unit/testing-registry.test.ts &amp;&amp; bun run typecheck</pre>
+              <p>Expected: autoload tests pass; sync→async refactor leaves prior tests green.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Auto-load at most once per registry state.</li>
+                  <li>All <code>lookup</code>/<code>lookup_failure</code> callers updated (typecheck enforces).</li>
+                  <li><code>arb(schema)</code>/<code>compose</code> don't trigger auto-load — verify in code.</li>
+                  <li>Walker error → clear warning, no throw.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-3">
+            <header>
+              <h3>Task 4.3: Pilot — fixture package contributes arbitraries</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/fixtures/example-consumer/package.json</code>, <code>tests/fixtures/example-consumer/register.ts</code>, <code>tests/property/vending-pilot.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~200</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Fixture package pretending to be vault. Declares <code>AUTH_TOKEN_BRAND</code> + registers arbitrary + a <code>rate_limited</code> failure case. Test overrides cwd via <code>load_from(fixture_dir)</code> and confirms the contributions are visible.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create fixture: minimal <code>package.json</code> with <code>"corpus": { "testing": "./register.ts" }</code>; <code>register.ts</code> declares + registers brand and arbitrary.</li>
+                <li>Create <code>tests/property/vending-pilot.test.ts</code>: reset registry → <code>load_from(fixture_path)</code> → <code>lookup(AUTH_TOKEN_BRAND)</code> returns the registered arbitrary; property asserts generated tokens match shape.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test tests/property/vending-pilot.test.ts</pre>
+              <p>Expected: external registrar's contributions visible via <code>lookup</code> with zero manual coupling.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Fixture loaded via walker, NOT direct import in test.</li>
+                  <li>Brand identity preserved across fixture/test boundary.</li>
+                  <li>Test uses <code>load_from</code> + fixture path (since fixture isn't a real npm install) — documented.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-4">
+            <header>
+              <h3>Task 4.4: Verification — Phase 4 close-out</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>all of Phase 4, <code>AGENTS.md</code> (append)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~40</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-1 .. task-4-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>verification</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Standard close-out + auto-load smoke: remove manual <code>await import("./register.js")</code> from Phase 1 pilot's <code>beforeAll</code> and confirm tests still pass via auto-load.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Suite + typecheck + build.</li>
+                <li>Remove manual registrar imports where auto-load now covers them.</li>
+                <li>Adversary checks.</li>
+                <li>Fill proof.</li>
+                <li>AGENTS.md append (vending docs).</li>
+                <li>Commit + PR. Title: <code>feat(testing): vending protocol — package.json entry-points + auto-load</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build</pre>
+              <p>Expected: full suite green; backend-equivalence still green after removing manual registrar import.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Auto-load end-to-end smoke recorded in proof.</li>
+                  <li>Fixture pilot results recorded.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-5">
+          <h3>Phase 5: Tooling + documentation</h3>
+          <p>Polish for ecosystem rollout: docs site MDX, scaffolder template stub, AGENTS.md coverage check, version bump + release. No new runtime code.</p>
+
+          <article class="task" id="task-5-1">
+            <header>
+              <h3>Task 5.1: Docs site MDX pages</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>docs/src/content/docs/testing/{overview,arbitraries,laws,vending}.mdx</code>, <code>docs/astro.config.mjs</code> (modify)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~600 markdown</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-5-2, task-5-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Docs are Astro Starlight (per AGENTS.md). Add 4 MDX pages under a <code>Testing</code> sidebar group: overview, arbitraries (arb + compose + registry), laws (round_trip/idempotent/functor/error_path_exhaustive/provider_equivalence), vending (package.json key + auto-load + load_from). Run <code>bun run docs:build</code> after — regenerates <code>llms.txt</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create 4 MDX files with runnable, copy-pasteable code examples.</li>
+                <li>Add Testing sidebar group in <code>docs/astro.config.mjs</code>.</li>
+                <li>Run <code>bun run docs:build</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun run docs:build</pre>
+              <p>Expected: build succeeds; <code>docs/public/llms.txt</code> regenerated.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Package name in docs is <code>@f0rbit/corpus</code> with scope.</li>
+                  <li>Code snippets are valid TS — tsc-check at least one.</li>
+                  <li>Sidebar order intuitive.</li>
+                  <li><code>llms.txt</code> regenerated.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-5-2">
+            <header>
+              <h3>Task 5.2: Scaffolder template stub</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>docs/templates/testing/register.ts</code>, <code>README.md</code> (modify)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~80</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-5-1, task-5-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Per architecture decisions, we don't modify devpad's scaffolder from corpus. Ship a template file the scaffolder copies. README pointer guides package authors.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Create <code>docs/templates/testing/register.ts</code> — fully-commented stub.</li>
+                <li>Add pointer line to <code>README.md</code> under "For package authors".</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun run typecheck</pre>
+              <p>Expected: typecheck clean.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Template under <code>docs/templates/</code>, not compiled into <code>dist/</code>.</li>
+                  <li>Uses real imports from <code>@f0rbit/corpus/testing</code> (published path).</li>
+                  <li>Comments explain BRAND + arbitrary + failure each with one-line "why".</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-5-3">
+            <header>
+              <h3>Task 5.3: AGENTS.md coverage check</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>AGENTS.md</code> (verify completeness; patch gaps)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~50</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-4</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-5-1, task-5-2</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Phases 1–4 each added to the AGENTS.md Testing section. This task verifies coverage and patches gaps: import paths, hybrid registry key rule, registrar contract, <code>error_path_exhaustive</code> recipe, <code>provider_equivalence</code> recipe linking the backend-equivalence canonical example.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Audit AGENTS.md Testing section against the checklist.</li>
+                <li>Fill gaps.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; grep -cE "testing\.|provider_equivalence|error_path_exhaustive|corpus\.testing" AGENTS.md</pre>
+              <p>Expected: ≥8 references.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Every public API in <code>testing</code> is documented somewhere.</li>
+                  <li>Registrar contract unambiguous.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-5-4">
+            <header>
+              <h3>Task 5.4: Verification — Phase 5 close-out + release prep</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>all of Phase 5, <code>package.json</code> (version bump)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~30</dd>
+              <dt>Dependencies</dt>
+              <dd>task-5-1 .. task-5-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>verification</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Final close-out. Suite green, dist emits, docs build, version bump to <code>0.7.0</code> (minor — additive feature, no breaks), commit, PR. <code>npm publish</code> is orchestrator's call, not automatic.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <ol>
+                <li>Run <code>bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build &amp;&amp; bun run docs:build</code>.</li>
+                <li>Bump version <code>0.6.0</code> → <code>0.7.0</code> in <code>package.json</code>.</li>
+                <li>CHANGELOG section if present.</li>
+                <li>Adversary checks 5.1–5.3.</li>
+                <li>Fill proof blocks.</li>
+                <li>Set top-level plan badge to <code>done</code>.</li>
+                <li>Commit + PR. Title: <code>chore(release): 0.7.0 — testing substrate</code>.</li>
+              </ol>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>cd ~/dev/corpus &amp;&amp; bun test &amp;&amp; bun run typecheck &amp;&amp; bun run build &amp;&amp; bun run docs:build</pre>
+              <p>Expected: every gate passes; <code>dist/testing/{index,register}.{js,d.ts}</code> exist.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Minor bump (no breaks).</li>
+                  <li><code>dist/testing/*</code> matches <code>exports."./testing"</code>.</li>
+                  <li>Docs site builds; Testing section in sidebar.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+      </section>
+
+      <section id="breaking">
+        <h2>Breaking changes</h2>
+        <p>None to the existing public API. The plan is purely additive: a new <code>testing</code> namespace, a new <code>./testing</code> entry in <code>package.json</code> <code>exports</code>, and two new <code>dependencies</code> (<code>fast-check</code>, <code>@traversable/zod-test</code>). Pre-existing exports from <code>index.ts</code>, <code>./file</code>, <code>./cloudflare</code>, <code>./types</code>, <code>./schema</code> are unchanged.</p>
+        <p>Within-phase note (not user-facing): Task 4.2 changes <code>testing.lookup</code> and <code>testing.lookup_failure</code> from sync to async to support auto-load. These functions are introduced inside the same release (0.7.0) so consumers never see the sync signature in the wild — flagged here only as an audit-trail item for the Phase 4 verification coder.</p>
+      </section>
+
+      <section id="out-of-scope">
+        <h2>Out of scope</h2>
+        <ul>
+          <li><strong>Mutation testing</strong> — Stryker bun runner is community-maintained and the upstream PR has been ignored for 10+ months. Track until officially supported.</li>
+          <li><strong>Ghostwriter that emits files</strong> — we ship <code>law.error_path_exhaustive</code> as a runtime check; full source-emission of property tests is a follow-up.</li>
+          <li><strong>Targeted / coverage-guided generation</strong> (Hypothesis's <code>target</code> primitive) — future.</li>
+          <li><strong>Persistent failure database</strong> (replay failing seeds across runs) — future.</li>
+          <li><strong>Cloudflare backend in the equivalence pilot</strong> — needs miniflare or real D1; defer to a follow-up gated on a wrangler-based test fixture.</li>
+          <li><strong>Cross-repo orchestration</strong> — a <code>property-testing</code> planner skill, an addition to global <code>~/.claude/AGENTS.md</code>, and a <code>&lt;section id="invariants"&gt;</code> slot in <code>~/.claude/context/plan-template.html</code>. These touch <code>~/.claude/</code> not <code>~/dev/corpus/</code>; create a separate plan after corpus 0.7.0 ships.</li>
+          <li><strong>Vault / pulse / devpad registrars</strong> — the substrate enables them; this plan does not write them. Each downstream package gets its own small follow-up plan.</li>
+          <li><strong>Custom shrink composition layer</strong> (Option 3's central proposal) — revisit only if fast-check's native rose-tree proves inadequate in practice.</li>
+          <li><strong>Replacing <code>@traversable/zod-test</code></strong> with a pure in-corpus walker for esoteric leaves — only if @traversable lags Zod major versions or stalls.</li>
+        </ul>
+      </section>
+
+      <section id="agents-md-updates">
+        <h2>AGENTS.md updates</h2>
+        <p>Patterns and conventions worth capturing in <code>~/dev/corpus/AGENTS.md</code>. Each phase's verification coder appends the relevant entries directly into AGENTS.md as part of the phase commit — no approval gate.</p>
+
+        <h3>Phase 1 — Foundations</h3>
+        <ul>
+          <li>Add a top-level <code>Testing substrate</code> section under <code>Conventions</code>.</li>
+          <li>Document: <code>testing</code> namespace is reached via <code>import { testing } from "@f0rbit/corpus"</code> or <code>import * as testing from "@f0rbit/corpus/testing"</code>. The second path is preferred in hot paths because it skips the main barrel's transitive imports.</li>
+          <li>Document the hybrid registry key rule: branded type symbols for identity-bearing domain types (UserId, AuthToken, Money, error types); Zod schema instance identity (WeakMap) for ad-hoc schemas without brands.</li>
+          <li>Document that <code>testing.arb(schema)</code> hand-rolls common Zod cases and delegates esoteric leaves to <code>@traversable/zod-test</code> — if a schema kind isn't supported, the error message names the kind and points at <code>testing.arbitrary(schema, ...)</code> as the manual escape hatch.</li>
+          <li>Note: corpus is the only place fast-check is configured. Downstream packages MUST import via <code>testing.*</code>, not directly from <code>"fast-check"</code>.</li>
+        </ul>
+
+        <h3>Phase 2 — Error paths</h3>
+        <ul>
+          <li>Add to <code>Testing substrate</code>: the registrar contract. A package contributes arbitraries by declaring <code>"corpus": { "testing": "./path/to/register.js" }</code> in its <code>package.json</code>. The file runs at import time and side-effects via <code>testing.arbitrary(...)</code> + <code>testing.failure(...)</code> calls. Order-independent.</li>
+          <li>Document <code>CORPUS_ERROR_BRAND</code> as the canonical brand for <code>CorpusError</code> — downstream packages import the symbol and register failure cases against it, not their own brand.</li>
+          <li>Document <code>error_path_exhaustive</code> recipe: define <code>provoke</code> mapped over <code>E["kind"]</code> (compiler enforces full coverage), supply <code>only</code> when scoping to a subset of variants the function actually emits.</li>
+          <li>Add gotcha: <code>testing.cover</code> labels are checked AFTER the property succeeds — if the property itself fails, fast-check's counterexample reporting fires first and the coverage check is silent. Intentional.</li>
+        </ul>
+
+        <h3>Phase 3 — Laws + model</h3>
+        <ul>
+          <li>Add canonical example reference: <code>tests/property/backend-equivalence.test.ts</code> is the reference implementation for <code>provider_equivalence</code>. Future cross-implementation equivalence tests in any downstream package should copy that file's structure (model + commands + per-step equivalence).</li>
+          <li>Document that <code>provider_equivalence</code> rebuilds each provider fresh per property run — provider <code>build</code> functions MUST NOT capture state across runs.</li>
+          <li>Document the equivalence-rule convention: <code>ok</code> flag agrees; on ok, structural-equal modulo Date precision and list ordering; on err, only <code>error.kind</code> matches (causes differ across backends).</li>
+          <li>If a backend bug was found during Phase 3, document it under <code>Gotchas</code> with the commit SHA that fixed it.</li>
+        </ul>
+
+        <h3>Phase 4 — Vending</h3>
+        <ul>
+          <li>Document the auto-load semantics: walker fires on first <code>testing.lookup</code> or <code>testing.lookup_failure</code> call. <code>testing.arb</code> and <code>testing.compose</code> do NOT trigger auto-load.</li>
+          <li>Document the within-repo override: <code>testing.__reset_registry_for_tests()</code> followed by <code>testing.load_from(...)</code> for explicit loading. The <code>__</code> prefix flags non-production use.</li>
+          <li>Document walker scope: direct deps + cwd package only. Transitive registrations happen because each declared package's registrar can register on behalf of its own deps. Hoisted monorepos work because resolution uses <code>import.meta.resolve</code>.</li>
+        </ul>
+
+        <h3>Phase 5 — Tooling</h3>
+        <ul>
+          <li>Cross-link from <code>AGENTS.md</code> Testing section to the Starlight docs site's <code>Testing</code> sidebar group as the long-form reference.</li>
+          <li>Reference <code>docs/templates/testing/register.ts</code> as the stub for new packages.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
+
