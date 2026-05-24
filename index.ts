@@ -88,3 +88,5 @@ export { Semaphore, parallel_map } from './concurrency.js';
 export * from './observations/index.js';
 
 export { createCorpusInfra, type CorpusInfra, type CorpusInfraConfig } from './sst.js';
+
+export * as testing from './testing/index.js';

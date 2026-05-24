@@ -31,7 +31,15 @@
 			"types": "./dist/schema.d.ts",
 			"import": "./dist/schema.js",
 			"require": "./dist/schema.js"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.ts",
+			"import": "./dist/testing/index.js",
+			"require": "./dist/testing/index.js"
 		}
+	},
+	"corpus": {
+		"testing": "./dist/testing/register.js"
 	},
 	"files": ["dist"],
 	"scripts": {
@@ -66,6 +74,8 @@
 		"zod": "^3"
 	},
 	"dependencies": {
-		"drizzle-orm": "^0.44.7"
+		"@traversable/zod-test": "^0.0.28",
+		"drizzle-orm": "^0.44.7",
+		"fast-check": "^4.7.0"
 	}
 }
