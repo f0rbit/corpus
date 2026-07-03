@@ -1,6 +1,6 @@
 # Cross-store atomic put
 
-Status: Proposal — no code written.
+Status: Completed — `corpus.transaction()` shipped across all backends (memory, file, Cloudflare, layered). Kept as design reference.
 Owner area: `corpus.ts`, `backend/*`, `observations/*`, `tests/integration/*`.
 Estimated total LOC: ~1100 production + ~600 tests, spread across 6 phases.
 
