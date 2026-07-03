@@ -1,10 +1,10 @@
-# @f0rbit/corpus v0.3.5 - Full Documentation
+# @f0rbit/corpus v0.6.0 - Full Documentation
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
 This document contains the complete source code and documentation for LLM consumption.
 
-# @f0rbit/corpus v0.3.5
+# @f0rbit/corpus v0.6.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -497,6 +497,12 @@ export {
 	type VersionSetStoreOptions,
 } from './version-set.js';
 
+export {
+	pipeline_template_store,
+	type PipelineTemplateStore,
+	type PipelineTemplateStoreOptions,
+} from './pipeline-template.js';
+
 export { corpus_snapshots, type CorpusSnapshotRow, type CorpusSnapshotInsert } from './schema.js';
 
 export type {
@@ -563,6 +569,8 @@ export { Semaphore, parallel_map } from './concurrency.js';
 export * from './observations/index.js';
 
 export { createCorpusInfra, type CorpusInfra, type CorpusInfraConfig } from './sst.js';
+
+export * as testing from './testing/index.js';
 
 ```
 
@@ -1221,6 +1229,17 @@ export type VersionSetManifest = {
   env_manifest_ref: string
   infra_plan_ref: string
   grants_ref?: string
+  /**
+   * Optional content-addressed reference to a compiled pipeline template
+   * blob — `pipeline-templates/<content_hash>`. Consumers (devpad's
+   * pipeline orchestrator) resolve this through `pipeline_template_store`
+   * to rehydrate the typed template snapshot.
+   *
+   * Optional for forward/backward compatibility — manifests written
+   * before this field existed continue to resolve via the consumer's
+   * built-in default template.
+   */
+  template_ref?: string
 }
 
 /**

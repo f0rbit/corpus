@@ -1,5 +1,7 @@
 # Streaming Reads + Codec Composition
 
+Status: Completed — streaming reads + `compose()` shipped (with reference codecs `gzip_codec` / `encrypt_codec`). Kept as design reference; §2.3 documents the encode-side buffering behaviour cited from AGENTS.md.
+
 Plan covering two linked features for `@f0rbit/corpus`:
 
 1. **Streaming reads** — surface the existing `DataHandle.stream()` capability through the `Store` API, with a streaming codec path so consumers can decode incrementally.
