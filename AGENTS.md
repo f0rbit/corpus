@@ -95,7 +95,8 @@ Conventions:
 
 - `bun test` only. No vitest, no jest.
 - Backend integration tests share a single contract suite at `tests/integration/backend-contract.test.ts`. New backends should plug into it via `runBackendContractTests(name, factory, cleanup)`.
-- Real I/O over mocks: file backend tests touch `tests/.tmp/` (cleaned per-test). Cloudflare tests use `wrangler dev` workflows out-of-band — no D1/R2 mocks in the suite.
+- Real I/O over mocks: file backend tests touch `tests/.tmp/` (cleaned per-test).
+- The Cloudflare backend runs through the contract suite against in-memory **platform fakes** at `tests/fakes/cloudflare.ts` — a `bun:sqlite`-backed D1 fake and a Map-backed R2 fake. The code under test is the real `backend/cloudflare.ts` (real Drizzle d1 driver, real SQL). Real-platform smoke via `wrangler dev` remains out-of-band; the fakes are not a substitute for a deploy check.
 - Per the global `testing-strategy` skill: in-memory fakes, integration-first, Provider pattern. Memory backend itself doubles as the in-memory fake for downstream consumers.
 
 ### Schema / migrations
@@ -161,4 +162,5 @@ The active plan is the source of truth for in-flight design; consult it before c
 - File backend `apply_batch` stages writes under `<base>/.tx-<uuid>/` and atomic-renames into the live tree on commit. `list_all_stores()` filters out both `_*` (internal: `_data`, `_observations.json`) and `.*` (staging dirs) — when adding directory-walking code anywhere in the file backend, mirror this filter.
 - `recover(root_dir)` is exported from `@f0rbit/corpus/file` (not the main barrel). Startup-time helper that removes leftover `.tx-*` staging dirs from a previous crash. Do NOT invoke concurrently with a live process pointing at the same dir — there's no file locking.
 - File-backend transactions are per-store-metadata atomic but the batch of renames across files is NOT atomic: a crash mid-commit can land some renames and not others, surfaced as `partial_commit`. Recovery semantics are abort-only — no roll-forward.
+- The fake D1 in `tests/fakes/cloudflare.ts` implements exactly the surface drizzle-orm's d1 driver calls: `prepare(sql)` → `bind(...params)` → `{ run(), all() → {results}, raw() → rows-as-arrays }`, plus atomic `batch(statements)` (drizzle's `SQLiteD1Session.batch` binds each statement then calls `client.batch`). Its DDL is derived from the Drizzle tables via `getTableConfig` — schema stays the single source of truth, and unsupported schema features (defaults, FKs, partial indexes, SQL expression indexes) throw loudly so the fake can't silently diverge. If a drizzle upgrade starts calling a new D1 method, the contract suite fails fast on the missing method.
 - Layered-backend `apply_batch` forwards to the bottom write layer only. Transactional writes skip cache layers; the cache fills lazily on subsequent reads or eagerly when the consumer issues non-transactional writes (which fan out to all layers). Mixing tx and non-tx writes against a layered backend produces asymmetric cache state — drive all writes through one path if cache consistency matters.

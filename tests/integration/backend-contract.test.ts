@@ -86,6 +86,22 @@ export function runBackendContractTests(
           expect(result2.ok).toBe(true)
         })
 
+        it('overwrites an existing version on repeated put', async () => {
+          await backend.metadata.put(makeMeta('test-store', 'v1', { content_hash: 'first' }))
+          await backend.metadata.put(makeMeta('test-store', 'v1', { content_hash: 'second' }))
+
+          const result = await backend.metadata.get('test-store', 'v1')
+          expect(result.ok).toBe(true)
+          if (!result.ok) return
+          expect(result.value.content_hash).toBe('second')
+
+          const versions: string[] = []
+          for await (const meta of backend.metadata.list('test-store')) {
+            versions.push(meta.version)
+          }
+          expect(versions).toHaveLength(1)
+        })
+
         it('preserves all metadata fields on roundtrip', async () => {
           const created = new Date('2024-01-15T10:00:00Z')
           const invoked = new Date('2024-01-15T09:00:00Z')
@@ -168,6 +184,20 @@ export function runBackendContractTests(
 
           expect(versions).toHaveLength(1)
           expect(versions).toContain('v1')
+        })
+
+        it('matches store_id exactly, not as a prefix', async () => {
+          // Regression guard for commit 02bee7f — the Cloudflare backend once
+          // filtered store_id with like() and leaked prefix-sharing stores.
+          await backend.metadata.put(makeMeta('blog', 'v1'))
+          await backend.metadata.put(makeMeta('blog-drafts', 'v2'))
+
+          const versions: string[] = []
+          for await (const meta of backend.metadata.list('blog')) {
+            versions.push(meta.version)
+          }
+
+          expect(versions).toEqual(['v1'])
         })
 
         it('respects limit option', async () => {
@@ -704,6 +734,10 @@ export function runBackendContractTests(
 import { create_memory_backend } from '../../backend/memory'
 import { create_file_backend } from '../../backend/file'
 import { create_layered_backend } from '../../backend/layered'
+import { create_cloudflare_backend } from '../../backend/cloudflare'
+import { corpus_snapshots } from '../../schema'
+import { corpus_observations } from '../../observations/schema'
+import { create_fake_d1, create_fake_r2 } from '../fakes/cloudflare'
 import { rm, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -749,6 +783,13 @@ runBackendContractTests(
   async () => {
     await rm(layeredTestDir, { recursive: true, force: true })
   }
+)
+
+runBackendContractTests('CloudflareBackend (faked D1 + R2)', () =>
+  create_cloudflare_backend({
+    d1: create_fake_d1([corpus_snapshots, corpus_observations]),
+    r2: create_fake_r2(),
+  })
 )
 
 const big = (size: number): Uint8Array => {

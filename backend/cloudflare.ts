@@ -455,9 +455,9 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	 * `corpus.gc()` cleans them up by listing R2 objects not referenced by
 	 * any live `data_key` in D1 — out of scope here, tracked in README.
 	 *
-	 * TODO: integration test against `wrangler dev` — repo convention is
-	 * out-of-band manual testing for the Cloudflare backend, no D1/R2 mocks
-	 * in the suite.
+	 * Covered by the contract suite + tests/integration/cloudflare-backend.test.ts
+	 * running against in-memory platform fakes (tests/fakes/cloudflare.ts).
+	 * Real-platform smoke via `wrangler dev` remains out-of-band.
 	 */
 	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
 		// Step 1: R2 data_put ops, sequential to short-circuit on first failure.
