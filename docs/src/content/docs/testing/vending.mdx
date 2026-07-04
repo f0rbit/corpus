@@ -1,0 +1,284 @@
+---
+title: Vending
+description: Share arbitraries across packages via the registry and auto-loading.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Vending is how packages share test generators with each other. Instead of duplicating arbitraries in every package that needs them, declare them once and the registry auto-discovers them.
+
+## The Package.json Key
+
+Each package declares where its test generators live:
+
+```json
+{
+  "name": "@my/auth",
+  "version": "1.0.0",
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+The `"corpus": { "testing": ... }` path points to a module — the **registrar**. The auto-loader imports it and calls its exported `register()` function, which populates the registry via `testing.arbitrary()` and `testing.failure()`.
+
+## Writing a Registrar
+
+A registrar is **import-safe**: nothing registers at module load. All registration happens inside an exported `register()` function, so downstream code can import your brand symbols for identity without touching the registry.
+
+```typescript
+// src/testing/register.ts
+import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
+import type { ArbBrand } from "@f0rbit/corpus/testing";
+import type { AuthToken, AuthError } from "../types.js";
+
+// Brands for your domain types — export them so downstream tests can look them up
+export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
+export const AUTH_ERROR_BRAND = Symbol("AuthError") as ArbBrand<AuthError>;
+
+// Called by the auto-loader (or explicitly via testing.load_from)
+export function register(): void {
+  arbitrary(
+    AUTH_TOKEN_BRAND,
+    compose((draw) => ({
+      id: draw(fc.uuid()),
+      secret: draw(fc.stringMatching(/^[a-f0-9]{32}$/)),
+    }))
+  );
+
+  failure(
+    AUTH_ERROR_BRAND,
+    "invalid_credential",
+    compose((draw) => ({
+      kind: "invalid_credential" as const,
+      reason: draw(fc.string()),
+    }))
+  );
+}
+```
+
+<Aside type="note">
+  A registrar without a `register()` export is also loaded — the walker then assumes registration happened via import side-effects. The explicit export is the convention: it keeps the module import-safe, which is why corpus's own registrar and the [scaffolder template](https://github.com/f0rbit/corpus/blob/main/docs/templates/testing/register.ts) both use it.
+</Aside>
+
+Then compile to JavaScript:
+
+```bash
+bun run build  # produces dist/testing/register.js
+```
+
+And your package.json knows where to find it:
+
+```json
+{
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+<Aside type="note">
+  The path can be `.ts` in development (bun/esbuild will resolve it), but for published packages, use the compiled `.js` path.
+</Aside>
+
+## Auto-Loading
+
+The first time a test calls `testing.lookup()` or `testing.lookup_failure()`, the registry **auto-discovers** and loads all registrars from your dependencies' `package.json` files:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const result = await testing.lookup(USER_ID_BRAND);
+// ↓ First call triggers auto-load
+// ↓ Discovers "corpus" keys in all direct dependencies' package.json
+// ↓ Imports each registrar module
+// ↓ Calls each registrar's exported register()
+// ↓ Returns the registered arbitrary
+```
+
+This is automatic — no manual wiring required. Every test that calls `lookup()` or `lookup_failure()` for the first time triggers the walk.
+
+<Aside type="tip">
+  Synchronous APIs like `testing.arb(schema)` and `testing.compose()` do NOT trigger auto-load. Only the async accessors `lookup()` and `lookup_failure()` do. This keeps the synchronous path fast for tests that don't need vended arbitraries.
+</Aside>
+
+## Explicit Loading with `load_from`
+
+When auto-discovery isn't enough (testing a fixture package, monorepo sibling, or offline scenario), use `load_from()` for explicit control:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+// Load from a directory
+const result = await testing.load_from("./fixtures/my-package");
+if (!result.ok) {
+  console.error("Failed to load:", result.error.message);
+}
+
+// Or by npm package name (resolves via import.meta.resolve)
+const result = await testing.load_from("@my/auth");
+```
+
+Explicit loads are **additive** — they don't stop auto-discovery. A later `lookup()` will still walk the full dependency graph as usual.
+
+## Registrar Scope
+
+The auto-loader discovers:
+
+1. **Direct dependencies** — packages in your `package.json` `dependencies`, `devDependencies`, and `peerDependencies`
+2. **The current package** — your own `"corpus": { "testing": ... }` entry, if present
+
+It does NOT discover transitive dependencies (your dependencies' dependencies). Instead, each package's registrar can register on behalf of its own deps, so arbitraries propagate upward naturally.
+
+In a monorepo with hoisting (npm v7+, pnpm, bun), all packages resolve via the same `node_modules`, so transitives are discovered anyway. The restriction is purely for non-hoisted setups.
+
+## Testing: Reset and Reload
+
+In test setup, you may want explicit control over which registrars are loaded. Use `testing.__reset_registry_for_tests()` to clear the cache and registries:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+beforeEach(async () => {
+  // Clear the registry and auto-load promise
+  testing.__reset_registry_for_tests();
+
+  // Now the next lookup() will walk fresh
+  const arb = await testing.lookup(MY_BRAND);
+});
+```
+
+Then use `load_from()` to load a specific registrar:
+
+```typescript
+beforeEach(async () => {
+  testing.__reset_registry_for_tests();
+
+  // Load only the fixture registrar, not the full dependency graph
+  const result = await testing.load_from("./fixtures/test-package");
+  if (!result.ok) {
+    throw new Error(`Failed to load fixture: ${result.error.message}`);
+  }
+});
+```
+
+<Aside type="caution">
+  The `__reset_registry_for_tests()` function is marked with `__` (double underscore) to signal it's test-only. Never call it in production code.
+</Aside>
+
+## Dev Checkout Safety
+
+The walker loads exactly the path the `"corpus": { "testing": ... }` key declares — there's no automatic `src/` vs `dist/` switching. Two deliberate carve-outs keep dev checkouts sane:
+
+1. **Missing self-registrar file → silently skipped.** Manifests usually point at build output (`./dist/...`). In a dev checkout of your own package that hasn't been built, the declared file doesn't exist — the walker skips it rather than warning on every test run. Register from source explicitly in your own suite (import your `register.ts` directly, or use `testing.load_from`). A *dependency* with a missing registrar file is NOT skipped — that's a packaging bug, and it surfaces as a load failure.
+
+2. **The corpus checkout itself is always skipped.** When the cwd package IS `@f0rbit/corpus`, loading `./dist/testing/register.js` would double-register through a parallel module graph (dist has its own registry instance). Corpus's own suite imports `testing/register.ts` from source instead.
+
+<Aside type="note">
+  Under bun, a `.ts` registrar path works in development. Published packages must point at compiled `.js` — consumers may not run a TypeScript-aware loader.
+</Aside>
+
+## Troubleshooting
+
+### Registrar fails to load
+
+If a registrar throws an error:
+
+```
+[corpus/testing] auto-load: registrar for '@my/auth' failed to load: [error message]
+Fix that package's "corpus": { "testing": ... } entry, or load a corrected registrar via testing.load_from(...).
+```
+
+Check:
+
+1. **The path exists** — Does the file at `"corpus": { "testing": ... }` exist?
+2. **It exports a `register()` function** — the walker calls it when present; a module without one is assumed to register via import side-effects (supported, but not the convention)
+3. **It doesn't throw on import** — module-level code runs before `register()` is called
+4. **No circular imports** — The registrar shouldn't import the test suite
+
+As a workaround, use `testing.__reset_registry_for_tests()` + `testing.load_from()` to load a corrected version manually.
+
+### Registrar not discovered
+
+If a registrar never loads:
+
+1. **Check it's a direct dependency** — Auto-load only walks direct deps, not transitives
+2. **Check the `package.json` key** — It must be `"corpus": { "testing": ... }`, not `"test_corpus"` or similar
+3. **Use `load_from()` explicitly** — If the package isn't a direct dep, load it by path
+
+### Performance: Auto-load is slow
+
+The first `lookup()` call walks the dependency graph and imports each registrar. On a large monorepo, this can take a second or two. Options:
+
+1. **Move to devDependencies** — Only test packages need registrars; trim unnecessary deps
+2. **Pre-load in your test setup** — Call `await testing.lookup()` once in a top-level test hook
+3. **Use `load_from()` selectively** — Load only the registrars you need for a specific test
+
+## Best Practices
+
+1. **One registrar per package** — All arbitraries for a package go in one `register.ts` file
+2. **Keep imports side-effect-free** — Do all registration inside the exported `register()`; the module itself should be safe to import for its brand symbols alone
+3. **Export the brands** — Let downstream packages import your `AUTH_TOKEN_BRAND` and use it with `lookup()`
+4. **Avoid transitive dependencies** — If your registrar imports your domain code, don't import test utilities that aren't in the published package
+5. **Test the registrar** — Add a smoke test that calls `testing.load_from()` and verifies a known brand is registered
+
+## Example: Complete Registrar
+
+Here's a full example from a hypothetical `@my/auth` package:
+
+```typescript
+// src/testing/register.ts
+import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
+import type { ArbBrand } from "@f0rbit/corpus/testing";
+import type { AuthToken, Session, AuthError } from "../types.js";
+
+export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
+export const SESSION_BRAND = Symbol("Session") as ArbBrand<Session>;
+export const AUTH_ERROR_BRAND = Symbol("AuthError") as ArbBrand<AuthError>;
+
+// Arbitraries defined at module level are fine — REGISTRATION is what
+// must wait for register(). Reuse token_arb inside session_arb directly
+// (lookup() is async and can't be drawn inside compose).
+const token_arb = compose((draw): AuthToken => ({
+  id: draw(fc.uuid()),
+  secret: draw(fc.stringMatching(/^[a-f0-9]{32}$/)),
+  expires_at: draw(fc.date({ min: new Date("2020-01-01"), max: new Date("2030-01-01") })),
+}));
+
+const session_arb = compose((draw): Session => ({
+  token: draw(token_arb),
+  user_id: draw(fc.uuid()),
+  created_at: draw(fc.date({ min: new Date("2020-01-01"), max: new Date("2030-01-01") })),
+}));
+
+export function register(): void {
+  arbitrary(AUTH_TOKEN_BRAND, token_arb);
+  arbitrary(SESSION_BRAND, session_arb);
+
+  // One failure generator per error variant your package's error union carries
+  failure(
+    AUTH_ERROR_BRAND,
+    "invalid_credential",
+    compose((draw) => ({
+      kind: "invalid_credential" as const,
+      field: draw(fc.constantFrom("email", "password")),
+      reason: draw(fc.string()),
+    }))
+  );
+}
+```
+
+Then in `package.json`:
+
+```json
+{
+  "name": "@my/auth",
+  "version": "1.0.0",
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+Build with `bun run build` (or your build tool), and downstream packages automatically get these arbitraries on the first `lookup()` call.

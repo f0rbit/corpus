@@ -56,6 +56,15 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Testing',
+          items: [
+            { label: 'Overview', slug: 'testing/overview' },
+            { label: 'Arbitraries', slug: 'testing/arbitraries' },
+            { label: 'Laws', slug: 'testing/laws' },
+            { label: 'Vending', slug: 'testing/vending' },
+          ],
+        },
+        {
           label: 'Core',
           items: [
             { label: 'create_corpus', slug: 'api/core/create-corpus' },

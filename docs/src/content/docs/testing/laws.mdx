@@ -1,0 +1,304 @@
+---
+title: Laws
+description: Five pre-built property checkers for common code contracts.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Laws are pre-built property checkers that verify your code respects a contract. Corpus ships five laws covering serialization, idempotence, functor structure, error exhaustiveness, and cross-implementation equivalence.
+
+## Round Trip
+
+**Contract:** `decode(encode(x)) === x` for all `x`.
+
+Use this for any codec, serializer, or bidirectional transformation.
+
+```typescript
+import { testing, text_codec } from "@f0rbit/corpus";
+
+const text_codec = {
+  encode: (x: string) => new TextEncoder().encode(x),
+  decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
+};
+
+await testing.law.round_trip(
+  testing.fc.string(),
+  text_codec.encode,
+  text_codec.decode
+);
+```
+
+The law generates 100 random strings by default, encodes each, decodes it, and asserts the result equals the original. Both `encode` and `decode` may be sync or async — the law awaits them.
+
+**Options:**
+- `numRuns` — property run count; default 100
+- `equals` — custom equality check; defaults to `Bun.deepEquals` under Bun (required on Node)
+
+```typescript
+await testing.law.round_trip(
+  testing.arb(UserSchema),
+  user => JSON.stringify(user),
+  json => JSON.parse(json),
+  {
+    equals: (a, b) => a.id === b.id && a.name === b.name,
+    numRuns: 200,
+  }
+);
+```
+
+## Idempotent
+
+**Contract:** `fn(fn(x)) === fn(x)` for all `x`.
+
+Use this for normalizers, canonicalizers, or any function that should stabilize after one application.
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const normalize_path = (p: string) => p.replace(/\/+/g, "/");
+
+await testing.law.idempotent(
+  testing.fc.string(),
+  normalize_path
+);
+```
+
+The law applies the function twice and asserts both results are equal.
+
+**Options:**
+- `numRuns` — default 100
+- `equals` — custom equality; defaults to `Bun.deepEquals`
+
+## Functor
+
+**Contract:** Structure is preserved through mapping: `x.map(f).map(g) === x.map(g ∘ f)` for all `x`, `f`, `g`.
+
+Use this for types that implement the functor laws (arrays, optionals, Results, Promises, etc.).
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const arr = [1, 2, 3];
+const f = (x: number) => x * 2;
+const g = (x: number) => x + 1;
+
+await testing.law.functor({
+  arb: testing.arb(ArraySchema),
+  map: (arr, fn) => arr.map(fn),
+  equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+});
+```
+
+The law generates random values, applies two different function compositions, and asserts they agree.
+
+**Options:**
+- `numRuns` — default 100
+- `arb` — the arbitrary to generate test values
+- `map(value, fn)` — the map operation
+- `equals` — custom equality
+
+<Aside type="note">
+  The functor law verifies **composition law** (`map(map(x, f), g) === map(x, g ∘ f)`), not identity law. It's the most practical variant for property testing.
+</Aside>
+
+## Error Path Exhaustive
+
+**Contract:** Every variant of a function's error union can be provoked and is tested.
+
+The headline law: compile-time exhaustiveness (TypeScript enforces you handle every variant) + runtime verification (every variant has a generator and actually fails correctly).
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing";
+import type { Result } from "@f0rbit/corpus";
+
+// Example: a function that returns multiple error kinds
+async function get_user(
+  id: string,
+  opts?: { timeout?: number }
+): Promise<Result<User, CorpusError>> {
+  // Can return: not_found, decode_error, timeout, or ok
+}
+
+await testing.law.error_path_exhaustive(get_user, {
+  error_brand: CORPUS_ERROR_BRAND,
+  provoke: {
+    not_found: (f) => [f.user_id],
+    decode_error: (f) => [corrupt_bytes(f)],
+    timeout: (f) => [undefined, { timeout: f.duration }],
+    // TypeScript enforces every variant is listed here
+  },
+  only: ["not_found", "decode_error"], // optional: test only a subset
+  numRuns: 200,
+});
+```
+
+**How it works:**
+
+1. TypeScript's mapped type `provoke: { [K in E["kind"]: ... }` enforces you provide a handler for every error variant. If you add a variant without updating `provoke`, it's a compile error.
+
+2. For each variant (or the `only` subset), the law:
+   - Looks up the failure generator via `testing.lookup_failure(brand, variant_kind)`
+   - Generates failure inputs from that generator
+   - Calls your function with those inputs
+   - Asserts it returns an `err` with the matching `kind`
+
+3. If a generator is missing, you get a clear error naming the exact registration call needed:
+   ```
+   error_path_exhaustive: no generator registered for variant 'not_found' of brand Symbol(CorpusError)
+   — register via testing.failure(CORPUS_ERROR_BRAND, 'not_found', () => ...)
+   ```
+
+**Options:**
+- `error_brand` — the branded symbol for your error union
+- `provoke` — mapped-type object with one entry per error variant; each entry is a function that takes a failure instance and returns the args to call your function with
+- `only` — optional subset of variants to test (useful during development)
+- `numRuns` — per-variant run count; default 50
+
+<Aside type="tip">
+  The `provoke` type signature uses `NoInfer` internally to enforce compile-time exhaustiveness. Missing a variant is a hard TypeScript error, not a silent omission.
+</Aside>
+
+## Provider Equivalence
+
+**Contract:** Multiple implementations (or backends) behave the same way under the same command sequence.
+
+The most powerful law: run fast-check's stateful command generator against a reference model and N systems-under-test (providers), and assert per-command that results agree.
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+interface Counter {
+  increment(): Promise<Result<number, CounterError>>;
+  reset(): Promise<Result<void, CounterError>>;
+}
+
+type CounterModel = { count: number };
+
+const increment_cmd = testing.law.equivalence_command<CounterModel, Counter, Result<number, CounterError>>({
+  label: "increment()",
+  on_model: (m) => {
+    if (m.count >= 100) return err({ kind: "overflow" });
+    m.count += 1;
+    return ok(m.count);
+  },
+  on_sut: (c) => c.increment(),
+});
+
+const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, void>({
+  label: "reset()",
+  on_model: (m) => {
+    m.count = 0;
+  },
+  on_sut: (c) => c.reset(),
+});
+
+await testing.law.provider_equivalence({
+  model: () => ({ count: 0 }),
+  providers: {
+    memory: () => new MemoryCounter(),
+    persistent: () => new FileBackedCounter(),
+  },
+  commands: [increment_cmd, reset_cmd],
+  equivalence: {
+    results_agree: (a, b) => a === b,
+  },
+  numRuns: 50,
+  maxCommands: 20,
+});
+```
+
+**How it works:**
+
+1. Fast-check generates a **shrinkable sequence of commands** — the same sequence runs against the model AND each provider.
+
+2. Each command runs twice:
+   - `on_model(model)` — synchronous reference implementation
+   - `on_sut(sut)` — the system-under-test (may be async)
+
+3. After every command, results are compared:
+   - If both are Result-shaped: `ok` flags must agree; when both ok, values must satisfy `results_agree`; when both err, `error.kind` must match
+   - Otherwise: results must satisfy `results_agree`
+
+4. If results diverge, the property fails with the provider label, command index, and the **minimal shrunk command sequence** — fast-check's native command shrinker finds the smallest reproduction.
+
+**Using `equivalence_command`:**
+
+```typescript
+const cmd = testing.law.equivalence_command({
+  label: "operation name",
+  check: (m) => precondition(m), // optional: only run if true
+  on_model: (m) => operation_on_model(m),
+  on_sut: (sut) => operation_on_sut(sut), // may be async
+});
+```
+
+The command carries both results and compares them automatically.
+
+**Options:**
+- `model()` — factory returning a fresh model instance per run (must return fresh, not reused)
+- `providers` — labelled object of provider factories (one per SUT)
+- `commands` — pool of `equivalence_command` instances and/or arbitraries of commands
+- `equivalence.results_agree(model_r, sut_r)` — equality check for ok-values (or raw results when non-Result-shaped)
+- `numRuns` — property runs; default 100
+- `maxCommands` — max commands per generated sequence; default depends on fast-check's sizing
+- `size` — bias for sequence length; default uses fast-check's heuristics
+
+<Aside type="caution">
+  **Command payload limitation:** Command arbitraries inside the pool must be plain fast-check arbitraries (`fc.integer`, `fc.string`, etc.). Avoid `testing.compose` or `testing.arb` as command payloads — the `fc.gen()` shrinker can hang. If you need dependent payloads, pre-sample with `fc.sample()` and pass fixed instances instead.
+</Aside>
+
+<Aside type="tip">
+  The backend-equivalence pilot in `tests/property/backend-equivalence.test.ts` is the canonical reference implementation. Future equivalence tests in any package should mirror its structure and command patterns.
+</Aside>
+
+## Common Patterns
+
+### Testing with Coverage Labels
+
+Use `testing.cover()` (Hedgehog-style) to assert parts of your test space got exercised:
+
+```typescript
+await testing.law.round_trip(
+  testing.compose((draw) => {
+    const x = draw(testing.fc.integer());
+    testing.cover(x > 0, "positive");
+    testing.cover(x < 0, "negative");
+    testing.cover(x === 0, "zero");
+    return x;
+  }),
+  encode,
+  decode,
+  { numRuns: 200 }
+);
+
+// If the labels don't hit, the law throws with coverage stats
+```
+
+### Opting Out of Shrinking
+
+The `round_trip`, `idempotent`, and `error_path_exhaustive` laws disable shrinking (`endOnFailure: true`) by default. This is intentional: codecs and failure generators may rely on subtle interactions that break under partial shrinks, and `testing.compose` uses `fc.gen()` whose shrinker doesn't reliably terminate.
+
+If you need shrinking, use `fc.assert` directly with a plain fast-check property.
+
+### Custom Equality
+
+Several laws accept an `equals` option for custom value comparison:
+
+```typescript
+await testing.law.round_trip(
+  arb,
+  encode,
+  decode,
+  {
+    equals: (a, b) => {
+      // Ignore the `_internal_cache` field
+      const { _internal_cache: _, ...a_clean } = a;
+      const { _internal_cache: __, ...b_clean } = b;
+      return JSON.stringify(a_clean) === JSON.stringify(b_clean);
+    },
+  }
+);
+```
+
+Under Bun, `round_trip` and `idempotent` default to `Bun.deepEquals`. On Node or workerd, you must provide `equals` or the law throws an error.
