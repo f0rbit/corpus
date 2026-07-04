@@ -22,7 +22,7 @@
 
 import fc from "fast-check";
 import { async_commands } from "../commands.js";
-import type { AsyncCommand } from "../commands.js";
+import type { AsyncCommand, CommandsConstraints } from "../commands.js";
 
 type CommandOutcome = {
 	readonly model_r: unknown;
@@ -190,6 +190,10 @@ const divergence = (
  * @param opts.numRuns - Property runs (default: fast-check's default, 100)
  * @param opts.maxCommands - Max commands per generated sequence (default:
  * fast-check's default sizing)
+ * @param opts.size - fast-check size bias for sequence LENGTH. With the
+ * default sizing, `maxCommands: 30` still averages ~5 commands per sequence
+ * (p90 ≈ 9); pass `"max"` to bias lengths toward `maxCommands` when deep
+ * stateful histories are the point of the law
  *
  * @example
  * ```ts
@@ -216,12 +220,13 @@ export async function provider_equivalence<Model extends object, S>(opts: {
 	equivalence: { results_agree: (model_r: unknown, sut_r: unknown) => boolean };
 	numRuns?: number;
 	maxCommands?: number;
+	size?: CommandsConstraints["size"];
 }): Promise<void> {
 	const command_arbs = opts.commands.map((c) => (is_arbitrary(c) ? c : fc.constant(c)));
-	const sequences = async_commands<Model, S>(
-		command_arbs,
-		opts.maxCommands === undefined ? {} : { maxCommands: opts.maxCommands },
-	);
+	const sequences = async_commands<Model, S>(command_arbs, {
+		...(opts.maxCommands === undefined ? {} : { maxCommands: opts.maxCommands }),
+		...(opts.size === undefined ? {} : { size: opts.size }),
+	});
 
 	await fc.assert(
 		fc.asyncProperty(sequences, async (cmds) => {
