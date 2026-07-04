@@ -69,7 +69,7 @@ function row_to_base(row: ObservationRow) {
 		...(row.confidence !== null && { confidence: row.confidence }),
 		...(row.observed_at && { observed_at: new Date(row.observed_at) }),
 		created_at: new Date(row.created_at),
-		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) }),
+		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) as SnapshotPointer[] }),
 	};
 }
 
@@ -87,7 +87,7 @@ export function row_to_observation(row: ObservationRow): Observation {
  * Convert a storage row to ObservationMeta (excludes content).
  */
 export function row_to_meta(row: ObservationRow): ObservationMeta {
-	return row_to_base(row) as ObservationMeta;
+	return row_to_base(row);
 }
 
 /**
@@ -111,8 +111,8 @@ export function create_observation_row(
 		source_store_id: source.store_id,
 		source_version: source.version,
 		source_path: source.path ?? null,
-		source_span_start: source.span?.start?.toString() ?? null,
-		source_span_end: source.span?.end?.toString() ?? null,
+		source_span_start: source.span?.start.toString() ?? null,
+		source_span_end: source.span?.end.toString() ?? null,
 		content: JSON.stringify(content),
 		confidence: opts.confidence ?? null,
 		observed_at: opts.observed_at?.toISOString() ?? null,
@@ -198,17 +198,13 @@ export type ObservationsCRUD = {
  */
 export function create_observations_storage(adapter: ObservationsAdapter | ObservationsCRUD): ObservationsStorage {
 	const wrap_add_one = async (row: ObservationRow): Promise<Result<void, CorpusError>> => {
-		const result = await (adapter as ObservationsAdapter).add_one(row);
-		if (result === undefined || result === null) return ok(undefined);
-		if (typeof result === "object" && "ok" in result) return result;
-		return ok(undefined);
+		const result = await adapter.add_one(row);
+		return result ?? ok(undefined);
 	};
 
 	const wrap_remove_one = async (id: string): Promise<Result<boolean, CorpusError>> => {
-		const result = await (adapter as ObservationsAdapter).remove_one(id);
-		if (typeof result === "boolean") return ok(result);
-		if (typeof result === "object" && "ok" in result) return result;
-		return ok(false);
+		const result = await adapter.remove_one(id);
+		return typeof result === "boolean" ? ok(result) : result;
 	};
 
 	return {
@@ -224,8 +220,8 @@ export function create_observations_storage(adapter: ObservationsAdapter | Obser
 		},
 
 		async *query_rows(opts: StorageQueryOpts = {}) {
-			if ((adapter as ObservationsAdapter).query) {
-				yield* (adapter as ObservationsAdapter).query!(opts);
+			if ("query" in adapter && adapter.query) {
+				yield* adapter.query(opts);
 			} else {
 				const rows = filter_observation_rows(await adapter.get_all(), opts);
 				for (const row of rows) {
@@ -239,12 +235,12 @@ export function create_observations_storage(adapter: ObservationsAdapter | Obser
 		},
 
 		async delete_by_source(store_id, version, path) {
-			if ((adapter as ObservationsAdapter).delete_by_source) {
-				return (adapter as ObservationsAdapter).delete_by_source!(store_id, version, path);
+			if ("delete_by_source" in adapter && adapter.delete_by_source) {
+				return adapter.delete_by_source(store_id, version, path);
 			}
 
 			const rows = await adapter.get_all();
-			const toKeep = rows.filter(
+			const to_keep = rows.filter(
 				(r) =>
 					!(
 						r.source_store_id === store_id &&
@@ -252,8 +248,8 @@ export function create_observations_storage(adapter: ObservationsAdapter | Obser
 						(path === undefined || r.source_path === path)
 					),
 			);
-			const deleted = rows.length - toKeep.length;
-			await adapter.set_all(toKeep);
+			const deleted = rows.length - to_keep.length;
+			await adapter.set_all(to_keep);
 			return ok(deleted);
 		},
 	};

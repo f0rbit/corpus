@@ -10,9 +10,9 @@
 
 import fc from "fast-check";
 import { z } from "zod";
-import { compose } from "../../../testing/compose";
-import { failure } from "../../../testing/failure";
-import { arbitrary } from "../../../testing/registry";
+import { compose } from "../../../testing/compose.js";
+import { failure } from "../../../testing/failure.js";
+import { arbitrary } from "../../../testing/registry.js";
 import type { ArbBrand } from "../../../testing/types";
 
 export type AuthToken = string & { readonly __brand: "AuthToken" };

@@ -16,7 +16,7 @@ type DemoInput = "trigger_ka" | { trigger: "kb"; reason: string };
 
 async function demo(input: DemoInput): Promise<Result<string, DemoError>> {
 	if (input === "trigger_ka") return err({ kind: "ka" });
-	if (typeof input === "object" && input.trigger === "kb") {
+	if (typeof input === "object") {
 		return err({ kind: "kb", reason: input.reason });
 	}
 	return ok("happy");
@@ -39,6 +39,15 @@ const register_kb = (): void => {
 			reason: draw(fc.string({ minLength: 1, maxLength: 20 })),
 		})),
 	);
+};
+
+// Wrong fn: always returns ka, even when provoked for kb.
+const broken = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
+	return err({ kind: "ka" });
+};
+
+const always_ok = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
+	return ok("nope");
 };
 
 describe("testing.law.error_path_exhaustive", () => {
@@ -134,11 +143,6 @@ describe("testing.law.error_path_exhaustive", () => {
 		register_ka();
 		register_kb();
 
-		// Wrong fn: always returns ka, even when provoked for kb.
-		const broken = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
-			return err({ kind: "ka" });
-		};
-
 		let thrown: unknown;
 		try {
 			await error_path_exhaustive(broken, {
@@ -159,10 +163,6 @@ describe("testing.law.error_path_exhaustive", () => {
 
 	test("fails loudly when fn returns ok for an error-path call", async () => {
 		register_ka();
-
-		const always_ok = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
-			return ok("nope");
-		};
 
 		let thrown: unknown;
 		try {

@@ -203,7 +203,7 @@ async function dependency_spec(dep: string, cwd: string): Promise<RegistrarSpec 
 async function resolve_dep_manifest(dep: string, cwd: string): Promise<string | null> {
 	const via_resolver = await try_catch_async(async () => {
 		const resolved: string | Promise<string> = import.meta.resolve(`${dep}/package.json`);
-		return typeof resolved === "string" ? resolved : await resolved;
+		return resolved;
 	}, to_error);
 	if (via_resolver.ok) return to_path(via_resolver.value);
 
@@ -216,7 +216,7 @@ async function target_dir(target: string): Promise<Result<string, DiscoveryError
 	if (isAbsolute(target) || target.startsWith(".")) return ok(resolve(target));
 	const manifest_path = await try_catch_async(async () => {
 		const resolved: string | Promise<string> = import.meta.resolve(`${target}/package.json`);
-		return typeof resolved === "string" ? resolved : await resolved;
+		return resolved;
 	}, to_error);
 	if (!manifest_path.ok) return err({ kind: "package_unresolvable", package: target, cause: manifest_path.error });
 	return ok(dirname(to_path(manifest_path.value)));

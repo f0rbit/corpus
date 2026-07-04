@@ -11,14 +11,14 @@ import {
 	text_codec,
 	binary_codec,
 	compute_hash,
-} from "../../index";
-import { create_file_backend } from "../../backend/file";
+} from "../../index.js";
+import { create_file_backend } from "../../backend/file.js";
 import type { Codec } from "../../types";
 
 const drain_chunks = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
 	const reader = stream.getReader();
 	const chunks: T[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -248,10 +248,10 @@ describe("store streaming", () => {
 
 	describe("type-level", () => {
 		it("get_handle().handle.stream() is a type error on json_codec stores", async () => {
-			const UserSchema = z.object({ name: z.string() });
+			const user_schema = z.object({ name: z.string() });
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("users", json_codec(UserSchema)))
+				.with_store(define_store("users", json_codec(user_schema)))
 				.build();
 
 			const put_result = await corpus.stores.users.put({ name: "Alice" });
@@ -273,10 +273,10 @@ describe("store streaming", () => {
 		});
 
 		it("put_stream is a type error on json_codec stores", async () => {
-			const UserSchema = z.object({ name: z.string() });
+			const user_schema = z.object({ name: z.string() });
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("users", json_codec(UserSchema)))
+				.with_store(define_store("users", json_codec(user_schema)))
 				.build();
 
 			const stream = new ReadableStream<{ name: string }>({

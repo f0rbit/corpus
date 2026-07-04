@@ -68,7 +68,7 @@ export function create_pointer(
 export function pointer_to_key(pointer: SnapshotPointer): string {
 	let key = `${pointer.store_id}:${pointer.version}`;
 	if (pointer.path) key += `:${pointer.path}`;
-	if (pointer.span) key += `:${pointer.span.start}-${pointer.span.end}`;
+	if (pointer.span) key += `:${String(pointer.span.start)}-${String(pointer.span.end)}`;
 	return key;
 }
 
@@ -109,9 +109,9 @@ export function key_to_pointer(key: string): SnapshotPointer | null {
 	if (!last_part) return pointer;
 	const span_match = /^(\d+)-(\d+)$/.exec(last_part);
 
-	if (span_match) {
-		const [, start_str, end_str] = span_match;
-		pointer.span = { start: parseInt(start_str!, 10), end: parseInt(end_str!, 10) };
+	const [, start_str, end_str] = span_match ?? [];
+	if (start_str !== undefined && end_str !== undefined) {
+		pointer.span = { start: parseInt(start_str, 10), end: parseInt(end_str, 10) };
 		const path_parts = rest.slice(0, -1);
 		if (path_parts.length > 0) pointer.path = path_parts.join(":");
 	} else {
@@ -165,7 +165,7 @@ export function resolve_path<T = unknown>(value: unknown, path: string): Result<
 				store_id: "",
 				version: "",
 				message: `Path segment '${segment}' not found - parent is null/undefined`,
-			} as CorpusError);
+			});
 		}
 
 		if (typeof current !== "object") {
@@ -174,7 +174,7 @@ export function resolve_path<T = unknown>(value: unknown, path: string): Result<
 				store_id: "",
 				version: "",
 				message: `Path segment '${segment}' not found - parent is not an object`,
-			} as CorpusError);
+			});
 		}
 
 		const index = /^\d+$/.test(segment) ? parseInt(segment, 10) : segment;
@@ -206,8 +206,10 @@ export function apply_span(value: string, span: { start: number; end: number }):
 	if (span.start < 0 || span.end > value.length || span.start > span.end) {
 		return err({
 			kind: "validation_error",
-			cause: new Error(`Invalid span [${span.start}, ${span.end}] for string of length ${value.length}`),
-			message: `Invalid span [${span.start}, ${span.end}] for string of length ${value.length}`,
+			cause: new Error(
+				`Invalid span [${String(span.start)}, ${String(span.end)}] for string of length ${String(value.length)}`,
+			),
+			message: `Invalid span [${String(span.start)}, ${String(span.end)}] for string of length ${String(value.length)}`,
 		});
 	}
 	return ok(value.slice(span.start, span.end));

@@ -75,6 +75,8 @@ Typecheck + tests are the CI gate. Lint/format are wired (`@f0rbit/lint`, exact-
 
 PRs on this repo merge with **squash only** — merge commits and rebase merges are disabled (settings flipped 2026-07-04; history before 0.7.0 predates this). The PR title becomes the squash commit title, so PR titles follow git-workflow commit rules: no "phase"/"task"/plan identifiers, describe the change itself.
 
+One-time bootstrap after cloning: `git config blame.ignoreRevsFile .git-blame-ignore-revs` — keeps the oxfmt normalization commit out of `git blame`.
+
 ## Conventions
 
 These differ from or override global defaults — read them.
@@ -101,7 +103,7 @@ Conventions:
 ### Testing
 
 - `bun test` only. No vitest, no jest.
-- Backend integration tests share a single contract suite at `tests/integration/backend-contract.test.ts`. New backends should plug into it via `runBackendContractTests(name, factory, cleanup)`.
+- Backend integration tests share a single contract suite at `tests/integration/backend-contract.test.ts`. New backends should plug into it via `run_backend_contract_tests(name, factory, cleanup)`.
 - Real I/O over mocks: file backend tests touch `tests/.tmp/` (cleaned per-test).
 - The Cloudflare backend runs through the contract suite against in-memory **platform fakes** at `tests/fakes/cloudflare.ts` — a `bun:sqlite`-backed D1 fake and a Map-backed R2 fake. The code under test is the real `backend/cloudflare.ts` (real Drizzle d1 driver, real SQL). Real-platform smoke via `wrangler dev` remains out-of-band; the fakes are not a substitute for a deploy check.
 - Per the global `testing-strategy` skill: in-memory fakes, integration-first, Provider pattern. Memory backend itself doubles as the in-memory fake for downstream consumers.

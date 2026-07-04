@@ -102,9 +102,9 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
-			const storageOpts = to_storage_opts(opts);
+			const storage_opts = to_storage_opts(opts);
 
-			for await (const row of storage.query_rows(storageOpts)) {
+			for await (const row of storage.query_rows(storage_opts)) {
 				if (opts.version_filter !== undefined) {
 					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
 					if (!included) continue;
@@ -114,9 +114,9 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
-			const storageOpts = to_storage_opts(opts);
+			const storage_opts = to_storage_opts(opts);
 
-			for await (const row of storage.query_rows(storageOpts)) {
+			for await (const row of storage.query_rows(storage_opts)) {
 				if (opts.version_filter !== undefined) {
 					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
 					if (!included) continue;

@@ -3,9 +3,9 @@ import { rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Backend, VersionSetManifest } from "../../index";
-import { version_set_store, VersionSetManifestSchema } from "../../index";
-import { create_memory_backend } from "../../backend/memory";
-import { create_file_backend } from "../../backend/file";
+import { version_set_store, VersionSetManifestSchema } from "../../index.js";
+import { create_memory_backend } from "../../backend/memory.js";
+import { create_file_backend } from "../../backend/file.js";
 
 const make_manifest = (pkg: string, overrides?: Partial<VersionSetManifest>): VersionSetManifest => ({
 	package: pkg,
@@ -143,7 +143,7 @@ function run_version_set_tests(name: string, factory: BackendFactory, cleanup?: 
 			});
 
 			it("rejects manifests that fail schema validation on decode", async () => {
-				const invalid = { ...make_manifest("pkg-a"), git_sha: "too-short" } as VersionSetManifest;
+				const invalid = { ...make_manifest("pkg-a"), git_sha: "too-short" };
 
 				const put = await version_sets.put(invalid);
 				expect(put.ok).toBe(true);
@@ -312,19 +312,19 @@ function run_version_set_tests(name: string, factory: BackendFactory, cleanup?: 
 
 run_version_set_tests("MemoryBackend", () => create_memory_backend());
 
-const fileTestDir = join(tmpdir(), "corpus-version-set-test-file");
+const file_test_dir = join(tmpdir(), "corpus-version-set-test-file");
 run_version_set_tests(
 	"FileBackend",
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
-		await mkdir(fileTestDir, { recursive: true });
-		return create_file_backend({ base_path: fileTestDir });
+		await rm(file_test_dir, { recursive: true, force: true });
+		await mkdir(file_test_dir, { recursive: true });
+		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
+		await rm(file_test_dir, { recursive: true, force: true });
 	},
 );
 
 afterAll(async () => {
-	await rm(fileTestDir, { recursive: true, force: true });
+	await rm(file_test_dir, { recursive: true, force: true });
 });

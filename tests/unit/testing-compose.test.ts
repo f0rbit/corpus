@@ -32,12 +32,8 @@ describe("testing.compose", () => {
 			const sample = samples[0];
 			if (sample && sample.items.length > 3) {
 				found_failing_case = true;
-				// Save the first failing case we find
-				if (!minimal_failing_case) {
-					minimal_failing_case = sample;
-				}
-				// Update to track the minimal case
-				if (sample.n < (minimal_failing_case?.n ?? Infinity)) {
+				// Track the minimal case (first hit seeds it)
+				if (!minimal_failing_case || sample.n < minimal_failing_case.n) {
 					minimal_failing_case = sample;
 				}
 			}

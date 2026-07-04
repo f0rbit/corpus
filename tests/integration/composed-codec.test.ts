@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { z } from "zod";
-import { create_corpus, create_memory_backend, define_store, json_codec, compose } from "../../index";
-import { gzip_codec } from "../../codecs/gzip";
-import { encrypt_codec } from "../../codecs/encrypt";
+import { create_corpus, create_memory_backend, define_store, json_codec, compose } from "../../index.js";
+import { gzip_codec } from "../../codecs/gzip.js";
+import { encrypt_codec } from "../../codecs/encrypt.js";
 
-const EventSchema = z.object({
+const event_schema = z.object({
 	id: z.string(),
 	timestamp: z.number(),
 	payload: z.string(),
@@ -17,7 +17,7 @@ describe("composed codec integration", () => {
 		it("roundtrips through memory backend", async () => {
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("events", compose(json_codec(EventSchema), gzip_codec())))
+				.with_store(define_store("events", compose(json_codec(event_schema), gzip_codec())))
 				.build();
 
 			const event = { id: "evt-1", timestamp: 123, payload: "x".repeat(512) };
@@ -35,7 +35,7 @@ describe("composed codec integration", () => {
 		it("deduplicates: storing the same value twice produces matching content_hash", async () => {
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("events", compose(json_codec(EventSchema), gzip_codec())))
+				.with_store(define_store("events", compose(json_codec(event_schema), gzip_codec())))
 				.build();
 
 			const event = { id: "evt-dup", timestamp: 42, payload: "stable" };
@@ -59,7 +59,7 @@ describe("composed codec integration", () => {
 		it("roundtrips through memory backend", async () => {
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("secrets", compose(json_codec(EventSchema), gzip_codec(), encrypt_codec(key))))
+				.with_store(define_store("secrets", compose(json_codec(event_schema), gzip_codec(), encrypt_codec(key))))
 				.build();
 
 			const event = { id: "secret-1", timestamp: 999, payload: "top secret" };
@@ -77,7 +77,7 @@ describe("composed codec integration", () => {
 		it("does NOT deduplicate: random IV per encode means identical plaintexts produce different content_hashes", async () => {
 			const corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("secrets", compose(json_codec(EventSchema), gzip_codec(), encrypt_codec(key))))
+				.with_store(define_store("secrets", compose(json_codec(event_schema), gzip_codec(), encrypt_codec(key))))
 				.build();
 
 			const event = { id: "secret-dup", timestamp: 7, payload: "same" };

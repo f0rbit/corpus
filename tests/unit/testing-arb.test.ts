@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import fc from "fast-check";
 import { z } from "zod";
-import { arb } from "../../testing/arb";
-import { arbitrary, __reset_registry_for_tests } from "../../testing/registry";
-import { VersionSetManifestSchema } from "../../version-set";
+import { arb } from "../../testing/arb.js";
+import { arbitrary, __reset_registry_for_tests } from "../../testing/registry.js";
+import { VersionSetManifestSchema } from "../../version-set.js";
 
 describe("testing/arb", () => {
 	beforeEach(() => {
@@ -107,7 +107,7 @@ describe("testing/arb", () => {
 		test("literal pinned to the documented value", () => {
 			const a = arb(z.literal("yes"));
 			fc.assert(
-				fc.property(a, (v) => v === "yes"),
+				fc.property(a, (v: string) => v === "yes"),
 				{ numRuns: 20 },
 			);
 		});
@@ -115,7 +115,7 @@ describe("testing/arb", () => {
 		test("enum picks from values", () => {
 			const a = arb(z.enum(["red", "green", "blue"]));
 			fc.assert(
-				fc.property(a, (v) => v === "red" || v === "green" || v === "blue"),
+				fc.property(a, (v: string) => v === "red" || v === "green" || v === "blue"),
 				{ numRuns: 50 },
 			);
 		});
@@ -127,7 +127,7 @@ describe("testing/arb", () => {
 			}
 			const a = arb(z.nativeEnum(Color));
 			fc.assert(
-				fc.property(a, (v) => v === Color.Red || v === Color.Green),
+				fc.property(a, (v: string) => v === "red" || v === "green"),
 				{ numRuns: 50 },
 			);
 		});
@@ -183,7 +183,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			const seen = new Set<string>();
 			fc.assert(
-				fc.property(a, (v) => {
+				fc.property(a, (v: string) => {
 					seen.add(v);
 					return v === "a" || v === "b" || v === "c";
 				}),
@@ -305,18 +305,18 @@ describe("testing/arb", () => {
 			// generated depth stays small. We don't claim absolute bounds — just
 			// that generation + parsing don't blow up.
 			type Tree = { value: number; children: Tree[] };
-			const TreeSchema: z.ZodType<Tree> = z.lazy(() =>
+			const tree_schema: z.ZodType<Tree> = z.lazy(() =>
 				z.object({
 					value: z.number().int().min(0).max(100),
-					children: z.array(TreeSchema).max(2),
+					children: z.array(tree_schema).max(2),
 				}),
 			);
 			// fc.sample asserts only that we can produce a small batch without
 			// stack-overflowing. The schema validates structure.
-			const a = arb(TreeSchema);
+			const a = arb(tree_schema);
 			const samples = fc.sample(a, { numRuns: 10, seed: 7 });
 			for (const s of samples) {
-				expect(TreeSchema.safeParse(s).success).toBe(true);
+				expect(tree_schema.safeParse(s).success).toBe(true);
 			}
 		});
 	});

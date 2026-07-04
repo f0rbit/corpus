@@ -153,7 +153,7 @@ function format_message(stats: readonly CoverageStat[]): string {
 		const status = s.met ? "OK  " : "FAIL";
 		const observed = s.observed_percent.toFixed(2);
 		const min = s.min_percent.toFixed(2);
-		return `  [${status}] ${s.name}: observed ${observed}% (${s.hits}/${s.total}), required >= ${min}%`;
+		return `  [${status}] ${s.name}: observed ${observed}% (${String(s.hits)}/${String(s.total)}), required >= ${min}%`;
 	});
 	return `testing.cover: coverage shortfall\n${lines.join("\n")}`;
 }

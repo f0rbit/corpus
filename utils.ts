@@ -11,7 +11,6 @@ import type {
 	SnapshotMeta,
 	ListOpts,
 	ParentRef,
-	ContentType,
 	Parser,
 } from "./types.js";
 
@@ -92,7 +91,7 @@ export function generate_version(): string {
 		.replace(/\//g, "_")
 		.replace(/=/g, "");
 
-	return sequence > 0 ? `${base64}.${sequence}` : base64;
+	return sequence > 0 ? `${base64}.${String(sequence)}` : base64;
 }
 
 /**
@@ -243,8 +242,10 @@ export function binary_codec(): Codec<Uint8Array> {
 export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
 	if (layers.length === 0) return head;
 
-	const decode_streamable = !!head.decode_stream && layers.every((l) => l.decode_stream);
-	const encode_streamable = !!head.encode_stream && layers.every((l) => l.encode_stream);
+	const head_encode_stream = head.encode_stream;
+	const head_decode_stream = head.decode_stream;
+	const layer_encoders = layers.flatMap((l) => (l.encode_stream ? [l.encode_stream] : []));
+	const layer_decoders = layers.flatMap((l) => (l.decode_stream ? [l.decode_stream] : []));
 
 	const codec: Codec<T> = {
 		content_type: head.content_type,
@@ -254,23 +255,22 @@ export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
 			return bytes;
 		},
 		async decode(bytes) {
-			for (let i = layers.length - 1; i >= 0; i--) bytes = await layers[i]!.decode(bytes);
+			for (const layer of layers.toReversed()) bytes = await layer.decode(bytes);
 			return head.decode(bytes);
 		},
 	};
 
-	if (encode_streamable) {
+	if (head_encode_stream && layer_encoders.length === layers.length) {
 		codec.encode_stream = (value) => {
-			let stream = head.encode_stream!(value);
-			for (const layer of layers) {
+			let stream = head_encode_stream(value);
+			for (const layer_fn of layer_encoders) {
 				const layer_in = stream;
-				const layer_fn = layer.encode_stream!;
 				stream = new ReadableStream<Uint8Array>({
 					async start(controller) {
 						const buffered = await stream_to_bytes(layer_in);
 						const layer_out = layer_fn(buffered);
 						const reader = layer_out.getReader();
-						while (true) {
+						for (;;) {
 							const { done, value: chunk } = await reader.read();
 							if (done) break;
 							controller.enqueue(chunk);
@@ -283,11 +283,11 @@ export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
 		};
 	}
 
-	if (decode_streamable) {
+	if (head_decode_stream && layer_decoders.length === layers.length) {
 		codec.decode_stream = (stream) => {
 			let bytes_stream = stream;
-			for (let i = layers.length - 1; i >= 0; i--) bytes_stream = layers[i]!.decode_stream!(bytes_stream);
-			return head.decode_stream!(bytes_stream);
+			for (const layer_fn of layer_decoders.toReversed()) bytes_stream = layer_fn(bytes_stream);
+			return head_decode_stream(bytes_stream);
 		};
 	}
 
@@ -314,7 +314,7 @@ export function concat_bytes(chunks: Uint8Array[]): Uint8Array {
 export async function stream_to_bytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
 	const chunks: Uint8Array[] = [];
 	const reader = stream.getReader();
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -344,7 +344,7 @@ export function create_emitter(handler?: EventHandler): (event: CorpusEvent) => 
 export type FilterPipelineConfig<T, Opts> = {
 	filters: Array<{
 		key: keyof Opts;
-		predicate: (item: T, optValue: NonNullable<Opts[keyof Opts]>) => boolean;
+		predicate: (item: T, opt_value: NonNullable<Opts[keyof Opts]>) => boolean;
 	}>;
 	sort: (a: T, b: T) => number;
 };
@@ -377,9 +377,9 @@ export function create_filter_pipeline<T, Opts extends { limit?: number }>(
 	return (items, opts) => {
 		let filtered = items;
 		for (const { key, predicate } of config.filters) {
-			const optValue = opts[key];
-			if (optValue !== undefined && optValue !== null) {
-				filtered = filtered.filter((item) => predicate(item, optValue as NonNullable<Opts[keyof Opts]>));
+			const opt_value = opts[key];
+			if (opt_value !== undefined && opt_value !== null) {
+				filtered = filtered.filter((item) => predicate(item, opt_value as NonNullable<Opts[keyof Opts]>));
 			}
 		}
 		filtered.sort(config.sort);
@@ -396,8 +396,7 @@ const snapshot_filter_pipeline = create_filter_pipeline<SnapshotMeta, ListOpts>(
 		{ key: "after", predicate: (m, after) => m.created_at > (after as Date) },
 		{
 			key: "tags",
-			predicate: (m, tags) =>
-				(tags as string[]).length === 0 || (tags as string[]).every((tag) => m.tags?.includes(tag)),
+			predicate: (m, tags) => (tags as string[]).every((tag) => m.tags?.includes(tag)),
 		},
 	],
 	sort: (a, b) => b.created_at.getTime() - a.created_at.getTime(),
@@ -437,10 +436,14 @@ export function parse_snapshot_meta(raw: {
 				? raw.invoked_at
 				: new Date(raw.invoked_at)
 			: undefined,
-		parents: raw.parents ? (typeof raw.parents === "string" ? JSON.parse(raw.parents) : raw.parents) : [],
-		tags: raw.tags ? (typeof raw.tags === "string" ? JSON.parse(raw.tags) : raw.tags) : undefined,
+		parents: raw.parents
+			? typeof raw.parents === "string"
+				? (JSON.parse(raw.parents) as ParentRef[])
+				: raw.parents
+			: [],
+		tags: raw.tags ? (typeof raw.tags === "string" ? (JSON.parse(raw.tags) as string[]) : raw.tags) : undefined,
 		content_hash: raw.content_hash ?? "",
-		content_type: (raw.content_type ?? "application/octet-stream") as ContentType,
+		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,
 	};
 }

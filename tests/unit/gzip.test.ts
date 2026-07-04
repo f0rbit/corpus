@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { gzip_codec } from "../../codecs/gzip";
-import { compose, text_codec, stream_to_bytes } from "../../utils";
+import { gzip_codec } from "../../codecs/gzip.js";
+import { compose, text_codec, stream_to_bytes } from "../../utils.js";
 
 describe("gzip_codec", () => {
 	test("encode/decode roundtrip preserves bytes for small, medium, and 1 MB payloads", async () => {

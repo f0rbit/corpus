@@ -9,21 +9,21 @@ import {
 	ok,
 	type Corpus,
 	type Store,
-} from "../../index";
+} from "../../index.js";
 
 // Phase 1 transaction tests — exercise the sequential-fallback path against
 // the memory backend (which does not implement apply_batch yet — Phase 2).
 // Once memory.apply_batch lands, these tests still pass; they assert
 // observable invariants, not which path was taken.
 
-const ItemSchema = z.object({ id: z.string() });
-type Item = z.infer<typeof ItemSchema>;
+const item_schema = z.object({ id: z.string() });
+type Item = z.infer<typeof item_schema>;
 
 function make_corpus(): Corpus<{ items: Store<Item> }> {
 	return create_corpus()
 		.with_backend(create_memory_backend())
-		.with_store(define_store("items", json_codec(ItemSchema)))
-		.build() as Corpus<{ items: Store<Item> }>;
+		.with_store(define_store("items", json_codec(item_schema)))
+		.build();
 }
 
 describe("corpus.transaction (Phase 1 fallback)", () => {

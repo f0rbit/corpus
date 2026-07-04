@@ -10,25 +10,25 @@ import {
 	type BatchOp,
 	type Corpus,
 	type Store,
-} from "../../index";
-import { define_observation_type, create_pointer } from "../../observations";
+} from "../../index.js";
+import { define_observation_type, create_pointer } from "../../observations/index.js";
 
 // Transaction-path coverage for the memory backend's apply_batch:
 // - tx.observe inside a transaction goes through observation_put and the
 //   observation lands in the live observation_store on commit.
 // - apply_batch rollback: snapshot state is fully restored when an op throws.
 
-const DocSchema = z.object({ text: z.string() });
-type Doc = z.infer<typeof DocSchema>;
+const doc_schema = z.object({ text: z.string() });
+type Doc = z.infer<typeof doc_schema>;
 
-const SentimentType = define_observation_type("sentiment", z.object({ subject: z.string(), score: z.number() }));
+const sentiment_type = define_observation_type("sentiment", z.object({ subject: z.string(), score: z.number() }));
 
 function make_corpus(backend?: Backend): Corpus<{ docs: Store<Doc> }> {
 	return create_corpus()
 		.with_backend(backend ?? create_memory_backend())
-		.with_store(define_store("docs", json_codec(DocSchema)))
-		.with_observations([SentimentType])
-		.build() as Corpus<{ docs: Store<Doc> }>;
+		.with_store(define_store("docs", json_codec(doc_schema)))
+		.with_observations([sentiment_type])
+		.build();
 }
 
 describe("memory backend - observations through tx.observe", () => {
@@ -38,7 +38,7 @@ describe("memory backend - observations through tx.observe", () => {
 		const result = await corpus.transaction(async (tx) => {
 			const snap = await tx.put(corpus.stores.docs, { text: "hello" });
 			if (!snap.ok) return snap;
-			const obs = await tx.observe(SentimentType, {
+			const obs = await tx.observe(sentiment_type, {
 				source: { store_id: "docs", version: snap.value.version },
 				content: { subject: "hello", score: 0.9 },
 			});
@@ -59,14 +59,14 @@ describe("memory backend - observations through tx.observe", () => {
 	it("rolls back an observation when the transaction body throws", async () => {
 		const corpus = make_corpus();
 
-		const seed = await corpus.observations!.put(SentimentType, {
+		const seed = await corpus.observations!.put(sentiment_type, {
 			source: create_pointer("docs", "pre-existing"),
 			content: { subject: "seed", score: 0.0 },
 		});
 		expect(seed.ok).toBe(true);
 
 		const result = await corpus.transaction(async (tx) => {
-			await tx.observe(SentimentType, {
+			await tx.observe(sentiment_type, {
 				source: { store_id: "docs", version: "doomed" },
 				content: { subject: "doomed", score: -1 },
 			});
@@ -114,12 +114,13 @@ describe("memory backend - apply_batch rollback", () => {
 				data_key: "docs/txhash",
 			},
 		};
-		const throwing_op = new Proxy({ type: "meta_put" } as BatchOp, {
+		const partial_op: unknown = { type: "meta_put" };
+		const throwing_op = new Proxy(partial_op as BatchOp, {
 			get(target, prop) {
 				if (prop === "meta") throw new Error("synthetic op failure");
-				return (target as any)[prop];
+				return Reflect.get(target, prop) as unknown;
 			},
-		}) as BatchOp;
+		});
 
 		const result = await backend.apply_batch!([ok_op, throwing_op]);
 		expect(result.ok).toBe(false);

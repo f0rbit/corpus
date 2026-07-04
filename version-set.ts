@@ -136,6 +136,17 @@ export type VersionSetStore = {
 	promote: (from_version: string, to_tags: string[]) => Promise<Result<SnapshotMeta, CorpusError>>;
 };
 
+function merge_pkg_tag(pkg: string, tags?: string[]): string[] {
+	const tag = `pkg:${pkg}`;
+	if (!tags || tags.length === 0) return [tag];
+	return tags.includes(tag) ? tags : [tag, ...tags];
+}
+
+function ref_from_meta(meta: SnapshotMeta): VersionSetRef {
+	const pkg = meta.tags?.find((t) => t.startsWith("pkg:"))?.slice(4) ?? "unknown";
+	return { package: pkg, version: meta.version, content_hash: meta.content_hash };
+}
+
 /**
  * Create a `version-set` store on the supplied backend.
  *
@@ -202,16 +213,6 @@ export function version_set_store(backend: Backend, opts?: VersionSetStoreOption
 
 	const store = create_store<VersionSetManifest>(backend, definition);
 
-	function pkg_tag(manifest: VersionSetManifest): string {
-		return `pkg:${manifest.package}`;
-	}
-
-	function merge_pkg_tag(pkg: string, tags?: string[]): string[] {
-		const tag = `pkg:${pkg}`;
-		if (!tags || tags.length === 0) return [tag];
-		return tags.includes(tag) ? tags : [tag, ...tags];
-	}
-
 	async function put_impl(
 		manifest: VersionSetManifest,
 		put_opts?: PutOpts,
@@ -224,11 +225,6 @@ export function version_set_store(backend: Backend, opts?: VersionSetStoreOption
 
 	function self_parent(meta: SnapshotMeta): ParentRef | undefined {
 		return meta.parents.find((p) => p.store_id === id);
-	}
-
-	function ref_from_meta(meta: SnapshotMeta): VersionSetRef {
-		const pkg = meta.tags?.find((t) => t.startsWith("pkg:"))?.slice(4) ?? "unknown";
-		return { package: pkg, version: meta.version, content_hash: meta.content_hash };
 	}
 
 	async function lineage_impl(version: string): Promise<Result<VersionSetRef[], CorpusError>> {

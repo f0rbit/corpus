@@ -66,7 +66,7 @@ const increment_command = equivalence_command<CounterModel, Counter, CounterResu
 // Payload from a PLAIN fc arbitrary — compose-based payloads don't shrink safely.
 const add_commands = fc.integer({ min: 1, max: 5 }).map((n) =>
 	equivalence_command<CounterModel, Counter, CounterResult>({
-		label: `add(${n})`,
+		label: `add(${String(n)})`,
 		on_model: (m) => {
 			if (m.count + n > CAP) return err({ kind: "overflow" });
 			m.count += n;
@@ -201,7 +201,7 @@ describe("testing.law.provider_equivalence", () => {
 		});
 
 		// Compile-time only — never invoked.
-		const _misuse = async (): Promise<void> => {
+		const misuse = async (): Promise<void> => {
 			await provider_equivalence<CounterModel, Counter>({
 				model: () => ({ count: 0 }),
 				providers: [{ label: "correct", build: make_correct }],
@@ -211,7 +211,7 @@ describe("testing.law.provider_equivalence", () => {
 				numRuns: 1,
 			});
 		};
-		void _misuse;
+		void misuse;
 
 		expect(typeof wrong_model_command.run).toBe("function");
 	});

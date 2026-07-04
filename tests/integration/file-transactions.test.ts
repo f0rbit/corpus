@@ -1,26 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { z } from "zod";
-import { create_file_backend, recover } from "../../backend/file";
-import { create_corpus, define_store, json_codec, ok } from "../../index";
-import type { Backend, BatchOp, Corpus, Store } from "../../types";
+import { create_file_backend, recover } from "../../backend/file.js";
+import { create_corpus, define_store, json_codec, ok } from "../../index.js";
+import type { Backend, Corpus, SnapshotMeta, Store } from "../../types.js";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const TEST_DIR = join(import.meta.dir, ".test-file-transactions");
 
-const ItemSchema = z.object({ id: z.string(), value: z.number() });
-type Item = z.infer<typeof ItemSchema>;
-const NoteSchema = z.object({ text: z.string() });
-type Note = z.infer<typeof NoteSchema>;
+const item_schema = z.object({ id: z.string(), value: z.number() });
+type Item = z.infer<typeof item_schema>;
+const note_schema = z.object({ text: z.string() });
+type Note = z.infer<typeof note_schema>;
 
 type TxStores = { items: Store<Item>; notes: Store<Note> };
 
 const make_corpus = (b: Backend): Corpus<TxStores> =>
 	create_corpus()
 		.with_backend(b)
-		.with_store(define_store("items", json_codec(ItemSchema)))
-		.with_store(define_store("notes", json_codec(NoteSchema)))
-		.build() as Corpus<TxStores>;
+		.with_store(define_store("items", json_codec(item_schema)))
+		.with_store(define_store("notes", json_codec(note_schema)))
+		.build();
 
 describe("file backend - apply_batch", () => {
 	beforeEach(async () => {
@@ -79,10 +79,10 @@ describe("file backend - apply_batch", () => {
 		// JSON.stringify to throw during the staging phase. Nothing is
 		// visible on disk, the staging dir is nuked, and we get a clean
 		// `transaction_aborted`.
-		const meta: any = { store_id: "items", version: "v1" };
+		const meta: Record<string, unknown> = { store_id: "items", version: "v1" };
 		meta.self = meta;
 
-		const result = await backend.apply_batch!([{ type: "meta_put", meta } as BatchOp]);
+		const result = await backend.apply_batch!([{ type: "meta_put", meta: meta as unknown as SnapshotMeta }]);
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
 		expect(result.error.kind).toBe("transaction_aborted");

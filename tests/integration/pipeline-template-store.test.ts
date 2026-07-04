@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import type { Backend } from "../../index";
-import { pipeline_template_store } from "../../index";
-import { create_memory_backend } from "../../backend/memory";
-import { create_file_backend } from "../../backend/file";
+import { pipeline_template_store } from "../../index.js";
+import { create_memory_backend } from "../../backend/memory.js";
+import { create_file_backend } from "../../backend/file.js";
 
 // Minimal schema mirroring the consumer-side shape — corpus is content-agnostic.
-const TestTemplateSchema = z.object({
+const test_template_schema = z.object({
 	rollout: z.union([
 		z.object({ type: z.literal("atomic") }),
 		z.object({
@@ -28,7 +28,7 @@ const TestTemplateSchema = z.object({
 	post_deploy_checks: z.array(z.object({ kind: z.string(), policy: z.string() })),
 });
 
-type TestTemplate = z.infer<typeof TestTemplateSchema>;
+type TestTemplate = z.infer<typeof test_template_schema>;
 
 const make_atomic_template = (): TestTemplate => ({
 	rollout: { type: "atomic" },
@@ -62,7 +62,7 @@ function run_pipeline_template_tests(name: string, factory: BackendFactory, clea
 		beforeEach(async () => {
 			if (cleanup) await cleanup();
 			backend = await factory();
-			templates = pipeline_template_store(backend, TestTemplateSchema);
+			templates = pipeline_template_store(backend, test_template_schema);
 		});
 
 		describe("put", () => {
@@ -145,19 +145,19 @@ function run_pipeline_template_tests(name: string, factory: BackendFactory, clea
 
 run_pipeline_template_tests("MemoryBackend", () => create_memory_backend());
 
-const fileTestDir = join(tmpdir(), "corpus-pipeline-template-test-file");
+const file_test_dir = join(tmpdir(), "corpus-pipeline-template-test-file");
 run_pipeline_template_tests(
 	"FileBackend",
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
-		await mkdir(fileTestDir, { recursive: true });
-		return create_file_backend({ base_path: fileTestDir });
+		await rm(file_test_dir, { recursive: true, force: true });
+		await mkdir(file_test_dir, { recursive: true });
+		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
+		await rm(file_test_dir, { recursive: true, force: true });
 	},
 );
 
 afterAll(async () => {
-	await rm(fileTestDir, { recursive: true, force: true });
+	await rm(file_test_dir, { recursive: true, force: true });
 });

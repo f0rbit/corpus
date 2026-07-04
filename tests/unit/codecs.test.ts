@@ -1,10 +1,10 @@
 import { describe, test, expect } from "bun:test";
-import { text_codec, binary_codec, json_codec, stream_to_bytes, concat_bytes } from "../../utils";
+import { text_codec, binary_codec, json_codec, stream_to_bytes, concat_bytes } from "../../utils.js";
 
 const collect_strings = async (stream: ReadableStream<string>): Promise<string[]> => {
 	const reader = stream.getReader();
 	const chunks: string[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -69,7 +69,7 @@ describe("Built-in codec stream methods", () => {
 		const decoded = codec.decode_stream!(stream);
 		const collected: Uint8Array[] = [];
 		const reader = decoded.getReader();
-		while (true) {
+		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			collected.push(value);
@@ -80,8 +80,8 @@ describe("Built-in codec stream methods", () => {
 	});
 
 	test("json_codec exposes neither encode_stream nor decode_stream", () => {
-		const Schema = { parse: (x: unknown) => x as { id: string } };
-		const codec = json_codec<{ id: string }>(Schema);
+		const schema = { parse: (x: unknown) => x as { id: string } };
+		const codec = json_codec<{ id: string }>(schema);
 		expect(codec.decode_stream).toBeUndefined();
 		expect(codec.encode_stream).toBeUndefined();
 	});

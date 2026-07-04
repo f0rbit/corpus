@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
 import type { Backend, Corpus, SnapshotMeta, Store } from "../../types";
-import { create_corpus, define_store, json_codec, ok, err } from "../../index";
-import { define_observation_type } from "../../observations";
+import { create_corpus, define_store, json_codec, ok, err } from "../../index.js";
+import { define_observation_type } from "../../observations/index.js";
 
 export type BackendFactory = () => Backend | Promise<Backend>;
 export type CleanupFn = () => void | Promise<void>;
 
-const makeMeta = (store_id: string, version: string, opts?: Partial<SnapshotMeta>): SnapshotMeta => ({
+const make_meta = (store_id: string, version: string, opts?: Partial<SnapshotMeta>): SnapshotMeta => ({
 	store_id,
 	version,
 	parents: [],
@@ -19,12 +19,40 @@ const makeMeta = (store_id: string, version: string, opts?: Partial<SnapshotMeta
 	...opts,
 });
 
-export function runBackendContractTests(name: string, createBackend: BackendFactory, cleanup?: CleanupFn) {
+const big_payload = (): Uint8Array => {
+	const buf = new Uint8Array(256 * 1024);
+	for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
+	return buf;
+};
+
+const drain = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(value);
+	}
+	return chunks;
+};
+
+const flatten = (chunks: Uint8Array[]): Uint8Array => {
+	const total = chunks.reduce((acc, c) => acc + c.length, 0);
+	const out = new Uint8Array(total);
+	let offset = 0;
+	for (const c of chunks) {
+		out.set(c, offset);
+		offset += c.length;
+	}
+	return out;
+};
+
+export function run_backend_contract_tests(name: string, create_backend: BackendFactory, cleanup?: CleanupFn) {
 	describe(`${name} - Backend Contract`, () => {
 		let backend: Backend;
 
 		beforeEach(async () => {
-			backend = await createBackend();
+			backend = await create_backend();
 			if (cleanup) await cleanup();
 		});
 
@@ -42,7 +70,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("retrieves stored metadata", async () => {
-					const meta = makeMeta("test-store", "v1", { content_hash: "abc123" });
+					const meta = make_meta("test-store", "v1", { content_hash: "abc123" });
 					await backend.metadata.put(meta);
 
 					const result = await backend.metadata.get("test-store", "v1");
@@ -57,7 +85,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 
 			describe("put", () => {
 				it("stores metadata successfully", async () => {
-					const meta = makeMeta("test-store", "v1");
+					const meta = make_meta("test-store", "v1");
 
 					const result = await backend.metadata.put(meta);
 
@@ -65,8 +93,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("allows storing multiple versions", async () => {
-					const meta1 = makeMeta("test-store", "v1");
-					const meta2 = makeMeta("test-store", "v2");
+					const meta1 = make_meta("test-store", "v1");
+					const meta2 = make_meta("test-store", "v2");
 
 					await backend.metadata.put(meta1);
 					await backend.metadata.put(meta2);
@@ -79,8 +107,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("overwrites an existing version on repeated put", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1", { content_hash: "first" }));
-					await backend.metadata.put(makeMeta("test-store", "v1", { content_hash: "second" }));
+					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "first" }));
+					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "second" }));
 
 					const result = await backend.metadata.get("test-store", "v1");
 					expect(result.ok).toBe(true);
@@ -97,7 +125,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				it("preserves all metadata fields on roundtrip", async () => {
 					const created = new Date("2024-01-15T10:00:00Z");
 					const invoked = new Date("2024-01-15T09:00:00Z");
-					const meta = makeMeta("test-store", "v1", {
+					const meta = make_meta("test-store", "v1", {
 						parents: [{ store_id: "parent-store", version: "p1", role: "source" }],
 						created_at: created,
 						invoked_at: invoked,
@@ -122,14 +150,14 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 
 			describe("delete", () => {
 				it("removes stored metadata", async () => {
-					const meta = makeMeta("test-store", "v1");
+					const meta = make_meta("test-store", "v1");
 					await backend.metadata.put(meta);
 
-					const deleteResult = await backend.metadata.delete("test-store", "v1");
-					expect(deleteResult.ok).toBe(true);
+					const delete_result = await backend.metadata.delete("test-store", "v1");
+					expect(delete_result.ok).toBe(true);
 
-					const getResult = await backend.metadata.get("test-store", "v1");
-					expect(getResult.ok).toBe(false);
+					const get_result = await backend.metadata.get("test-store", "v1");
+					expect(get_result.ok).toBe(false);
 				});
 
 				it("succeeds when deleting non-existent metadata", async () => {
@@ -150,9 +178,9 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("returns all versions for a store", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1"));
-					await backend.metadata.put(makeMeta("test-store", "v2"));
-					await backend.metadata.put(makeMeta("test-store", "v3"));
+					await backend.metadata.put(make_meta("test-store", "v1"));
+					await backend.metadata.put(make_meta("test-store", "v2"));
+					await backend.metadata.put(make_meta("test-store", "v3"));
 
 					const versions: string[] = [];
 					for await (const meta of backend.metadata.list("test-store")) {
@@ -166,8 +194,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("only returns versions from requested store", async () => {
-					await backend.metadata.put(makeMeta("store-a", "v1"));
-					await backend.metadata.put(makeMeta("store-b", "v2"));
+					await backend.metadata.put(make_meta("store-a", "v1"));
+					await backend.metadata.put(make_meta("store-b", "v2"));
 
 					const versions: string[] = [];
 					for await (const meta of backend.metadata.list("store-a")) {
@@ -181,8 +209,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				it("matches store_id exactly, not as a prefix", async () => {
 					// Regression guard for commit 02bee7f — the Cloudflare backend once
 					// filtered store_id with like() and leaked prefix-sharing stores.
-					await backend.metadata.put(makeMeta("blog", "v1"));
-					await backend.metadata.put(makeMeta("blog-drafts", "v2"));
+					await backend.metadata.put(make_meta("blog", "v1"));
+					await backend.metadata.put(make_meta("blog-drafts", "v2"));
 
 					const versions: string[] = [];
 					for await (const meta of backend.metadata.list("blog")) {
@@ -193,9 +221,9 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("respects limit option", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1", { created_at: new Date("2024-01-01") }));
-					await backend.metadata.put(makeMeta("test-store", "v2", { created_at: new Date("2024-01-02") }));
-					await backend.metadata.put(makeMeta("test-store", "v3", { created_at: new Date("2024-01-03") }));
+					await backend.metadata.put(make_meta("test-store", "v1", { created_at: new Date("2024-01-01") }));
+					await backend.metadata.put(make_meta("test-store", "v2", { created_at: new Date("2024-01-02") }));
+					await backend.metadata.put(make_meta("test-store", "v3", { created_at: new Date("2024-01-03") }));
 
 					const versions: string[] = [];
 					for await (const meta of backend.metadata.list("test-store", { limit: 2 })) {
@@ -206,9 +234,9 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("filters by tags when provided", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1", { tags: ["alpha"] }));
-					await backend.metadata.put(makeMeta("test-store", "v2", { tags: ["beta"] }));
-					await backend.metadata.put(makeMeta("test-store", "v3", { tags: ["alpha", "beta"] }));
+					await backend.metadata.put(make_meta("test-store", "v1", { tags: ["alpha"] }));
+					await backend.metadata.put(make_meta("test-store", "v2", { tags: ["beta"] }));
+					await backend.metadata.put(make_meta("test-store", "v3", { tags: ["alpha", "beta"] }));
 
 					const versions: string[] = [];
 					for await (const meta of backend.metadata.list("test-store", { tags: ["alpha"] })) {
@@ -231,9 +259,9 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("returns newest by created_at", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1", { created_at: new Date("2024-01-01") }));
-					await backend.metadata.put(makeMeta("test-store", "v2", { created_at: new Date("2024-01-03") }));
-					await backend.metadata.put(makeMeta("test-store", "v3", { created_at: new Date("2024-01-02") }));
+					await backend.metadata.put(make_meta("test-store", "v1", { created_at: new Date("2024-01-01") }));
+					await backend.metadata.put(make_meta("test-store", "v2", { created_at: new Date("2024-01-03") }));
+					await backend.metadata.put(make_meta("test-store", "v3", { created_at: new Date("2024-01-02") }));
 
 					const result = await backend.metadata.get_latest("test-store");
 
@@ -245,7 +273,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 
 			describe("get_children", () => {
 				it("returns empty when no children exist", async () => {
-					await backend.metadata.put(makeMeta("test-store", "parent"));
+					await backend.metadata.put(make_meta("test-store", "parent"));
 
 					const children: string[] = [];
 					for await (const meta of backend.metadata.get_children("test-store", "parent")) {
@@ -256,18 +284,18 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("returns all snapshots with matching parent", async () => {
-					await backend.metadata.put(makeMeta("test-store", "parent"));
+					await backend.metadata.put(make_meta("test-store", "parent"));
 					await backend.metadata.put(
-						makeMeta("test-store", "child1", {
+						make_meta("test-store", "child1", {
 							parents: [{ store_id: "test-store", version: "parent" }],
 						}),
 					);
 					await backend.metadata.put(
-						makeMeta("test-store", "child2", {
+						make_meta("test-store", "child2", {
 							parents: [{ store_id: "test-store", version: "parent" }],
 						}),
 					);
-					await backend.metadata.put(makeMeta("test-store", "unrelated"));
+					await backend.metadata.put(make_meta("test-store", "unrelated"));
 
 					const children: string[] = [];
 					for await (const meta of backend.metadata.get_children("test-store", "parent")) {
@@ -289,8 +317,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("finds metadata by content hash", async () => {
-					await backend.metadata.put(makeMeta("test-store", "v1", { content_hash: "target-hash" }));
-					await backend.metadata.put(makeMeta("test-store", "v2", { content_hash: "other-hash" }));
+					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "target-hash" }));
+					await backend.metadata.put(make_meta("test-store", "v2", { content_hash: "other-hash" }));
 
 					const result = await backend.metadata.find_by_hash("test-store", "target-hash");
 
@@ -299,8 +327,8 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				});
 
 				it("only searches within specified store", async () => {
-					await backend.metadata.put(makeMeta("store-a", "v1", { content_hash: "shared-hash" }));
-					await backend.metadata.put(makeMeta("store-b", "v2", { content_hash: "shared-hash" }));
+					await backend.metadata.put(make_meta("store-a", "v1", { content_hash: "shared-hash" }));
+					await backend.metadata.put(make_meta("store-b", "v2", { content_hash: "shared-hash" }));
 
 					const result = await backend.metadata.find_by_hash("store-a", "shared-hash");
 
@@ -380,11 +408,11 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 				it("removes stored data", async () => {
 					await backend.data.put("test-key", new TextEncoder().encode("data"));
 
-					const deleteResult = await backend.data.delete("test-key");
-					expect(deleteResult.ok).toBe(true);
+					const delete_result = await backend.data.delete("test-key");
+					expect(delete_result.ok).toBe(true);
 
-					const getResult = await backend.data.get("test-key");
-					expect(getResult.ok).toBe(false);
+					const get_result = await backend.data.get("test-key");
+					expect(get_result.ok).toBe(false);
 				});
 
 				it("succeeds when deleting non-existent data", async () => {
@@ -423,7 +451,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 					const reader = stream.getReader();
 					const chunks: Uint8Array[] = [];
 
-					while (true) {
+					for (;;) {
 						const { done, value } = await reader.read();
 						if (done) break;
 						chunks.push(value);
@@ -441,34 +469,6 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 			});
 
 			describe("streaming reads", () => {
-				const big_payload = (): Uint8Array => {
-					const buf = new Uint8Array(256 * 1024);
-					for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
-					return buf;
-				};
-
-				const drain = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
-					const reader = stream.getReader();
-					const chunks: Uint8Array[] = [];
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						chunks.push(value);
-					}
-					return chunks;
-				};
-
-				const flatten = (chunks: Uint8Array[]): Uint8Array => {
-					const total = chunks.reduce((acc, c) => acc + c.length, 0);
-					const out = new Uint8Array(total);
-					let offset = 0;
-					for (const c of chunks) {
-						out.set(c, offset);
-						offset += c.length;
-					}
-					return out;
-				};
-
 				it("data handle stream() yields multi-chunk stream when bytes exceed chunk size", async () => {
 					const data = big_payload();
 					await backend.data.put("big-payload", data);
@@ -518,20 +518,20 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 		describe("cross-client consistency", () => {
 			it("data_key links metadata to data", async () => {
 				const data = new TextEncoder().encode("linked content");
-				const dataKey = "test-store/content-hash";
+				const data_key = "test-store/content-hash";
 
-				await backend.data.put(dataKey, data);
-				await backend.metadata.put(makeMeta("test-store", "v1", { data_key: dataKey }));
+				await backend.data.put(data_key, data);
+				await backend.metadata.put(make_meta("test-store", "v1", { data_key: data_key }));
 
-				const metaResult = await backend.metadata.get("test-store", "v1");
-				expect(metaResult.ok).toBe(true);
-				if (!metaResult.ok) return;
+				const meta_result = await backend.metadata.get("test-store", "v1");
+				expect(meta_result.ok).toBe(true);
+				if (!meta_result.ok) return;
 
-				const dataResult = await backend.data.get(metaResult.value.data_key);
-				expect(dataResult.ok).toBe(true);
-				if (!dataResult.ok) return;
+				const data_result = await backend.data.get(meta_result.value.data_key);
+				expect(data_result.ok).toBe(true);
+				if (!data_result.ok) return;
 
-				const bytes = await dataResult.value.bytes();
+				const bytes = await data_result.value.bytes();
 				expect(bytes).toEqual(data);
 			});
 		});
@@ -540,21 +540,21 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 		// The test suite gates on `backend.apply_batch != null` at run time so future
 		// backends pick it up automatically by adding the method.
 		describe("transaction contract", () => {
-			const ItemSchema = z.object({ id: z.string() });
-			type Item = z.infer<typeof ItemSchema>;
-			const NoteSchema = z.object({ text: z.string() });
-			type Note = z.infer<typeof NoteSchema>;
+			const item_schema = z.object({ id: z.string() });
+			type Item = z.infer<typeof item_schema>;
+			const note_schema = z.object({ text: z.string() });
+			type Note = z.infer<typeof note_schema>;
 
-			const SentimentType = define_observation_type("sentiment", z.object({ subject: z.string(), score: z.number() }));
+			const sentiment_type = define_observation_type("sentiment", z.object({ subject: z.string(), score: z.number() }));
 
 			type TxStores = { items: Store<Item>; notes: Store<Note> };
 			const make_corpus = (b: Backend): Corpus<TxStores> =>
 				create_corpus()
 					.with_backend(b)
-					.with_store(define_store("items", json_codec(ItemSchema)))
-					.with_store(define_store("notes", json_codec(NoteSchema)))
-					.with_observations([SentimentType])
-					.build() as Corpus<TxStores>;
+					.with_store(define_store("items", json_codec(item_schema)))
+					.with_store(define_store("notes", json_codec(note_schema)))
+					.with_observations([sentiment_type])
+					.build();
 
 			it("atomic success across multiple stores", async () => {
 				if (!backend.apply_batch) return;
@@ -684,7 +684,7 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 					const snap = await tx.put(corpus.stores.items, { id: "snap" });
 					if (!snap.ok) return snap;
 
-					const obs = await tx.observe(SentimentType, {
+					const obs = await tx.observe(sentiment_type, {
 						source: { store_id: "items", version: snap.value.version },
 						content: { subject: "snap", score: 0.5 },
 					});
@@ -721,34 +721,34 @@ export function runBackendContractTests(name: string, createBackend: BackendFact
 	});
 }
 
-import { create_memory_backend } from "../../backend/memory";
-import { create_file_backend } from "../../backend/file";
-import { create_layered_backend } from "../../backend/layered";
-import { create_cloudflare_backend } from "../../backend/cloudflare";
-import { corpus_snapshots } from "../../schema";
-import { corpus_observations } from "../../observations/schema";
-import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare";
+import { create_memory_backend } from "../../backend/memory.js";
+import { create_file_backend } from "../../backend/file.js";
+import { create_layered_backend } from "../../backend/layered.js";
+import { create_cloudflare_backend } from "../../backend/cloudflare.js";
+import { corpus_snapshots } from "../../schema.js";
+import { corpus_observations } from "../../observations/schema.js";
+import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare.js";
 import { rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-runBackendContractTests("MemoryBackend", () => create_memory_backend());
+run_backend_contract_tests("MemoryBackend", () => create_memory_backend());
 
-const fileTestDir = join(tmpdir(), "corpus-contract-test-file");
-runBackendContractTests(
+const file_test_dir = join(tmpdir(), "corpus-contract-test-file");
+run_backend_contract_tests(
 	"FileBackend",
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
-		await mkdir(fileTestDir, { recursive: true });
-		return create_file_backend({ base_path: fileTestDir });
+		await rm(file_test_dir, { recursive: true, force: true });
+		await mkdir(file_test_dir, { recursive: true });
+		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(fileTestDir, { recursive: true, force: true });
+		await rm(file_test_dir, { recursive: true, force: true });
 	},
 );
 
-const layeredTestDir = join(tmpdir(), "corpus-contract-test-layered");
-runBackendContractTests("LayeredBackend (memory read/write)", () => {
+const layered_test_dir = join(tmpdir(), "corpus-contract-test-layered");
+run_backend_contract_tests("LayeredBackend (memory read/write)", () => {
 	const memory = create_memory_backend();
 	return create_layered_backend({
 		read: [memory],
@@ -756,23 +756,23 @@ runBackendContractTests("LayeredBackend (memory read/write)", () => {
 	});
 });
 
-runBackendContractTests(
+run_backend_contract_tests(
 	"LayeredBackend (file read/write)",
 	async () => {
-		await rm(layeredTestDir, { recursive: true, force: true });
-		await mkdir(layeredTestDir, { recursive: true });
-		const file = create_file_backend({ base_path: layeredTestDir });
+		await rm(layered_test_dir, { recursive: true, force: true });
+		await mkdir(layered_test_dir, { recursive: true });
+		const file = create_file_backend({ base_path: layered_test_dir });
 		return create_layered_backend({
 			read: [file],
 			write: [file],
 		});
 	},
 	async () => {
-		await rm(layeredTestDir, { recursive: true, force: true });
+		await rm(layered_test_dir, { recursive: true, force: true });
 	},
 );
 
-runBackendContractTests("CloudflareBackend (faked D1 + R2)", () =>
+run_backend_contract_tests("CloudflareBackend (faked D1 + R2)", () =>
 	create_cloudflare_backend({
 		d1: create_fake_d1([corpus_snapshots, corpus_observations]),
 		r2: create_fake_r2(),
@@ -785,10 +785,10 @@ const big = (size: number): Uint8Array => {
 	return buf;
 };
 
-const drainChunks = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
+const drain_chunks = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
 	const reader = stream.getReader();
 	const chunks: Uint8Array[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -806,7 +806,7 @@ describe("backend-specific streaming chunk counts", () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 
-		const chunks = await drainChunks(result.value.stream());
+		const chunks = await drain_chunks(result.value.stream());
 		expect(chunks).toHaveLength(1);
 		expect(chunks[0]).toEqual(data);
 	});
@@ -826,7 +826,7 @@ describe("backend-specific streaming chunk counts", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const chunks = await drainChunks(result.value.stream());
+			const chunks = await drain_chunks(result.value.stream());
 			expect(chunks.length).toBeGreaterThanOrEqual(2);
 
 			const total = chunks.reduce((acc, c) => acc + c.length, 0);

@@ -1,4 +1,58 @@
 {
 	"extends": ["./node_modules/@f0rbit/oxlint-config/oxlintrc.json"],
-	"ignorePatterns": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "docs/**", ".plans/**"]
+	"ignorePatterns": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "docs/**", ".plans/**"],
+	"overrides": [
+		{
+			// Tests assert optional backend capabilities (observations, apply_batch,
+			// stream codec methods) that each fixture is known to provide — a `!` after
+			// explicit setup is the idiomatic bun-test pattern; the test fails loudly
+			// either way. Guard rewrites would add noise without safety.
+			"files": ["tests/**"],
+			"rules": {
+				"typescript/no-non-null-assertion": "off"
+			}
+		},
+		{
+			// Zod v3 internals (`_def`) are the walker's raison d'être; the `__`-prefixed
+			// test-only escape hatches are a documented convention (AGENTS.md).
+			"files": ["testing/**"],
+			"rules": {
+				"no-underscore-dangle": [
+					"error",
+					{
+						"allow": [
+							"_def",
+							"__reset_registry_for_tests",
+							"__reset_auto_load_for_tests",
+							"__set_auto_load_cwd_for_tests"
+						]
+					}
+				]
+			}
+		},
+		{
+			// `_assert_manifest_shape` is the compile-time bidirectional schema/type
+			// assertion pair (see AGENTS.md, Version sets).
+			"files": ["version-set.ts"],
+			"rules": {
+				"no-underscore-dangle": ["error", { "allow": ["_assert_manifest_shape"] }]
+			}
+		},
+		{
+			// Node ESM __dirname shim in the docs generator script.
+			"files": ["scripts/generate-llm-docs.js"],
+			"rules": {
+				"no-underscore-dangle": ["error", { "allow": ["__dirname"] }]
+			}
+		},
+		{
+			// `Store<any>` in generic constraint position is the standard variance escape:
+			// Store<T> is invariant in T, so `Record<string, Store<unknown>>` constraints
+			// would reject every concrete Store<T>. Public API shape — cannot change.
+			"files": ["types.ts", "corpus.ts"],
+			"rules": {
+				"typescript/no-explicit-any": "off"
+			}
+		}
+	]
 }

@@ -33,7 +33,7 @@ export function compose<T>(fn: (draw: Draw) => T): Arbitrary<T> {
 	return fc.gen().map((gen_value) => {
 		const draw: Draw = <U>(arb: Arbitrary<U>): U => {
 			// Use the generator's builder pattern: pass a function that returns the arbitrary
-			return gen_value((): Arbitrary<U> => arb) as U;
+			return gen_value((): Arbitrary<U> => arb);
 		};
 		return fn(draw);
 	});

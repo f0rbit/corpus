@@ -164,7 +164,7 @@ const getMdxDocs = () => {
 	const docs = [];
 	const walkDir = (dir, basePath = "") => {
 		if (!existsSync(dir)) return;
-		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+		const entries = readdirSync(dir, { withFileTypes: true }).toSorted((a, b) => a.name.localeCompare(b.name));
 		for (const entry of entries) {
 			const fullPath = join(dir, entry.name);
 			const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
@@ -196,7 +196,7 @@ const groupDocs = (docs) => {
 		if (!groups.has(segment)) groups.set(segment, []);
 		groups.get(segment).push(doc);
 	}
-	const ordered = [...groups.entries()].sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+	const ordered = [...groups.entries()].toSorted(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
 	return ordered;
 };
 
@@ -315,7 +315,7 @@ const collectSourceFiles = (roots) => {
 			if (resolved && !seen.has(resolved)) queue.push(resolved);
 		}
 	}
-	return [...seen].sort();
+	return [...seen].toSorted();
 };
 
 const generateLlmsFullTxt = (conciseTxt) => {

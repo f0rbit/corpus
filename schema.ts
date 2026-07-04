@@ -42,12 +42,12 @@ export const corpus_snapshots = sqliteTable(
 		data_key: text("data_key").notNull(),
 		tags: text("tags"),
 	},
-	(table) => ({
-		pk: primaryKey({ columns: [table.store_id, table.version] }),
-		created_idx: index("idx_store_created").on(table.store_id, table.created_at),
-		hash_idx: index("idx_content_hash").on(table.store_id, table.content_hash),
-		data_key_idx: index("idx_data_key").on(table.data_key),
-	}),
+	(table) => [
+		primaryKey({ columns: [table.store_id, table.version] }),
+		index("idx_store_created").on(table.store_id, table.created_at),
+		index("idx_content_hash").on(table.store_id, table.content_hash),
+		index("idx_data_key").on(table.data_key),
+	],
 );
 
 export type CorpusSnapshotRow = typeof corpus_snapshots.$inferSelect;

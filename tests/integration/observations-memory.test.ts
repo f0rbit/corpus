@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
-import { create_memory_backend } from "../../backend/memory";
-import { define_observation_type, create_pointer } from "../../observations";
+import { create_memory_backend } from "../../backend/memory.js";
+import { define_observation_type, create_pointer } from "../../observations/index.js";
 import type { ObservationsClient } from "../../types";
 
-const SentimentType = define_observation_type(
+const sentiment_type = define_observation_type(
 	"sentiment",
 	z.object({
 		subject: z.string(),
@@ -13,7 +13,7 @@ const SentimentType = define_observation_type(
 	}),
 );
 
-const EntityType = define_observation_type(
+const entity_type = define_observation_type(
 	"entity",
 	z.object({
 		name: z.string(),
@@ -22,7 +22,7 @@ const EntityType = define_observation_type(
 	}),
 );
 
-const SimpleType = define_observation_type(
+const simple_type = define_observation_type(
 	"simple",
 	z.object({
 		value: z.string(),
@@ -40,7 +40,7 @@ describe("observations integration - memory backend", () => {
 
 	describe("basic CRUD", () => {
 		it("puts and gets an observation", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				content: { subject: "test", score: 0.8, keywords: ["good"] },
 			});
@@ -56,10 +56,10 @@ describe("observations integration - memory backend", () => {
 			expect(obs.source.version).toBe("v1");
 			expect(obs.id).toMatch(/^obs_/);
 
-			const getResult = await observations.get(obs.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.id).toBe(obs.id);
+			const get_result = await observations.get(obs.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.id).toBe(obs.id);
 			}
 		});
 
@@ -72,18 +72,18 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("deletes an observation", async () => {
-			const putResult = await observations.put(SimpleType, {
+			const put_result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 			});
-			expect(putResult.ok).toBe(true);
-			if (!putResult.ok) return;
+			expect(put_result.ok).toBe(true);
+			if (!put_result.ok) return;
 
-			const deleteResult = await observations.delete(putResult.value.id);
-			expect(deleteResult.ok).toBe(true);
+			const delete_result = await observations.delete(put_result.value.id);
+			expect(delete_result.ok).toBe(true);
 
-			const getResult = await observations.get(putResult.value.id);
-			expect(getResult.ok).toBe(false);
+			const get_result = await observations.get(put_result.value.id);
+			expect(get_result.ok).toBe(false);
 		});
 
 		it("delete returns not_found for missing id", async () => {
@@ -96,24 +96,21 @@ describe("observations integration - memory backend", () => {
 
 		it("delete_by_source removes matching observations", async () => {
 			const source = create_pointer("docs", "v1");
-			await observations.put(SimpleType, { source, content: { value: "a" } });
-			await observations.put(SimpleType, { source, content: { value: "b" } });
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, { source, content: { value: "a" } });
+			await observations.put(simple_type, { source, content: { value: "b" } });
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v2"),
 				content: { value: "c" },
 			});
 
-			const deleteResult = await observations.delete_by_source(source);
-			expect(deleteResult.ok).toBe(true);
-			if (deleteResult.ok) {
-				expect(deleteResult.value).toBe(2);
+			const delete_result = await observations.delete_by_source(source);
+			expect(delete_result.ok).toBe(true);
+			if (delete_result.ok) {
+				expect(delete_result.value).toBe(2);
 			}
 
-			let count = 0;
-			for await (const _ of observations.query({})) {
-				count++;
-			}
-			expect(count).toBe(1);
+			const remaining = await Array.fromAsync(observations.query({}));
+			expect(remaining.length).toBe(1);
 		});
 
 		it("delete_by_source returns 0 for no matches", async () => {
@@ -126,28 +123,25 @@ describe("observations integration - memory backend", () => {
 
 		it("delete_by_source respects path filter", async () => {
 			const base = create_pointer("docs", "v1");
-			const withPath = create_pointer("docs", "v1", "$.specific");
+			const with_path = create_pointer("docs", "v1", "$.specific");
 
-			await observations.put(SimpleType, { source: base, content: { value: "a" } });
-			await observations.put(SimpleType, { source: withPath, content: { value: "b" } });
+			await observations.put(simple_type, { source: base, content: { value: "a" } });
+			await observations.put(simple_type, { source: with_path, content: { value: "b" } });
 
-			const deleteResult = await observations.delete_by_source(withPath);
-			expect(deleteResult.ok).toBe(true);
-			if (deleteResult.ok) {
-				expect(deleteResult.value).toBe(1);
+			const delete_result = await observations.delete_by_source(with_path);
+			expect(delete_result.ok).toBe(true);
+			if (delete_result.ok) {
+				expect(delete_result.value).toBe(1);
 			}
 
-			let count = 0;
-			for await (const _ of observations.query({})) {
-				count++;
-			}
-			expect(count).toBe(1);
+			const remaining = await Array.fromAsync(observations.query({}));
+			expect(remaining.length).toBe(1);
 		});
 	});
 
 	describe("type validation", () => {
 		it("validates content against schema on put", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				content: { subject: "test", score: 0.5, keywords: ["word"] },
 			});
@@ -155,7 +149,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("rejects invalid content - missing field", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				// @ts-expect-error - testing invalid content
 				content: { subject: "test" },
@@ -167,7 +161,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("rejects invalid content - wrong type", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				// @ts-expect-error - testing invalid content
 				content: { subject: 123, score: "bad", keywords: "not-array" },
@@ -179,7 +173,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("rejects invalid content - out of range", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				content: { subject: "test", score: 5.0, keywords: [] },
 			});
@@ -190,7 +184,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("rejects invalid content - score below minimum", async () => {
-			const result = await observations.put(SentimentType, {
+			const result = await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				content: { subject: "test", score: -2.0, keywords: [] },
 			});
@@ -201,9 +195,9 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("rejects invalid enum value", async () => {
-			const result = await observations.put(EntityType, {
+			const result = await observations.put(entity_type, {
 				source: create_pointer("docs", "v1"),
-				content: { name: "Test", type: "invalid" as any, mentions: 1 },
+				content: { name: "Test", type: "invalid" as never, mentions: 1 },
 			});
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -212,7 +206,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("accepts valid enum value", async () => {
-			const result = await observations.put(EntityType, {
+			const result = await observations.put(entity_type, {
 				source: create_pointer("docs", "v1"),
 				content: { name: "Test Corp", type: "org", mentions: 5 },
 			});
@@ -222,17 +216,17 @@ describe("observations integration - memory backend", () => {
 
 	describe("query filtering", () => {
 		beforeEach(async () => {
-			await observations.put(SentimentType, {
+			await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v1"),
 				content: { subject: "topic1", score: 0.8, keywords: ["good"] },
 				observed_at: new Date("2024-01-15"),
 			});
-			await observations.put(SentimentType, {
+			await observations.put(sentiment_type, {
 				source: create_pointer("docs", "v2"),
 				content: { subject: "topic2", score: -0.5, keywords: ["bad"] },
 				observed_at: new Date("2024-02-15"),
 			});
-			await observations.put(EntityType, {
+			await observations.put(entity_type, {
 				source: create_pointer("articles", "a1"),
 				content: { name: "Acme Corp", type: "org", mentions: 5 },
 				observed_at: new Date("2024-01-20"),
@@ -330,7 +324,7 @@ describe("observations integration - memory backend", () => {
 			for await (const meta of observations.query_meta({ type: "sentiment" })) {
 				expect(meta.id).toBeDefined();
 				expect(meta.type).toBe("sentiment");
-				expect((meta as any).content).toBeUndefined();
+				expect(meta).not.toHaveProperty("content");
 			}
 		});
 
@@ -366,7 +360,7 @@ describe("observations integration - memory backend", () => {
 
 	describe("optional fields", () => {
 		it("stores and retrieves confidence", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 				confidence: 0.95,
@@ -374,109 +368,109 @@ describe("observations integration - memory backend", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.confidence).toBe(0.95);
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.confidence).toBe(0.95);
 			}
 		});
 
 		it("stores and retrieves observed_at", async () => {
-			const observedAt = new Date("2024-06-15T10:30:00Z");
-			const result = await observations.put(SimpleType, {
+			const observed_at = new Date("2024-06-15T10:30:00Z");
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
-				observed_at: observedAt,
+				observed_at,
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.observed_at?.toISOString()).toBe(observedAt.toISOString());
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.observed_at?.toISOString()).toBe(observed_at.toISOString());
 			}
 		});
 
 		it("stores and retrieves derived_from", async () => {
-			const derivedFrom = [create_pointer("models", "gpt4"), create_pointer("prompts", "sentiment-v2")];
-			const result = await observations.put(SimpleType, {
+			const derived_from = [create_pointer("models", "gpt4"), create_pointer("prompts", "sentiment-v2")];
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
-				derived_from: derivedFrom,
+				derived_from,
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.derived_from).toEqual(derivedFrom);
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.derived_from).toEqual(derived_from);
 			}
 		});
 
 		it("stores source with path", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1", "$.paragraphs[0]"),
 				content: { value: "test" },
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.source.path).toBe("$.paragraphs[0]");
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.source.path).toBe("$.paragraphs[0]");
 			}
 		});
 
 		it("stores source with span", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1", undefined, { start: 100, end: 200 }),
 				content: { value: "test" },
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.source.span).toEqual({ start: 100, end: 200 });
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.source.span).toEqual({ start: 100, end: 200 });
 			}
 		});
 
 		it("stores source with path and span together", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1", "$.text", { start: 50, end: 150 }),
 				content: { value: "test" },
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.source.path).toBe("$.text");
-				expect(getResult.value.source.span).toEqual({ start: 50, end: 150 });
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.source.path).toBe("$.text");
+				expect(get_result.value.source.span).toEqual({ start: 50, end: 150 });
 			}
 		});
 
 		it("omits undefined optional fields", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.confidence).toBeUndefined();
-				expect(getResult.value.observed_at).toBeUndefined();
-				expect(getResult.value.derived_from).toBeUndefined();
-				expect(getResult.value.source.path).toBeUndefined();
-				expect(getResult.value.source.span).toBeUndefined();
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.confidence).toBeUndefined();
+				expect(get_result.value.observed_at).toBeUndefined();
+				expect(get_result.value.derived_from).toBeUndefined();
+				expect(get_result.value.source.path).toBeUndefined();
+				expect(get_result.value.source.span).toBeUndefined();
 			}
 		});
 	});
@@ -536,15 +530,15 @@ describe("observations integration - memory backend", () => {
 
 	describe("version_filter", () => {
 		beforeEach(async () => {
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "first" },
 			});
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v2"),
 				content: { value: "second" },
 			});
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v3"),
 				content: { value: "third" },
 			});
@@ -624,7 +618,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("function receives store_id correctly", async () => {
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("other", "v1"),
 				content: { value: "other-store" },
 			});
@@ -642,7 +636,7 @@ describe("observations integration - memory backend", () => {
 	describe("timestamps", () => {
 		it("sets created_at automatically", async () => {
 			const before = new Date();
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 			});
@@ -657,48 +651,48 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("preserves created_at on retrieval", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.created_at.toISOString()).toBe(result.value.created_at.toISOString());
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.created_at.toISOString()).toBe(result.value.created_at.toISOString());
 			}
 		});
 
 		it("created_at differs from observed_at", async () => {
-			const observedAt = new Date("2024-01-01");
-			const result = await observations.put(SimpleType, {
+			const observed_at = new Date("2024-01-01");
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
-				observed_at: observedAt,
+				observed_at,
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.value.created_at.getTime()).not.toBe(observedAt.getTime());
-			expect(result.value.observed_at?.toISOString()).toBe(observedAt.toISOString());
+			expect(result.value.created_at.getTime()).not.toBe(observed_at.getTime());
+			expect(result.value.observed_at?.toISOString()).toBe(observed_at.toISOString());
 		});
 	});
 
 	describe("query ordering", () => {
 		it("returns observations in created_at descending order", async () => {
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "first" },
 			});
 			await new Promise((r) => setTimeout(r, 5));
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v2"),
 				content: { value: "second" },
 			});
 			await new Promise((r) => setTimeout(r, 5));
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v3"),
 				content: { value: "third" },
 			});
@@ -720,9 +714,9 @@ describe("observations integration - memory backend", () => {
 			const ids = new Set<string>();
 
 			for (let i = 0; i < 10; i++) {
-				const result = await observations.put(SimpleType, {
-					source: create_pointer("docs", `v${i}`),
-					content: { value: `test${i}` },
+				const result = await observations.put(simple_type, {
+					source: create_pointer("docs", `v${String(i)}`),
+					content: { value: `test${String(i)}` },
 				});
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -734,7 +728,7 @@ describe("observations integration - memory backend", () => {
 		});
 
 		it("ids start with obs_ prefix", async () => {
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "test" },
 			});
@@ -747,14 +741,14 @@ describe("observations integration - memory backend", () => {
 
 	describe("created_at filtering", () => {
 		beforeEach(async () => {
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content: { value: "old" },
 			});
 
 			await new Promise((r) => setTimeout(r, 50));
 
-			await observations.put(SimpleType, {
+			await observations.put(simple_type, {
 				source: create_pointer("docs", "v2"),
 				content: { value: "new" },
 			});
@@ -787,7 +781,7 @@ describe("observations integration - memory backend", () => {
 
 	describe("content retrieval", () => {
 		it("preserves complex nested content", async () => {
-			const ComplexType = define_observation_type(
+			const complex_type = define_observation_type(
 				"complex",
 				z.object({
 					nested: z.object({
@@ -812,34 +806,34 @@ describe("observations integration - memory backend", () => {
 				},
 			};
 
-			const result = await observations.put(ComplexType, {
+			const result = await observations.put(complex_type, {
 				source: create_pointer("docs", "v1"),
 				content,
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.content).toEqual(content);
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.content).toEqual(content);
 			}
 		});
 
 		it("handles special characters in content", async () => {
 			const content = { value: 'test with "quotes" and \\backslash and unicode: 日本語' };
 
-			const result = await observations.put(SimpleType, {
+			const result = await observations.put(simple_type, {
 				source: create_pointer("docs", "v1"),
 				content,
 			});
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			const getResult = await observations.get(result.value.id);
-			expect(getResult.ok).toBe(true);
-			if (getResult.ok) {
-				expect(getResult.value.content).toEqual(content);
+			const get_result = await observations.get(result.value.id);
+			expect(get_result.ok).toBe(true);
+			if (get_result.ok) {
+				expect(get_result.value.content).toEqual(content);
 			}
 		});
 	});

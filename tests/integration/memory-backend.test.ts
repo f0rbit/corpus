@@ -8,19 +8,19 @@ import {
 	type CorpusEvent,
 	type Corpus,
 	type Store,
-} from "../../index";
+} from "../../index.js";
 
-const ItemSchema = z.object({
+const item_schema = z.object({
 	id: z.string(),
 	text: z.string(),
 });
 
-const TimelineSchema = z.object({
-	items: z.array(ItemSchema),
+const timeline_schema = z.object({
+	items: z.array(item_schema),
 	cursor: z.string().optional(),
 });
 
-type Timeline = z.infer<typeof TimelineSchema>;
+type Timeline = z.infer<typeof timeline_schema>;
 
 describe("memory backend", () => {
 	let events: CorpusEvent[];
@@ -30,7 +30,7 @@ describe("memory backend", () => {
 		events = [];
 		corpus = create_corpus()
 			.with_backend(create_memory_backend({ on_event: (e) => events.push(e) }))
-			.with_store(define_store("timelines", json_codec(TimelineSchema)))
+			.with_store(define_store("timelines", json_codec(timeline_schema)))
 			.build();
 	});
 
@@ -141,7 +141,7 @@ describe("memory backend", () => {
 
 			expect(result.value.version).toBe(version);
 			expect(result.value.content_hash).toBeString();
-			expect((result.value as any).data).toBeUndefined();
+			expect(result.value).not.toHaveProperty("data");
 		});
 	});
 
@@ -176,9 +176,7 @@ describe("memory backend", () => {
 			await corpus.stores.timelines.put(data);
 			await corpus.stores.timelines.put(data);
 
-			const data_puts = events.filter((e) => e.type === "data_put") as Array<
-				Extract<CorpusEvent, { type: "data_put" }>
-			>;
+			const data_puts = events.filter((e) => e.type === "data_put");
 
 			expect(data_puts).toHaveLength(2);
 			expect(data_puts[0]?.deduplicated).toBe(false);
@@ -400,8 +398,7 @@ describe("memory backend", () => {
 			await corpus.stores.timelines.put({ items: [{ id: "2", text: "b" }] });
 			events.length = 0;
 
-			for await (const _ of corpus.stores.timelines.list()) {
-			}
+			await Array.fromAsync(corpus.stores.timelines.list());
 
 			const meta_list = events.find((e) => e.type === "meta_list") as Extract<CorpusEvent, { type: "meta_list" }>;
 			expect(meta_list).toBeDefined();
@@ -424,17 +421,16 @@ describe("memory backend", () => {
 	});
 
 	describe("multiple stores", () => {
-		const UserSchema = z.object({
+		const user_schema = z.object({
 			name: z.string(),
 			email: z.string(),
 		});
-		type User = z.infer<typeof UserSchema>;
 
 		it("supports multiple independent stores", async () => {
 			const multi_corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("timelines", json_codec(TimelineSchema)))
-				.with_store(define_store("users", json_codec(UserSchema)))
+				.with_store(define_store("timelines", json_codec(timeline_schema)))
+				.with_store(define_store("users", json_codec(user_schema)))
 				.build();
 
 			const t1 = await multi_corpus.stores.timelines.put({ items: [] });
@@ -458,8 +454,8 @@ describe("memory backend", () => {
 		it("stores are isolated from each other", async () => {
 			const multi_corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("store_a", json_codec(ItemSchema)))
-				.with_store(define_store("store_b", json_codec(ItemSchema)))
+				.with_store(define_store("store_a", json_codec(item_schema)))
+				.with_store(define_store("store_b", json_codec(item_schema)))
 				.build();
 
 			const a = await multi_corpus.stores.store_a.put({ id: "1", text: "a" });
@@ -479,8 +475,8 @@ describe("memory backend", () => {
 		it("list only returns snapshots from own store", async () => {
 			const multi_corpus = create_corpus()
 				.with_backend(create_memory_backend())
-				.with_store(define_store("store_a", json_codec(ItemSchema)))
-				.with_store(define_store("store_b", json_codec(ItemSchema)))
+				.with_store(define_store("store_a", json_codec(item_schema)))
+				.with_store(define_store("store_b", json_codec(item_schema)))
 				.build();
 
 			const a1 = await multi_corpus.stores.store_a.put({ id: "1", text: "a" });

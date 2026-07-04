@@ -23,6 +23,7 @@ import type {
 } from "./types.js";
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
+import { try_catch, try_catch_async } from "./result.js";
 import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
@@ -42,6 +43,14 @@ type StoreImpl<T> = Omit<Store<T>, "put_stream"> & {
 
 function to_error(cause: unknown): Error {
 	return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function encode_error(cause: unknown): CorpusError {
+	return { kind: "encode_error", cause: to_error(cause) };
+}
+
+function decode_error(cause: unknown): CorpusError {
+	return { kind: "decode_error", cause: to_error(cause) };
 }
 
 /**
@@ -138,13 +147,9 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		const handle: SnapshotHandleImpl<T> = {
 			async value(): Promise<Result<T, CorpusError>> {
 				const bytes = await data_handle.bytes();
-				try {
-					return ok(await codec.decode(bytes));
-				} catch (cause) {
-					const error: CorpusError = { kind: "decode_error", cause: to_error(cause) };
-					emit({ type: "error", error });
-					return err(error);
-				}
+				const decoded = await try_catch_async(() => codec.decode(bytes), decode_error);
+				if (!decoded.ok) emit({ type: "error", error: decoded.error });
+				return decoded;
 			},
 			async bytes(): Promise<Result<Uint8Array, CorpusError>> {
 				return ok(await data_handle.bytes());
@@ -154,13 +159,9 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		if (codec.decode_stream) {
 			const decode_stream = codec.decode_stream;
 			handle.stream = async (): Promise<Result<ReadableStream<T>, CorpusError>> => {
-				try {
-					return ok(decode_stream(data_handle.stream()));
-				} catch (cause) {
-					const error: CorpusError = { kind: "decode_error", cause: to_error(cause) };
-					emit({ type: "error", error });
-					return err(error);
-				}
+				const stream = try_catch(() => decode_stream(data_handle.stream()), decode_error);
+				if (!stream.ok) emit({ type: "error", error: stream.error });
+				return stream;
 			};
 		}
 
@@ -215,28 +216,28 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 			return err(error);
 		}
 
-		let encoded: Uint8Array;
-		try {
-			// codec.encode_stream takes a value (T), not a stream — so we adapt by encoding
-			// each consumer-provided chunk independently and concatenating the byte outputs.
-			// Per plan §2.6 option (c): buffer encoded output for hashing, since corpus
-			// content-addresses by SHA-256 of the encoded bytes and there's no streaming
-			// SHA-256 in the standard runtime.
+		const encode_stream = codec.encode_stream;
+		// codec.encode_stream takes a value (T), not a stream — so we adapt by encoding
+		// each consumer-provided chunk independently and concatenating the byte outputs.
+		// Per plan §2.6 option (c): buffer encoded output for hashing, since corpus
+		// content-addresses by SHA-256 of the encoded bytes and there's no streaming
+		// SHA-256 in the standard runtime.
+		const encoded = await try_catch_async(async () => {
 			const encoded_chunks: Uint8Array[] = [];
 			const reader = stream.getReader();
-			while (true) {
+			for (;;) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				encoded_chunks.push(await stream_to_bytes(codec.encode_stream(value)));
+				encoded_chunks.push(await stream_to_bytes(encode_stream(value)));
 			}
-			encoded = concat_bytes(encoded_chunks);
-		} catch (cause) {
-			const error: CorpusError = { kind: "encode_error", cause: to_error(cause) };
-			emit({ type: "error", error });
-			return err(error);
+			return concat_bytes(encoded_chunks);
+		}, encode_error);
+		if (!encoded.ok) {
+			emit({ type: "error", error: encoded.error });
+			return encoded;
 		}
 
-		return do_put(encoded, opts);
+		return do_put(encoded.value, opts);
 	}
 
 	const store: StoreImpl<T> = {
@@ -244,16 +245,13 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		codec,
 
 		async put(data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
-			let bytes: Uint8Array;
-			try {
-				bytes = await codec.encode(data);
-			} catch (cause) {
-				const error: CorpusError = { kind: "encode_error", cause: to_error(cause) };
-				emit({ type: "error", error });
-				return err(error);
+			const bytes = await try_catch_async(() => codec.encode(data), encode_error);
+			if (!bytes.ok) {
+				emit({ type: "error", error: bytes.error });
+				return bytes;
 			}
 
-			return do_put(bytes, opts);
+			return do_put(bytes.value, opts);
 		},
 
 		async get(version: string): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
@@ -385,6 +383,10 @@ export function create_corpus(): CorpusBuilder<{}> {
 	return make_builder<{}>();
 }
 
+function meta_key(store_id: string, version: string): string {
+	return `${store_id}:${version}`;
+}
+
 function build_corpus<Stores extends Record<string, Store<any>>>(
 	b: Backend,
 	definitions: readonly StoreDefinition<string, any>[],
@@ -418,10 +420,6 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 		const commits: SnapshotMeta[] = [];
 		const observations: Observation[] = [];
 
-		function meta_key(store_id: string, version: string): string {
-			return `${store_id}:${version}`;
-		}
-
 		function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
 			const prefix = `${store_id}:`;
 			for (const [k, m] of buffered_meta) {
@@ -437,12 +435,9 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 					return err({ kind: "invalid_config", message: `store '${store.id}' is not registered on this corpus` });
 				}
 
-				let bytes: Uint8Array;
-				try {
-					bytes = await store.codec.encode(data);
-				} catch (cause) {
-					return err({ kind: "encode_error", cause: to_error(cause) });
-				}
+				const encoded = await try_catch_async(() => store.codec.encode(data), encode_error);
+				if (!encoded.ok) return encoded;
+				const bytes = encoded.value;
 
 				const version = generate_version();
 				const content_hash = await compute_hash(bytes);
@@ -493,22 +488,18 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 				if (buffered) {
 					const bytes = buffered_data.get(buffered.data_key);
 					if (bytes) {
-						try {
-							const value = await store.codec.decode(bytes);
-							return ok({ meta: buffered, data: value });
-						} catch (cause) {
-							return err({ kind: "decode_error", cause: to_error(cause) });
-						}
+						return try_catch_async(
+							async () => ({ meta: buffered, data: await store.codec.decode(bytes) }),
+							decode_error,
+						);
 					}
 					// dedup hit on live data — fall through to backend read by data_key
 					const live = await b.data.get(buffered.data_key);
 					if (!live.ok) return live;
-					try {
-						const value = await store.codec.decode(await live.value.bytes());
-						return ok({ meta: buffered, data: value });
-					} catch (cause) {
-						return err({ kind: "decode_error", cause: to_error(cause) });
-					}
+					return try_catch_async(
+						async () => ({ meta: buffered, data: await store.codec.decode(await live.value.bytes()) }),
+						decode_error,
+					);
 				}
 				return store.get(version);
 			},
@@ -558,14 +549,16 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 			},
 		};
 
-		let body_result: Result<R, CorpusError>;
-		try {
-			body_result = await body(handle);
-		} catch (cause) {
+		const body_run = await try_catch_async(
+			() => body(handle),
+			(cause): CorpusError => ({ kind: "transaction_aborted", reason: "threw", cause: to_error(cause) }),
+		);
+		if (!body_run.ok) {
 			in_transaction = false;
-			return err({ kind: "transaction_aborted", reason: "threw", cause: to_error(cause) });
+			return body_run;
 		}
 
+		const body_result = body_run.value;
 		if (!body_result.ok) {
 			in_transaction = false;
 			return err({
@@ -648,7 +641,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 function corpus_error_to_native(e: CorpusError): Error {
 	// pull the original cause if present, otherwise synthesise one from the kind
 	if ("cause" in e && e.cause instanceof Error) return e.cause;
-	return new Error(`[${e.kind}] ${"message" in e ? e.message : JSON.stringify(e)}`);
+	return new Error(`[${e.kind}] ${("message" in e ? e.message : undefined) ?? JSON.stringify(e)}`);
 }
 
 /**
@@ -676,8 +669,7 @@ async function sequential_apply_with_compensation(
 		// non-undoable, surface partial_commit honestly.
 		let compensation_failed = false;
 		let compensation_cause: Error | undefined;
-		for (let i = applied.length - 1; i >= 0; i--) {
-			const applied_op = applied[i]!;
+		for (const applied_op of applied.toReversed()) {
 			if (applied_op.type === "meta_delete" || applied_op.type === "observation_delete") {
 				compensation_failed = true;
 				continue;
