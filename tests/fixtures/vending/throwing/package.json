@@ -1,0 +1,6 @@
+{
+	"name": "vending-throwing",
+	"version": "0.0.0",
+	"private": true,
+	"dependencies": { "throwing-registrar": "1.0.0" }
+}

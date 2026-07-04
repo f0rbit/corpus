@@ -1,0 +1,6 @@
+{
+	"name": "@f0rbit/corpus",
+	"version": "0.0.0",
+	"private": true,
+	"corpus": { "testing": "./register.ts" }
+}

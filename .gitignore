@@ -1,5 +1,8 @@
 # dependencies (bun install)
 node_modules
+# ...except vending-walker test fixtures, which fake installed packages
+!tests/fixtures/**/node_modules/
+!tests/fixtures/**/node_modules/**
 
 # output
 out
