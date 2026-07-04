@@ -59,11 +59,7 @@ const DEFAULT_NUM_RUNS = 50;
  * });
  * ```
  */
-export async function error_path_exhaustive<
-	Args extends readonly unknown[],
-	T,
-	E extends { kind: string },
->(
+export async function error_path_exhaustive<Args extends readonly unknown[], T, E extends { kind: string }>(
 	fn: (...args: Args) => Promise<Result<T, E>>,
 	opts: {
 		error_brand: ArbBrand<E>;
@@ -105,9 +101,7 @@ export async function error_path_exhaustive<
 				// Node / workerd). fast-check surfaces thrown errors as property
 				// failures with the counterexample attached.
 				if (result.ok) {
-					throw new Error(
-						`error_path_exhaustive: provoked variant '${failure.kind}' but fn returned ok`,
-					);
+					throw new Error(`error_path_exhaustive: provoked variant '${failure.kind}' but fn returned ok`);
 				}
 				if (result.error.kind !== failure.kind) {
 					throw new Error(

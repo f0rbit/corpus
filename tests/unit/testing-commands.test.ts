@@ -163,9 +163,7 @@ describe("testing.law.provider_equivalence", () => {
 
 		const shrunk_match = message.match(/sequence: \[([^\]]*)\]/);
 		expect(shrunk_match).not.toBeNull();
-		const shrunk = (shrunk_match?.[1] ?? "")
-			.split(", ")
-			.filter((s) => s.length > 0);
+		const shrunk = (shrunk_match?.[1] ?? "").split(", ").filter((s) => s.length > 0);
 
 		expect(shrunk.length).toBeGreaterThanOrEqual(1);
 		expect(shrunk.length).toBeLessThanOrEqual(2);

@@ -47,14 +47,14 @@ This is a **single-package** library (not a monorepo). All source lives at the r
 
 Public entry points exposed via `package.json` `exports`:
 
-| Specifier | Purpose |
-|-----------|---------|
-| `@f0rbit/corpus` | Main barrel (everything) |
-| `@f0rbit/corpus/file` | File backend (drops in for `import('./backend/file.js')` consumers without pulling Cloudflare types) |
-| `@f0rbit/corpus/cloudflare` | Cloudflare backend |
-| `@f0rbit/corpus/types` | Types only — useful from worker entrypoints |
-| `@f0rbit/corpus/schema` | Drizzle schema only — for migration tooling |
-| `@f0rbit/corpus/testing` | Property-based testing substrate (`arb`, `compose`, registry, re-exported `fc`) |
+| Specifier                   | Purpose                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `@f0rbit/corpus`            | Main barrel (everything)                                                                             |
+| `@f0rbit/corpus/file`       | File backend (drops in for `import('./backend/file.js')` consumers without pulling Cloudflare types) |
+| `@f0rbit/corpus/cloudflare` | Cloudflare backend                                                                                   |
+| `@f0rbit/corpus/types`      | Types only — useful from worker entrypoints                                                          |
+| `@f0rbit/corpus/schema`     | Drizzle schema only — for migration tooling                                                          |
+| `@f0rbit/corpus/testing`    | Property-based testing substrate (`arb`, `compose`, registry, re-exported `fc`)                      |
 
 ## Scripts
 
@@ -84,6 +84,7 @@ These differ from or override global defaults — read them.
 This library defines its **own** `Result<T, E = CorpusError>` and `ok` / `err` helpers in `types.ts`. **Do not import `@f0rbit/corpus` from inside this repo** for Result types; import from `./types.js` (or `./result.js` for combinators). The global `corpus-patterns` skill describes the same API — its examples apply, just with relative imports.
 
 Conventions:
+
 - Never throw across module boundaries. Use `try_catch` / `try_catch_async` to wrap external calls (fs, fetch, Drizzle, R2) at the edge.
 - Use `pipe()` chains for multi-step Result transformations rather than nested `if (!result.ok) return result`.
 - All public functions returning a Result should declare it explicitly — no inference of `Result<...>` return types.
@@ -113,8 +114,8 @@ Drizzle is the sole source of truth: `schema.ts` (`corpus_snapshots`) and `obser
 
 The `version_set_store` factory lives in `version-set.ts`. The manifest schema (`VersionSetManifest`) is consumed by `~/dev/devpad/packages/pipelines/` and any package scaffolded by `devpad pipelines init`. Treat any change to the Zod schema as a breaking change across consumers.
 
-- *Zod `.default()` makes input ≠ output*: prefer a bidirectional `extends` assertion over `satisfies ZodType<T>` when the static type mirrors a schema with defaults. `.default()` widens the input type but narrows the output, so a direct `satisfies` against the inferred shape rejects schemas with defaults.
-- *Per-store partitioning via internal tag*: stores that need a per-partition `data_key_fn` (e.g. `version_set_store`) read the partition key from a tag the store sets on every `put`. Keep this tag set as a private convention of the store factory — consumers shouldn't have to know to set it themselves.
+- _Zod `.default()` makes input ≠ output_: prefer a bidirectional `extends` assertion over `satisfies ZodType<T>` when the static type mirrors a schema with defaults. `.default()` widens the input type but narrows the output, so a direct `satisfies` against the inferred shape rejects schemas with defaults.
+- _Per-store partitioning via internal tag_: stores that need a per-partition `data_key_fn` (e.g. `version_set_store`) read the partition key from a tag the store sets on every `put`. Keep this tag set as a private convention of the store factory — consumers shouldn't have to know to set it themselves.
 
 ### Observations
 
@@ -157,6 +158,7 @@ Docs live in `docs/` as an Astro Starlight workspace.
 - The package name in user-facing docs is **`@f0rbit/corpus`** (with the scope). The README has historically used the unscoped form — prefer the scoped form going forward.
 
 Plans live in `.plans/`:
+
 - `corpus-testing-substrate.html` — **completed** (shipped in 0.7.0): property-based testing substrate, phases 1–5 (PRs #31, #36, #37, #38 + the 0.7.0 release PR). Kept as design reference; deferred items live in its `#out-of-scope`.
 - `streamed-reads.md` — completed: streaming reads + codec composition shipped. Kept as reference — the `compose()` encode-buffering gotcha below cites its §2.3.
 - `cross-store-atomic.md` — completed: `corpus.transaction(async tx => ...)` shipped across all backends. Kept as design reference.

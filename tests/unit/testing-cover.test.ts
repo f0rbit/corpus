@@ -1,40 +1,28 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import {
-	cover_property,
-	CoverageError,
-	DEFAULT_NUM_RUNS,
-} from "../../testing/cover.js";
+import { cover_property, CoverageError, DEFAULT_NUM_RUNS } from "../../testing/cover.js";
 
 describe("testing.cover", () => {
 	test("property passes + all labels met: resolves without throwing", async () => {
-		await cover_property(
-			fc.integer({ min: -100, max: 100 }),
-			(_n) => true,
-			{
-				labels: [
-					{ name: "negative", min_percent: 20, matches: (n) => n < 0 },
-					{ name: "non_negative", min_percent: 20, matches: (n) => n >= 0 },
-				],
-				numRuns: 200,
-			}
-		);
+		await cover_property(fc.integer({ min: -100, max: 100 }), (_n) => true, {
+			labels: [
+				{ name: "negative", min_percent: 20, matches: (n) => n < 0 },
+				{ name: "non_negative", min_percent: 20, matches: (n) => n >= 0 },
+			],
+			numRuns: 200,
+		});
 	});
 
 	test("property passes but one label below minimum: throws CoverageError", async () => {
 		// `n === 0` is essentially never produced by fc.integer over the full
 		// signed-32-bit range, so requiring 50% coverage forces the shortfall.
-		const promise = cover_property(
-			fc.integer({ min: -1_000_000, max: 1_000_000 }),
-			(_n) => true,
-			{
-				labels: [
-					{ name: "any", min_percent: 0, matches: (_n) => true },
-					{ name: "exactly_zero", min_percent: 50, matches: (n) => n === 0 },
-				],
-				numRuns: 100,
-			}
-		);
+		const promise = cover_property(fc.integer({ min: -1_000_000, max: 1_000_000 }), (_n) => true, {
+			labels: [
+				{ name: "any", min_percent: 0, matches: (_n) => true },
+				{ name: "exactly_zero", min_percent: 50, matches: (n) => n === 0 },
+			],
+			numRuns: 100,
+		});
 		await expect(promise).rejects.toBeInstanceOf(CoverageError);
 	});
 
@@ -45,16 +33,10 @@ describe("testing.cover", () => {
 		// one if the property had passed.
 		let thrown: unknown;
 		try {
-			await cover_property(
-				fc.integer({ min: 0, max: 10 }),
-				(n) => n <= 5,
-				{
-					labels: [
-						{ name: "impossible", min_percent: 100, matches: (n) => n === -1 },
-					],
-					numRuns: 200,
-				}
-			);
+			await cover_property(fc.integer({ min: 0, max: 10 }), (n) => n <= 5, {
+				labels: [{ name: "impossible", min_percent: 100, matches: (n) => n === -1 }],
+				numRuns: 200,
+			});
 		} catch (e) {
 			thrown = e;
 		}
@@ -65,17 +47,13 @@ describe("testing.cover", () => {
 
 	test("CoverageError message lists ALL labels — met ones flagged OK, unmet flagged FAIL", async () => {
 		try {
-			await cover_property(
-				fc.integer({ min: 0, max: 99 }),
-				(_n) => true,
-				{
-					labels: [
-						{ name: "always_hit", min_percent: 90, matches: (_n) => true },
-						{ name: "never_hit", min_percent: 50, matches: (_n) => false },
-					],
-					numRuns: 200,
-				}
-			);
+			await cover_property(fc.integer({ min: 0, max: 99 }), (_n) => true, {
+				labels: [
+					{ name: "always_hit", min_percent: 90, matches: (_n) => true },
+					{ name: "never_hit", min_percent: 50, matches: (_n) => false },
+				],
+				numRuns: 200,
+			});
 			throw new Error("expected CoverageError to be thrown");
 		} catch (e) {
 			expect(e).toBeInstanceOf(CoverageError);
@@ -96,20 +74,14 @@ describe("testing.cover", () => {
 		// fc.assert reads its seed from the global config when none is passed
 		// directly. Pin both runs to the same seed and assert the stats line up.
 		const run_once = async (): Promise<number> => {
-			fc.configureGlobal({ seed: 0xC0FFEE, randomType: "xorshift128plus" });
+			fc.configureGlobal({ seed: 0xc0ffee, randomType: "xorshift128plus" });
 			try {
-				await cover_property(
-					fc.integer({ min: 0, max: 9 }),
-					(_n) => true,
-					{
-						// 100% requirement on a 10% predicate is guaranteed to fail
-						// and surface the stats.
-						labels: [
-							{ name: "is_zero", min_percent: 100, matches: (n) => n === 0 },
-						],
-						numRuns: 200,
-					}
-				);
+				await cover_property(fc.integer({ min: 0, max: 9 }), (_n) => true, {
+					// 100% requirement on a 10% predicate is guaranteed to fail
+					// and surface the stats.
+					labels: [{ name: "is_zero", min_percent: 100, matches: (n) => n === 0 }],
+					numRuns: 200,
+				});
 				return -1;
 			} catch (e) {
 				if (e instanceof CoverageError) {
@@ -128,16 +100,10 @@ describe("testing.cover", () => {
 
 	test("hit counts equal numRuns: tally happens once per sample inside the predicate wrapper", async () => {
 		try {
-			await cover_property(
-				fc.integer({ min: 0, max: 99 }),
-				(_n) => true,
-				{
-					labels: [
-						{ name: "all", min_percent: 200, matches: (_n) => true },
-					],
-					numRuns: 137,
-				}
-			);
+			await cover_property(fc.integer({ min: 0, max: 99 }), (_n) => true, {
+				labels: [{ name: "all", min_percent: 200, matches: (_n) => true }],
+				numRuns: 137,
+			});
 			throw new Error("expected shortfall");
 		} catch (e) {
 			expect(e).toBeInstanceOf(CoverageError);
@@ -149,15 +115,9 @@ describe("testing.cover", () => {
 
 	test("default numRuns: 200 samples when opts.numRuns is omitted", async () => {
 		try {
-			await cover_property(
-				fc.integer({ min: 0, max: 99 }),
-				(_n) => true,
-				{
-					labels: [
-						{ name: "all", min_percent: 200, matches: (_n) => true },
-					],
-				}
-			);
+			await cover_property(fc.integer({ min: 0, max: 99 }), (_n) => true, {
+				labels: [{ name: "all", min_percent: 200, matches: (_n) => true }],
+			});
 			throw new Error("expected shortfall");
 		} catch (e) {
 			expect(e).toBeInstanceOf(CoverageError);

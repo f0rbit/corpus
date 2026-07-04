@@ -3,12 +3,20 @@
  * @description Centralized business logic for observations, built on storage adapters.
  */
 
-import type { Result, CorpusError, MetadataClient, ObservationsClient } from '../types.js';
-import type { Observation, ObservationMeta, ObservationTypeDef, ObservationPutOpts, ObservationQueryOpts, SnapshotPointer, VersionFilter } from './types.js';
-import type { ObservationsStorage, StorageQueryOpts } from './storage.js';
-import { row_to_observation, row_to_meta, create_observation_row } from './storage.js';
-import { generate_observation_id } from './utils.js';
-import { ok, err } from '../types.js';
+import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types.js";
+import type {
+	Observation,
+	ObservationMeta,
+	ObservationTypeDef,
+	ObservationPutOpts,
+	ObservationQueryOpts,
+	SnapshotPointer,
+	VersionFilter,
+} from "./types.js";
+import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
+import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
+import { generate_observation_id } from "./utils.js";
+import { ok, err } from "../types.js";
 
 async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
 	if (typeof filter === "function") return filter(store_id, version);
@@ -45,7 +53,10 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 	}
 
 	return {
-		async put<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
+		async put<T>(
+			type: ObservationTypeDef<T>,
+			opts: ObservationPutOpts<T>,
+		): Promise<Result<Observation<T>, CorpusError>> {
 			const validation = type.schema.safeParse(opts.content);
 			if (!validation.success) {
 				return err({

@@ -38,7 +38,7 @@ describe("Built-in codec stream methods", () => {
 				controller.enqueue(chunk_a);
 				controller.enqueue(chunk_b);
 				controller.close();
-			}
+			},
 		});
 
 		const out_chunks = await collect_strings(codec.decode_stream!(byte_stream));
@@ -63,7 +63,7 @@ describe("Built-in codec stream methods", () => {
 				controller.enqueue(chunk_a);
 				controller.enqueue(chunk_b);
 				controller.close();
-			}
+			},
 		});
 
 		const decoded = codec.decode_stream!(stream);

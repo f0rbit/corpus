@@ -71,7 +71,7 @@ describe("store streaming", () => {
 				.build();
 
 			const first = await corpus.stores.notes.put("first");
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			const second = await corpus.stores.notes.put("second");
 			expect(first.ok && second.ok).toBe(true);
 			if (!first.ok || !second.ok) return;

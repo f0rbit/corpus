@@ -3,24 +3,24 @@
  * @description AES-GCM byte-transformer codec via WebCrypto.
  */
 
-import type { BytesCodec } from '../types.js'
+import type { BytesCodec } from "../types.js";
 
-const IV_LENGTH = 12
+const IV_LENGTH = 12;
 
 async function encrypt_bytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
-	const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH))
-	const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes as Uint8Array<ArrayBuffer>)
-	const out = new Uint8Array(iv.length + ciphertext.byteLength)
-	out.set(iv, 0)
-	out.set(new Uint8Array(ciphertext), iv.length)
-	return out
+	const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+	const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes as Uint8Array<ArrayBuffer>);
+	const out = new Uint8Array(iv.length + ciphertext.byteLength);
+	out.set(iv, 0);
+	out.set(new Uint8Array(ciphertext), iv.length);
+	return out;
 }
 
 async function decrypt_bytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
-	const iv = bytes.slice(0, IV_LENGTH)
-	const ciphertext = bytes.slice(IV_LENGTH)
-	const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext as Uint8Array<ArrayBuffer>)
-	return new Uint8Array(plaintext)
+	const iv = bytes.slice(0, IV_LENGTH);
+	const ciphertext = bytes.slice(IV_LENGTH);
+	const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext as Uint8Array<ArrayBuffer>);
+	return new Uint8Array(plaintext);
 }
 
 /**
@@ -69,21 +69,21 @@ async function decrypt_bytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Ar
  */
 export function encrypt_codec(key: CryptoKey): BytesCodec {
 	return {
-		content_type: 'application/octet-stream',
+		content_type: "application/octet-stream",
 		encode: (bytes) => encrypt_bytes(key, bytes),
 		decode: (bytes) => decrypt_bytes(key, bytes),
 		encode_stream(value) {
 			return new ReadableStream<Uint8Array>({
 				async start(controller) {
 					try {
-						controller.enqueue(await encrypt_bytes(key, value))
-						controller.close()
+						controller.enqueue(await encrypt_bytes(key, value));
+						controller.close();
 					} catch (cause) {
-						controller.error(cause)
+						controller.error(cause);
 					}
 				},
-			})
+			});
 		},
 		// decode_stream INTENTIONALLY OMITTED — see module docstring.
-	}
+	};
 }

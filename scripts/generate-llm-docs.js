@@ -88,9 +88,7 @@ const bucketFor = (surface, module) => {
 };
 
 const collectDirectExports = (content, bucket) => {
-	const stripped = content
-		.replace(NAMED_REEXPORT, "")
-		.replace(STAR_REEXPORT, "");
+	const stripped = content.replace(NAMED_REEXPORT, "").replace(STAR_REEXPORT, "");
 
 	for (const m of stripped.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)) bucket.values.add(m[1]);
 	for (const m of stripped.matchAll(/export\s+const\s+(\w+)/g)) bucket.values.add(m[1]);
@@ -150,7 +148,10 @@ const extractFrontmatter = (mdxContent) => {
 		const colonIdx = line.indexOf(":");
 		if (colonIdx > 0) {
 			const key = line.slice(0, colonIdx).trim();
-			const value = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, "");
+			const value = line
+				.slice(colonIdx + 1)
+				.trim()
+				.replace(/^["']|["']$/g, "");
 			fm[key] = value;
 		}
 	}
@@ -234,7 +235,10 @@ const renderSurface = (surface) => {
 	for (const [module, bucket] of surface) {
 		if (bucket.values.size === 0 && bucket.types.size === 0 && bucket.namespaces.size === 0) continue;
 		const lines = [`### ${module}`];
-		if (bucket.namespaces.size > 0) lines.push(`Namespace re-export: ${renderCodes(bucket.namespaces)} (e.g. \`import { ${[...bucket.namespaces][0]} } from '${pkg.name}'\`)`);
+		if (bucket.namespaces.size > 0)
+			lines.push(
+				`Namespace re-export: ${renderCodes(bucket.namespaces)} (e.g. \`import { ${[...bucket.namespaces][0]} } from '${pkg.name}'\`)`,
+			);
 		if (bucket.values.size > 0) lines.push(`- Values: ${renderCodes(bucket.values)}`);
 		if (bucket.types.size > 0) lines.push(`- Types: ${renderCodes(bucket.types)}`);
 		sections.push(lines.join("\n"));

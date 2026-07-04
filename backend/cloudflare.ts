@@ -5,10 +5,24 @@
 
 import { and, desc, eq, gt, inArray, like, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { corpus_observations, create_observations_client, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
+import {
+	corpus_observations,
+	create_observations_client,
+	type ObservationsStorage,
+	type StorageQueryOpts,
+} from "../observations/index.js";
 import { first, to_fallback, to_nullable } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
-import type { Backend, BatchOp, CorpusError, DataClient, EventHandler, MetadataClient, Result, SnapshotMeta } from "../types.js";
+import type {
+	Backend,
+	BatchOp,
+	CorpusError,
+	DataClient,
+	EventHandler,
+	MetadataClient,
+	Result,
+	SnapshotMeta,
+} from "../types.js";
 import { err, ok } from "../types.js";
 import { create_emitter, parse_snapshot_meta } from "../utils.js";
 
@@ -123,7 +137,10 @@ function create_cloudflare_storage(db: ReturnType<typeof drizzle>): Observations
 
 		async delete_by_source(store_id, version, path) {
 			try {
-				const conditions = [eq(corpus_observations.source_store_id, store_id), eq(corpus_observations.source_version, version)];
+				const conditions = [
+					eq(corpus_observations.source_store_id, store_id),
+					eq(corpus_observations.source_version, version),
+				];
 
 				if (path !== undefined) {
 					conditions.push(eq(corpus_observations.source_path, path));
@@ -280,7 +297,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			for (const row of rows) {
 				const meta = snapshot_row_to_meta(row);
 
-				if (opts?.tags?.length && !opts.tags.every(t => meta.tags?.includes(t))) {
+				if (opts?.tags?.length && !opts.tags.every((t) => meta.tags?.includes(t))) {
 					continue;
 				}
 
@@ -293,7 +310,12 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 
 		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
 			try {
-				const rows = await db.select().from(corpus_snapshots).where(eq(corpus_snapshots.store_id, store_id)).orderBy(desc(corpus_snapshots.created_at)).limit(1);
+				const rows = await db
+					.select()
+					.from(corpus_snapshots)
+					.where(eq(corpus_snapshots.store_id, store_id))
+					.orderBy(desc(corpus_snapshots.created_at))
+					.limit(1);
 
 				const row = to_nullable(first(rows));
 				if (!row) {
@@ -316,7 +338,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
             SELECT 1 FROM json_each(${corpus_snapshots.parents}) 
             WHERE json_extract(value, '$.store_id') = ${parent_store_id}
               AND json_extract(value, '$.version') = ${parent_version}
-          )`
+          )`,
 				);
 
 			for (const row of rows) {
@@ -341,10 +363,17 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	};
 
 	const data: DataClient = {
-		async get(data_key): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
+		async get(
+			data_key,
+		): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
 			try {
 				const object = await r2.get(data_key);
-				emit({ type: "data_get", store_id: to_fallback(first(data_key.split("/")), data_key), version: data_key, found: !!object });
+				emit({
+					type: "data_get",
+					store_id: to_fallback(first(data_key.split("/")), data_key),
+					version: data_key,
+					found: !!object,
+				});
 
 				if (!object) {
 					return err({ kind: "not_found", store_id: data_key, version: "" });
@@ -462,13 +491,13 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
 		// Step 1: R2 data_put ops, sequential to short-circuit on first failure.
 		for (const op of ops) {
-			if (op.type !== 'data_put') continue;
+			if (op.type !== "data_put") continue;
 			try {
 				await r2.put(op.data_key, op.bytes);
 			} catch (cause) {
 				return err({
-					kind: 'transaction_aborted',
-					reason: 'apply_batch_failed',
+					kind: "transaction_aborted",
+					reason: "apply_batch_failed",
 					cause: cause instanceof Error ? cause : new Error(String(cause)),
 				});
 			}
@@ -483,19 +512,19 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		const stmts: Stmt[] = [];
 		for (const op of ops) {
 			switch (op.type) {
-				case 'meta_put':
+				case "meta_put":
 					stmts.push(meta_insert_stmt(op.meta));
 					break;
-				case 'meta_delete':
+				case "meta_delete":
 					stmts.push(meta_delete_stmt(op.store_id, op.version));
 					break;
-				case 'observation_put':
+				case "observation_put":
 					stmts.push(obs_insert_stmt(op.row));
 					break;
-				case 'observation_delete':
+				case "observation_delete":
 					stmts.push(obs_delete_stmt(op.id));
 					break;
-				case 'data_put':
+				case "data_put":
 					break;
 			}
 		}
@@ -510,8 +539,8 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			return ok(undefined);
 		} catch (cause) {
 			return err({
-				kind: 'transaction_aborted',
-				reason: 'apply_batch_failed',
+				kind: "transaction_aborted",
+				reason: "apply_batch_failed",
 				cause: cause instanceof Error ? cause : new Error(String(cause)),
 			});
 		}

@@ -10,7 +10,7 @@ const SentimentType = define_observation_type(
 		subject: z.string(),
 		score: z.number().min(-1).max(1),
 		keywords: z.array(z.string()),
-	})
+	}),
 );
 
 const EntityType = define_observation_type(
@@ -19,14 +19,14 @@ const EntityType = define_observation_type(
 		name: z.string(),
 		type: z.enum(["person", "org", "location"]),
 		mentions: z.number(),
-	})
+	}),
 );
 
 const SimpleType = define_observation_type(
 	"simple",
 	z.object({
 		value: z.string(),
-	})
+	}),
 );
 
 describe("observations integration - memory backend", () => {
@@ -580,7 +580,7 @@ describe("observations integration - memory backend", () => {
 			const results: unknown[] = [];
 			for await (const obs of observations.query({
 				version_filter: async (_store_id, version) => {
-					await new Promise(r => setTimeout(r, 1));
+					await new Promise((r) => setTimeout(r, 1));
 					return version === "v1";
 				},
 			})) {
@@ -692,12 +692,12 @@ describe("observations integration - memory backend", () => {
 				source: create_pointer("docs", "v1"),
 				content: { value: "first" },
 			});
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			await observations.put(SimpleType, {
 				source: create_pointer("docs", "v2"),
 				content: { value: "second" },
 			});
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			await observations.put(SimpleType, {
 				source: create_pointer("docs", "v3"),
 				content: { value: "third" },
@@ -752,7 +752,7 @@ describe("observations integration - memory backend", () => {
 				content: { value: "old" },
 			});
 
-			await new Promise(r => setTimeout(r, 50));
+			await new Promise((r) => setTimeout(r, 50));
 
 			await observations.put(SimpleType, {
 				source: create_pointer("docs", "v2"),
@@ -795,11 +795,11 @@ describe("observations integration - memory backend", () => {
 							z.object({
 								key: z.string(),
 								values: z.array(z.number()),
-							})
+							}),
 						),
 						optional: z.string().optional(),
 					}),
-				})
+				}),
 			);
 
 			const content = {

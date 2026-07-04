@@ -21,15 +21,28 @@
  * - {@link fc} — fast-check as a convenience re-export (consumers don't need separate import)
  */
 
-export { arb } from './arb.js';
-export { compose, type Draw } from './compose.js';
-export { arbitrary, lookup, __reset_registry_for_tests } from './registry.js';
-export { failure, lookup_failure, list_registered_variants } from './failure.js';
-export { load_from } from './vending/auto-load.js';
-export { register, CORPUS_ERROR_BRAND, SNAPSHOT_META_BRAND, BATCH_OP_BRAND } from './register.js';
-export { cover_property as cover, CoverageError, DEFAULT_NUM_RUNS, type CoverageLabel, type CoverageStat } from './cover.js';
-export { commands, async_commands, model_run, async_model_run } from './commands.js';
-export type { Command, AsyncCommand, ICommand, ModelRunSetup, ModelRunAsyncSetup, CommandsConstraints } from './commands.js';
-export type { ArbBrand, FailureKey } from './types.js';
-export * as law from './laws/index.js';
-export { default as fc } from 'fast-check';
+export { arb } from "./arb.js";
+export { compose, type Draw } from "./compose.js";
+export { arbitrary, lookup, __reset_registry_for_tests } from "./registry.js";
+export { failure, lookup_failure, list_registered_variants } from "./failure.js";
+export { load_from } from "./vending/auto-load.js";
+export { register, CORPUS_ERROR_BRAND, SNAPSHOT_META_BRAND, BATCH_OP_BRAND } from "./register.js";
+export {
+	cover_property as cover,
+	CoverageError,
+	DEFAULT_NUM_RUNS,
+	type CoverageLabel,
+	type CoverageStat,
+} from "./cover.js";
+export { commands, async_commands, model_run, async_model_run } from "./commands.js";
+export type {
+	Command,
+	AsyncCommand,
+	ICommand,
+	ModelRunSetup,
+	ModelRunAsyncSetup,
+	CommandsConstraints,
+} from "./commands.js";
+export type { ArbBrand, FailureKey } from "./types.js";
+export * as law from "./laws/index.js";
+export { default as fc } from "fast-check";

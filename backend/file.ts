@@ -3,18 +3,18 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta, EventHandler } from '../types.js';
-import type { ObservationRow } from '../observations/index.js';
-import { create_observations_client, create_observations_storage } from '../observations/index.js';
-import { create_emitter, parse_snapshot_meta } from '../utils.js';
-import { ok, err } from '../types.js';
+import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta, EventHandler } from "../types.js";
+import type { ObservationRow } from "../observations/index.js";
+import { create_observations_client, create_observations_storage } from "../observations/index.js";
+import { create_emitter, parse_snapshot_meta } from "../utils.js";
+import { ok, err } from "../types.js";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { create_metadata_client, create_data_client } from './base.js';
-import type { MetadataStorage, DataStorage } from './base.js';
+import { create_metadata_client, create_data_client } from "./base.js";
+import type { MetadataStorage, DataStorage } from "./base.js";
 
 /** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
-const TX_DIR_PREFIX = '.tx-';
+const TX_DIR_PREFIX = ".tx-";
 
 export type FileBackendConfig = {
 	base_path: string;
@@ -242,9 +242,9 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
 		const tx_id = crypto.randomUUID();
 		const tx_dir = join(base_path, `${TX_DIR_PREFIX}${tx_id}`);
-		const staged_meta_dir = join(tx_dir, 'meta');
-		const staged_data_dir = join(tx_dir, 'data');
-		const staged_obs_path = join(tx_dir, '_observations.json');
+		const staged_meta_dir = join(tx_dir, "meta");
+		const staged_data_dir = join(tx_dir, "data");
+		const staged_obs_path = join(tx_dir, "_observations.json");
 
 		try {
 			await mkdir(tx_dir, { recursive: true });
@@ -269,25 +269,25 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			// Pass 1: stage data + collect meta/obs ops.
 			for (const op of ops) {
 				switch (op.type) {
-					case 'meta_put':
+					case "meta_put":
 						meta_bucket(op.meta.store_id).puts.push(op.meta);
 						break;
-					case 'meta_delete':
+					case "meta_delete":
 						meta_bucket(op.store_id).deletes.push(op.version);
 						break;
-					case 'data_put': {
+					case "data_put": {
 						const live = data_path(op.data_key);
-						const staged = join(staged_data_dir, `${op.data_key.replace(/\//g, '_')}.bin`);
+						const staged = join(staged_data_dir, `${op.data_key.replace(/\//g, "_")}.bin`);
 						await mkdir(dirname(staged), { recursive: true });
 						await Bun.write(staged, op.bytes);
 						data_writes.push({ staged, live });
 						break;
 					}
-					case 'observation_put':
+					case "observation_put":
 						touches_observations = true;
 						obs_puts.push(op.row);
 						break;
-					case 'observation_delete':
+					case "observation_delete":
 						touches_observations = true;
 						obs_deletes.push(op.id);
 						break;
@@ -335,12 +335,13 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 					committed++;
 				} catch (cause) {
 					return err({
-						kind: 'partial_commit',
+						kind: "partial_commit",
 						ops_completed: committed,
 						ops_failed: renames.length - committed,
-						cause: cause instanceof Error
-							? new Error(`${cause.message} (staging dir: ${tx_dir})`, { cause })
-							: new Error(`apply_batch rename failed (staging dir: ${tx_dir})`),
+						cause:
+							cause instanceof Error
+								? new Error(`${cause.message} (staging dir: ${tx_dir})`, { cause })
+								: new Error(`apply_batch rename failed (staging dir: ${tx_dir})`),
 					});
 				}
 			}
@@ -353,8 +354,8 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			// is a clean abort. Nuke the staging dir.
 			await rm(tx_dir, { recursive: true, force: true }).catch(() => {});
 			return err({
-				kind: 'transaction_aborted',
-				reason: 'apply_batch_failed',
+				kind: "transaction_aborted",
+				reason: "apply_batch_failed",
 				cause: cause instanceof Error ? cause : new Error(String(cause)),
 			});
 		}
@@ -396,9 +397,9 @@ export async function recover(root_dir: string): Promise<Result<{ recovered: num
 		entries = await readdir(root_dir, { withFileTypes: true });
 	} catch (cause) {
 		return err({
-			kind: 'storage_error',
+			kind: "storage_error",
 			cause: cause instanceof Error ? cause : new Error(String(cause)),
-			operation: 'recover',
+			operation: "recover",
 		});
 	}
 
@@ -416,9 +417,9 @@ export async function recover(root_dir: string): Promise<Result<{ recovered: num
 
 	if (failures.length > 0) {
 		return err({
-			kind: 'storage_error',
+			kind: "storage_error",
 			cause: failures[0]!,
-			operation: 'recover',
+			operation: "recover",
 		});
 	}
 

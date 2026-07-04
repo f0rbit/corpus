@@ -83,8 +83,8 @@ export async function functor<T, A>(opts: FunctorLawOpts<T, A>): Promise<void> {
 			if (!is_equal) {
 				throw new Error(
 					`functor identity law failed: map(x, id) !== x\n` +
-					`  original: ${JSON.stringify(x)}\n` +
-					`  mapped:   ${JSON.stringify(mapped)}`,
+						`  original: ${JSON.stringify(x)}\n` +
+						`  mapped:   ${JSON.stringify(mapped)}`,
 				);
 			}
 		}),
@@ -107,8 +107,8 @@ export async function functor<T, A>(opts: FunctorLawOpts<T, A>): Promise<void> {
 			if (!is_equal) {
 				throw new Error(
 					`functor composition law failed: map(map(x, f), g) !== map(x, g ∘ f)\n` +
-					`  left:  ${JSON.stringify(left)}\n` +
-					`  right: ${JSON.stringify(right)}`,
+						`  left:  ${JSON.stringify(left)}\n` +
+						`  right: ${JSON.stringify(right)}`,
 				);
 			}
 		}),

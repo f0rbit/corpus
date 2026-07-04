@@ -11,19 +11,11 @@
  * `data_key` layout is `pipeline-templates/<content_hash>`.
  */
 
-import type { z } from 'zod'
-import type {
-  Backend,
-  CorpusError,
-  PutOpts,
-  Result,
-  SnapshotMeta,
-  Snapshot,
-  Store,
-} from './types.js'
-import { define_store } from './types.js'
-import { create_store } from './corpus.js'
-import { json_codec } from './utils.js'
+import type { z } from "zod";
+import type { Backend, CorpusError, PutOpts, Result, SnapshotMeta, Snapshot, Store } from "./types.js";
+import { define_store } from "./types.js";
+import { create_store } from "./corpus.js";
+import { json_codec } from "./utils.js";
 
 /**
  * Configuration for `pipeline_template_store`.
@@ -32,11 +24,11 @@ import { json_codec } from './utils.js'
  * @group Pipeline Template Types
  */
 export type PipelineTemplateStoreOptions = {
-  /** Store id. Defaults to `'pipeline-templates'`. */
-  id?: string
-  /** Description applied to the underlying `StoreDefinition`. */
-  description?: string
-}
+	/** Store id. Defaults to `'pipeline-templates'`. */
+	id?: string;
+	/** Description applied to the underlying `StoreDefinition`. */
+	description?: string;
+};
 
 /**
  * Public API exposed by a pipeline-template store. Wraps the underlying
@@ -51,20 +43,20 @@ export type PipelineTemplateStoreOptions = {
  * @group Pipeline Template Types
  */
 export type PipelineTemplateStore<T> = {
-  /** Underlying corpus `Store<T>` for advanced reads. */
-  readonly store: Store<T>
-  /**
-   * Store a template snapshot. Content-hash dedup means identical
-   * templates share a single data blob (the corpus dedup) but produce
-   * a fresh `SnapshotMeta` with its own version + tags.
-   */
-  put: (template: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
-  /**
-   * Fetch a template snapshot by its corpus `version`. Returns the
-   * decoded `T` body along with the snapshot meta.
-   */
-  get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
-}
+	/** Underlying corpus `Store<T>` for advanced reads. */
+	readonly store: Store<T>;
+	/**
+	 * Store a template snapshot. Content-hash dedup means identical
+	 * templates share a single data blob (the corpus dedup) but produce
+	 * a fresh `SnapshotMeta` with its own version + tags.
+	 */
+	put: (template: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	/**
+	 * Fetch a template snapshot by its corpus `version`. Returns the
+	 * decoded `T` body along with the snapshot meta.
+	 */
+	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+};
 
 /**
  * Create a `pipeline-templates` store on the supplied backend.
@@ -108,22 +100,22 @@ export type PipelineTemplateStore<T> = {
  * ```
  */
 export function pipeline_template_store<T>(
-  backend: Backend,
-  schema: z.ZodType<T>,
-  opts?: PipelineTemplateStoreOptions
+	backend: Backend,
+	schema: z.ZodType<T>,
+	opts?: PipelineTemplateStoreOptions,
 ): PipelineTemplateStore<T> {
-  const id = opts?.id ?? 'pipeline-templates'
+	const id = opts?.id ?? "pipeline-templates";
 
-  const definition = define_store(id, json_codec(schema), {
-    description: opts?.description ?? 'Compiled pipeline template snapshots (content-addressed)',
-    data_key_fn: (ctx) => `${id}/${ctx.content_hash}`,
-  })
+	const definition = define_store(id, json_codec(schema), {
+		description: opts?.description ?? "Compiled pipeline template snapshots (content-addressed)",
+		data_key_fn: (ctx) => `${id}/${ctx.content_hash}`,
+	});
 
-  const store = create_store<T>(backend, definition)
+	const store = create_store<T>(backend, definition);
 
-  return {
-    store,
-    put: (template, put_opts) => store.put(template, put_opts),
-    get: (version) => store.get(version),
-  }
+	return {
+		store,
+		put: (template, put_opts) => store.put(template, put_opts),
+		get: (version) => store.get(version),
+	};
 }

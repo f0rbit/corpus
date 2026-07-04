@@ -43,7 +43,7 @@ describe("property: backend metadata round-trip", () => {
 				expect(value.parents).toEqual(meta.parents);
 				expect(value.tags).toEqual(meta.tags);
 			}),
-			{ numRuns: 200 }
+			{ numRuns: 200 },
 		);
 	});
 });

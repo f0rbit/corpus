@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
-import { create_corpus, create_memory_backend, define_store, json_codec, type CorpusEvent, type Corpus, type Store } from "../../index";
+import {
+	create_corpus,
+	create_memory_backend,
+	define_store,
+	json_codec,
+	type CorpusEvent,
+	type Corpus,
+	type Store,
+} from "../../index";
 
 const ItemSchema = z.object({
 	id: z.string(),
@@ -21,7 +29,7 @@ describe("memory backend", () => {
 	beforeEach(() => {
 		events = [];
 		corpus = create_corpus()
-			.with_backend(create_memory_backend({ on_event: e => events.push(e) }))
+			.with_backend(create_memory_backend({ on_event: (e) => events.push(e) }))
 			.with_store(define_store("timelines", json_codec(TimelineSchema)))
 			.build();
 	});
@@ -81,9 +89,9 @@ describe("memory backend", () => {
 
 		it("get_latest returns most recent by created_at", async () => {
 			await corpus.stores.timelines.put({ items: [{ id: "1", text: "first" }] });
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			await corpus.stores.timelines.put({ items: [{ id: "2", text: "second" }] });
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			const last_put = await corpus.stores.timelines.put({ items: [{ id: "3", text: "third" }] });
 			expect(last_put.ok).toBe(true);
 			if (!last_put.ok) return;
@@ -106,9 +114,9 @@ describe("memory backend", () => {
 
 		it("list returns all snapshots newest first", async () => {
 			const put1 = await corpus.stores.timelines.put({ items: [] });
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			const put2 = await corpus.stores.timelines.put({ items: [] });
-			await new Promise(r => setTimeout(r, 5));
+			await new Promise((r) => setTimeout(r, 5));
 			const put3 = await corpus.stores.timelines.put({ items: [] });
 			if (!put1.ok || !put2.ok || !put3.ok) return;
 
@@ -168,7 +176,9 @@ describe("memory backend", () => {
 			await corpus.stores.timelines.put(data);
 			await corpus.stores.timelines.put(data);
 
-			const data_puts = events.filter(e => e.type === "data_put") as Array<Extract<CorpusEvent, { type: "data_put" }>>;
+			const data_puts = events.filter((e) => e.type === "data_put") as Array<
+				Extract<CorpusEvent, { type: "data_put" }>
+			>;
 
 			expect(data_puts).toHaveLength(2);
 			expect(data_puts[0]?.deduplicated).toBe(false);
@@ -185,7 +195,7 @@ describe("memory backend", () => {
 				{ items: [] },
 				{
 					parents: [{ store_id: "timelines", version: parent.value.version, role: "source" }],
-				}
+				},
 			);
 
 			expect(result.ok).toBe(true);
@@ -205,7 +215,7 @@ describe("memory backend", () => {
 				{ items: [] },
 				{
 					parents: [{ store_id: "timelines", version: parent.value.version }],
-				}
+				},
 			);
 			if (!child.ok) return;
 
@@ -225,13 +235,13 @@ describe("memory backend", () => {
 				{ items: [{ id: "1", text: "child1" }] },
 				{
 					parents: [{ store_id: "timelines", version: parent.value.version }],
-				}
+				},
 			);
 			const child2 = await corpus.stores.timelines.put(
 				{ items: [{ id: "2", text: "child2" }] },
 				{
 					parents: [{ store_id: "timelines", version: parent.value.version }],
-				}
+				},
 			);
 			const unrelated = await corpus.stores.timelines.put({ items: [{ id: "3", text: "unrelated" }] });
 			if (!child1.ok || !child2.ok || !unrelated.ok) return;
@@ -259,7 +269,7 @@ describe("memory backend", () => {
 						{ store_id: "timelines", version: source1.value.version, role: "primary" },
 						{ store_id: "timelines", version: source2.value.version, role: "secondary" },
 					],
-				}
+				},
 			);
 
 			expect(result.ok).toBe(true);
@@ -275,7 +285,7 @@ describe("memory backend", () => {
 				{ items: [] },
 				{
 					tags: ["important", "daily"],
-				}
+				},
 			);
 
 			expect(result.ok).toBe(true);
@@ -357,7 +367,7 @@ describe("memory backend", () => {
 		it("fires events for put operation", async () => {
 			await corpus.stores.timelines.put({ items: [] });
 
-			const event_types = events.map(e => e.type);
+			const event_types = events.map((e) => e.type);
 
 			expect(event_types).toContain("data_put");
 			expect(event_types).toContain("meta_put");
@@ -371,7 +381,7 @@ describe("memory backend", () => {
 
 			await corpus.stores.timelines.get(put_result.value.version);
 
-			const event_types = events.map(e => e.type);
+			const event_types = events.map((e) => e.type);
 			expect(event_types).toContain("meta_get");
 			expect(event_types).toContain("data_get");
 			expect(event_types).toContain("snapshot_get");
@@ -380,7 +390,7 @@ describe("memory backend", () => {
 		it("fires meta_get with found=false for missing", async () => {
 			await corpus.stores.timelines.get("nonexistent");
 
-			const meta_get = events.find(e => e.type === "meta_get") as Extract<CorpusEvent, { type: "meta_get" }>;
+			const meta_get = events.find((e) => e.type === "meta_get") as Extract<CorpusEvent, { type: "meta_get" }>;
 			expect(meta_get).toBeDefined();
 			expect(meta_get.found).toBe(false);
 		});
@@ -393,7 +403,7 @@ describe("memory backend", () => {
 			for await (const _ of corpus.stores.timelines.list()) {
 			}
 
-			const meta_list = events.find(e => e.type === "meta_list") as Extract<CorpusEvent, { type: "meta_list" }>;
+			const meta_list = events.find((e) => e.type === "meta_list") as Extract<CorpusEvent, { type: "meta_list" }>;
 			expect(meta_list).toBeDefined();
 			expect(meta_list.count).toBe(2);
 		});
@@ -402,7 +412,10 @@ describe("memory backend", () => {
 			const put_result = await corpus.stores.timelines.put({ items: [] });
 			if (!put_result.ok) return;
 
-			const snapshot_put = events.find(e => e.type === "snapshot_put") as Extract<CorpusEvent, { type: "snapshot_put" }>;
+			const snapshot_put = events.find((e) => e.type === "snapshot_put") as Extract<
+				CorpusEvent,
+				{ type: "snapshot_put" }
+			>;
 			expect(snapshot_put).toBeDefined();
 			expect(snapshot_put.content_hash).toBeString();
 			expect(snapshot_put.store_id).toBe("timelines");
@@ -495,7 +508,7 @@ describe("memory backend", () => {
 				{ items: [] },
 				{
 					invoked_at: invoked,
-				}
+				},
 			);
 
 			expect(result.ok).toBe(true);

@@ -19,7 +19,7 @@ describe("Concurrency Utilities", () => {
 				acquired = true;
 			});
 
-			await new Promise(r => setTimeout(r, 10));
+			await new Promise((r) => setTimeout(r, 10));
 			expect(acquired).toBe(false);
 
 			semaphore.release();
@@ -83,7 +83,7 @@ describe("Concurrency Utilities", () => {
 					await semaphore.acquire();
 					await semaphore.acquire();
 				})(),
-				new Promise(r => setTimeout(r, 10)).then(() => {
+				new Promise((r) => setTimeout(r, 10)).then(() => {
 					blocked = true;
 				}),
 			]);
@@ -98,7 +98,7 @@ describe("Concurrency Utilities", () => {
 				acquired = true;
 			});
 
-			await new Promise(r => setTimeout(r, 10));
+			await new Promise((r) => setTimeout(r, 10));
 			expect(acquired).toBe(false);
 
 			semaphore.release();
@@ -115,7 +115,7 @@ describe("Concurrency Utilities", () => {
 				await semaphore.acquire();
 				concurrent.push(i);
 				maxConcurrent = Math.max(maxConcurrent, concurrent.length);
-				await new Promise(r => setTimeout(r, 5));
+				await new Promise((r) => setTimeout(r, 5));
 				concurrent.splice(concurrent.indexOf(i), 1);
 				semaphore.release();
 			});
@@ -128,7 +128,7 @@ describe("Concurrency Utilities", () => {
 	describe("parallel_map", () => {
 		test("processes all items", async () => {
 			const items = [1, 2, 3, 4, 5];
-			const results = await parallel_map(items, async x => x * 2, 2);
+			const results = await parallel_map(items, async (x) => x * 2, 2);
 			expect(results).toEqual([2, 4, 6, 8, 10]);
 		});
 
@@ -142,11 +142,11 @@ describe("Concurrency Utilities", () => {
 				async (x, index) => {
 					concurrent.push(index);
 					maxConcurrent = Math.max(maxConcurrent, concurrent.length);
-					await new Promise(r => setTimeout(r, 10));
+					await new Promise((r) => setTimeout(r, 10));
 					concurrent.splice(concurrent.indexOf(index), 1);
 					return x * 2;
 				},
-				3
+				3,
 			);
 
 			expect(maxConcurrent).toBeLessThanOrEqual(3);
@@ -156,11 +156,11 @@ describe("Concurrency Utilities", () => {
 			const items = [5, 1, 3, 2, 4];
 			const results = await parallel_map(
 				items,
-				async x => {
-					await new Promise(r => setTimeout(r, x * 5));
+				async (x) => {
+					await new Promise((r) => setTimeout(r, x * 5));
 					return x * 10;
 				},
-				2
+				2,
 			);
 			expect(results).toEqual([50, 10, 30, 20, 40]);
 		});
@@ -171,28 +171,28 @@ describe("Concurrency Utilities", () => {
 			await expect(
 				parallel_map(
 					items,
-					async x => {
+					async (x) => {
 						if (x === 2) throw new Error("failed on 2");
 						return x;
 					},
-					2
-				)
+					2,
+				),
 			).rejects.toThrow("failed on 2");
 		});
 
 		test("works with empty array", async () => {
-			const results = await parallel_map([] as number[], async x => x * 2, 3);
+			const results = await parallel_map([] as number[], async (x) => x * 2, 3);
 			expect(results).toEqual([]);
 		});
 
 		test("works with single item", async () => {
-			const results = await parallel_map([42], async x => x * 2, 5);
+			const results = await parallel_map([42], async (x) => x * 2, 5);
 			expect(results).toEqual([84]);
 		});
 
 		test("works when concurrency exceeds items", async () => {
 			const items = [1, 2];
-			const results = await parallel_map(items, async x => x * 2, 10);
+			const results = await parallel_map(items, async (x) => x * 2, 10);
 			expect(results).toEqual([2, 4]);
 		});
 
@@ -209,12 +209,12 @@ describe("Concurrency Utilities", () => {
 
 			await parallel_map(
 				items,
-				async delay => {
+				async (delay) => {
 					startTimes.push(Date.now() - start);
-					await new Promise(r => setTimeout(r, delay));
+					await new Promise((r) => setTimeout(r, delay));
 					return delay;
 				},
-				2
+				2,
 			);
 
 			expect(startTimes[0]).toBeLessThan(20);
@@ -228,12 +228,12 @@ describe("Concurrency Utilities", () => {
 
 			await parallel_map(
 				items,
-				async x => {
+				async (x) => {
 					order.push(x);
-					await new Promise(r => setTimeout(r, 10));
+					await new Promise((r) => setTimeout(r, 10));
 					return x;
 				},
-				1
+				1,
 			);
 
 			expect(order).toEqual([1, 2, 3]);
@@ -241,7 +241,7 @@ describe("Concurrency Utilities", () => {
 
 		test("handles objects as items", async () => {
 			const items = [{ id: 1 }, { id: 2 }, { id: 3 }];
-			const results = await parallel_map(items, async item => ({ ...item, processed: true }), 2);
+			const results = await parallel_map(items, async (item) => ({ ...item, processed: true }), 2);
 			expect(results).toEqual([
 				{ id: 1, processed: true },
 				{ id: 2, processed: true },

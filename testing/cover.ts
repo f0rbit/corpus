@@ -103,7 +103,7 @@ export async function cover_property<T>(
 	opts: {
 		labels: ReadonlyArray<CoverageLabel<T>>;
 		numRuns?: number;
-	}
+	},
 ): Promise<void> {
 	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
 	const tallies: HitTally<T>[] = opts.labels.map((label) => ({

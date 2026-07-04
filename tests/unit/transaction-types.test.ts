@@ -1,6 +1,15 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
-import { create_corpus, create_memory_backend, define_store, json_codec, err, ok, type Corpus, type Store } from "../../index";
+import {
+	create_corpus,
+	create_memory_backend,
+	define_store,
+	json_codec,
+	err,
+	ok,
+	type Corpus,
+	type Store,
+} from "../../index";
 
 // Phase 1 transaction tests — exercise the sequential-fallback path against
 // the memory backend (which does not implement apply_batch yet — Phase 2).

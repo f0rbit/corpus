@@ -10,7 +10,7 @@
  * - Composable pipelines with `pipe`
  */
 
-import { ok, err, type Result } from './types.js';
+import { ok, err, type Result } from "./types.js";
 
 /**
  * Pattern match on a Result, extracting the value with appropriate handler.
@@ -47,7 +47,8 @@ export const match = <T, E, R>(result: Result<T, E>, on_ok: (value: T) => R, on_
  * const users = unwrap_or(await fetchUsers(), [])
  * ```
  */
-export const unwrap_or = <T, E>(result: Result<T, E>, default_value: T): T => (result.ok ? result.value : default_value);
+export const unwrap_or = <T, E>(result: Result<T, E>, default_value: T): T =>
+	result.ok ? result.value : default_value;
 
 /**
  * Extract value from Result, throwing if error.
@@ -127,7 +128,10 @@ export const try_catch = <T, E>(fn: () => T, on_error: (e: unknown) => E): Resul
  * )
  * ```
  */
-export const try_catch_async = async <T, E>(fn: () => Promise<T>, on_error: (e: unknown) => E): Promise<Result<T, E>> => {
+export const try_catch_async = async <T, E>(
+	fn: () => Promise<T>,
+	on_error: (e: unknown) => E,
+): Promise<Result<T, E>> => {
 	try {
 		return ok(await fn());
 	} catch (e) {
@@ -158,7 +162,12 @@ export type FetchError = { type: "network"; cause: unknown } | { type: "http"; s
  * )
  * ```
  */
-export const fetch_result = async <T, E>(input: string | URL | Request, init: RequestInit | undefined, on_error: (e: FetchError) => E, parse_body: (response: Response) => Promise<T> = r => r.json() as Promise<T>): Promise<Result<T, E>> => {
+export const fetch_result = async <T, E>(
+	input: string | URL | Request,
+	init: RequestInit | undefined,
+	on_error: (e: FetchError) => E,
+	parse_body: (response: Response) => Promise<T> = (r) => r.json() as Promise<T>,
+): Promise<Result<T, E>> => {
 	try {
 		const response = await fetch(input, init);
 		if (!response.ok) {
@@ -211,44 +220,44 @@ const create_pipe = <T, E>(promised: Promise<Result<T, E>>): Pipe<T, E> => ({
 			promised.then((r): Result<U, E> => {
 				if (r.ok) return ok(fn(r.value));
 				return err(r.error);
-			})
+			}),
 		),
 	map_async: <U>(fn: (value: T) => Promise<U>): Pipe<U, E> =>
 		create_pipe(
 			promised.then(async (r): Promise<Result<U, E>> => {
 				if (r.ok) return ok(await fn(r.value));
 				return err(r.error);
-			})
+			}),
 		),
 	flat_map: <U>(fn: (value: T) => MaybePromise<Result<U, E>>): Pipe<U, E> =>
 		create_pipe(
 			promised.then((r): MaybePromise<Result<U, E>> => {
 				if (r.ok) return fn(r.value);
 				return err(r.error);
-			})
+			}),
 		),
 	map_err: <F>(fn: (error: E) => F): Pipe<T, F> =>
 		create_pipe(
 			promised.then((r): Result<T, F> => {
 				if (r.ok) return ok(r.value);
 				return err(fn(r.error));
-			})
+			}),
 		),
 	tap: (fn: (value: T) => MaybePromise<void>): Pipe<T, E> =>
 		create_pipe(
 			promised.then(async (r): Promise<Result<T, E>> => {
 				if (r.ok) await fn(r.value);
 				return r;
-			})
+			}),
 		),
 	tap_err: (fn: (error: E) => MaybePromise<void>): Pipe<T, E> =>
 		create_pipe(
 			promised.then(async (r): Promise<Result<T, E>> => {
 				if (!r.ok) await fn(r.error);
 				return r;
-			})
+			}),
 		),
-	unwrap_or: (default_value: T): Promise<T> => promised.then(r => (r.ok ? r.value : default_value)),
+	unwrap_or: (default_value: T): Promise<T> => promised.then((r) => (r.ok ? r.value : default_value)),
 	result: (): Promise<Result<T, E>> => promised,
 });
 
@@ -283,7 +292,12 @@ pipe.err = <E>(error: E): Pipe<never, E> => pipe(err(error));
 pipe.try = <T, E>(fn: () => Promise<T>, on_error: (e: unknown) => E): Pipe<T, E> => pipe(try_catch_async(fn, on_error));
 
 /** Create a pipe from a fetch operation */
-pipe.fetch = <T, E>(input: string | URL | Request, init: RequestInit | undefined, on_error: (e: FetchError) => E, parse_body?: (response: Response) => Promise<T>): Pipe<T, E> => pipe(fetch_result(input, init, on_error, parse_body));
+pipe.fetch = <T, E>(
+	input: string | URL | Request,
+	init: RequestInit | undefined,
+	on_error: (e: FetchError) => E,
+	parse_body?: (response: Response) => Promise<T>,
+): Pipe<T, E> => pipe(fetch_result(input, init, on_error, parse_body));
 
 /**
  * Extract value from Result, returning null for any error.
@@ -413,7 +427,10 @@ export const merge_deep = <T extends Record<string, unknown>>(base: T, overrides
 	for (const key in overrides) {
 		const value = overrides[key as keyof typeof overrides];
 		if (value !== undefined && typeof value === "object" && !Array.isArray(value) && value !== null) {
-			(result as Record<string, unknown>)[key] = merge_deep(result[key] as Record<string, unknown>, value as DeepPartial<Record<string, unknown>>);
+			(result as Record<string, unknown>)[key] = merge_deep(
+				result[key] as Record<string, unknown>,
+				value as DeepPartial<Record<string, unknown>>,
+			);
 		} else if (value !== undefined) {
 			(result as Record<string, unknown>)[key] = value;
 		}
@@ -436,7 +453,10 @@ export const merge_deep = <T extends Record<string, unknown>>(base: T, overrides
  * const tenth = at(items, 10)   // { ok: false, error: { kind: 'index_out_of_bounds', index: 10, length: 3 } }
  * ```
  */
-export const at = <T>(array: readonly T[], index: number): Result<T, { kind: "index_out_of_bounds"; index: number; length: number }> => {
+export const at = <T>(
+	array: readonly T[],
+	index: number,
+): Result<T, { kind: "index_out_of_bounds"; index: number; length: number }> => {
 	if (index < 0 || index >= array.length) {
 		return err({ kind: "index_out_of_bounds", index, length: array.length });
 	}
@@ -484,4 +504,3 @@ export const last = <T>(array: readonly T[]): Result<T, { kind: "empty_array" }>
 	}
 	return ok(array[array.length - 1] as T);
 };
-

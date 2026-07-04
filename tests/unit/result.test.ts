@@ -1,5 +1,20 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
-import { match, unwrap_or, unwrap, unwrap_err, try_catch, try_catch_async, fetch_result, type FetchError, pipe, to_nullable, to_fallback, null_on, fallback_on, format_error } from "../../result";
+import {
+	match,
+	unwrap_or,
+	unwrap,
+	unwrap_err,
+	try_catch,
+	try_catch_async,
+	fetch_result,
+	type FetchError,
+	pipe,
+	to_nullable,
+	to_fallback,
+	null_on,
+	fallback_on,
+	format_error,
+} from "../../result";
 import { ok, err, type Result } from "../../types";
 
 const mockFetch = (fn: () => Promise<Response>): void => {
@@ -12,8 +27,8 @@ describe("Result Utilities", () => {
 			const result = ok(42);
 			const output = match(
 				result,
-				value => `success: ${value}`,
-				error => `error: ${error}`
+				(value) => `success: ${value}`,
+				(error) => `error: ${error}`,
 			);
 			expect(output).toBe("success: 42");
 		});
@@ -22,8 +37,8 @@ describe("Result Utilities", () => {
 			const result = err("something went wrong");
 			const output = match(
 				result,
-				value => `success: ${value}`,
-				error => `error: ${error}`
+				(value) => `success: ${value}`,
+				(error) => `error: ${error}`,
 			);
 			expect(output).toBe("error: something went wrong");
 		});
@@ -32,8 +47,8 @@ describe("Result Utilities", () => {
 			const result = ok({ name: "Alice", age: 30 });
 			const output = match(
 				result,
-				user => user.age * 2,
-				() => 0
+				(user) => user.age * 2,
+				() => 0,
 			);
 			expect(output).toBe(60);
 		});
@@ -43,7 +58,7 @@ describe("Result Utilities", () => {
 			const output = match(
 				result,
 				() => null,
-				error => error.code
+				(error) => error.code,
 			);
 			expect(output).toBe(404);
 		});
@@ -125,7 +140,7 @@ describe("Result Utilities", () => {
 		test("returns ok for successful function", () => {
 			const result = try_catch(
 				() => JSON.parse('{"value": 42}'),
-				e => format_error(e)
+				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(true);
 			if (result.ok) {
@@ -136,7 +151,7 @@ describe("Result Utilities", () => {
 		test("returns error for thrown exception", () => {
 			const result = try_catch(
 				() => JSON.parse("invalid json"),
-				e => `parse error: ${format_error(e)}`
+				(e) => `parse error: ${format_error(e)}`,
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -149,7 +164,7 @@ describe("Result Utilities", () => {
 				() => {
 					throw new Error("custom error");
 				},
-				e => ({ kind: "custom", message: format_error(e) })
+				(e) => ({ kind: "custom", message: format_error(e) }),
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -162,7 +177,7 @@ describe("Result Utilities", () => {
 				() => {
 					throw "string error";
 				},
-				e => format_error(e)
+				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -172,8 +187,8 @@ describe("Result Utilities", () => {
 
 		test("returns correct value type", () => {
 			const result = try_catch(
-				() => [1, 2, 3].map(x => x * 2),
-				() => [] as number[]
+				() => [1, 2, 3].map((x) => x * 2),
+				() => [] as number[],
 			);
 			expect(result.ok).toBe(true);
 			if (result.ok) {
@@ -186,7 +201,7 @@ describe("Result Utilities", () => {
 		test("returns ok for successful async function", async () => {
 			const result = await try_catch_async(
 				async () => Promise.resolve(42),
-				e => format_error(e)
+				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(true);
 			if (result.ok) {
@@ -197,7 +212,7 @@ describe("Result Utilities", () => {
 		test("returns error for rejected promise", async () => {
 			const result = await try_catch_async(
 				async () => Promise.reject(new Error("async failure")),
-				e => `async error: ${format_error(e)}`
+				(e) => `async error: ${format_error(e)}`,
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -210,7 +225,7 @@ describe("Result Utilities", () => {
 				async () => {
 					throw { code: 500 };
 				},
-				e => ({ kind: "server_error", cause: e })
+				(e) => ({ kind: "server_error", cause: e }),
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -222,10 +237,10 @@ describe("Result Utilities", () => {
 		test("handles delayed async operations", async () => {
 			const result = await try_catch_async(
 				async () => {
-					await new Promise(r => setTimeout(r, 10));
+					await new Promise((r) => setTimeout(r, 10));
 					return "delayed result";
 				},
-				e => format_error(e)
+				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(true);
 			if (result.ok) {
@@ -239,7 +254,7 @@ describe("Result Utilities", () => {
 					await Promise.resolve();
 					throw new Error("thrown after await");
 				},
-				e => format_error(e)
+				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -258,7 +273,7 @@ describe("Result Utilities", () => {
 		test("returns ok for successful fetch with JSON", async () => {
 			mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: "test" }), { status: 200 })));
 
-			const result = await fetch_result("https://api.example.com/data", undefined, e => e);
+			const result = await fetch_result("https://api.example.com/data", undefined, (e) => e);
 
 			expect(result.ok).toBe(true);
 			if (result.ok) {
@@ -269,7 +284,7 @@ describe("Result Utilities", () => {
 		test("returns HTTP error for non-ok response", async () => {
 			mockFetch(() => Promise.resolve(new Response("Not Found", { status: 404, statusText: "Not Found" })));
 
-			const result = await fetch_result<unknown, FetchError>("https://api.example.com/missing", undefined, e => e);
+			const result = await fetch_result<unknown, FetchError>("https://api.example.com/missing", undefined, (e) => e);
 
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -284,7 +299,7 @@ describe("Result Utilities", () => {
 		test("returns network error for fetch failure", async () => {
 			mockFetch(() => Promise.reject(new Error("Network failure")));
 
-			const result = await fetch_result<unknown, FetchError>("https://api.example.com/data", undefined, e => e);
+			const result = await fetch_result<unknown, FetchError>("https://api.example.com/data", undefined, (e) => e);
 
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -295,7 +310,9 @@ describe("Result Utilities", () => {
 		test("returns parse error when JSON parsing fails", async () => {
 			mockFetch(() => Promise.resolve(new Response("not json", { status: 200 })));
 
-			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, e => (e.type === "network" ? "parse failed" : "http error"));
+			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, (e) =>
+				e.type === "network" ? "parse failed" : "http error",
+			);
 
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -306,7 +323,9 @@ describe("Result Utilities", () => {
 		test("uses custom error mapper", async () => {
 			mockFetch(() => Promise.resolve(new Response("", { status: 500, statusText: "Server Error" })));
 
-			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, e => (e.type === "http" ? `HTTP ${e.status}` : "Network error"));
+			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, (e) =>
+				e.type === "http" ? `HTTP ${e.status}` : "Network error",
+			);
 
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
@@ -320,8 +339,8 @@ describe("Result Utilities", () => {
 			const result = await fetch_result<string, FetchError>(
 				"https://api.example.com/text",
 				undefined,
-				e => e,
-				response => response.text()
+				(e) => e,
+				(response) => response.text(),
 			);
 
 			expect(result.ok).toBe(true);
@@ -345,7 +364,7 @@ describe("Result Utilities", () => {
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ key: "value" }),
 				},
-				e => e
+				(e) => e,
 			);
 
 			expect(capturedInit?.method).toBe("POST");
@@ -381,7 +400,7 @@ describe("Result Utilities", () => {
 				const result = await pipe
 					.try(
 						async () => 42,
-						e => format_error(e)
+						(e) => format_error(e),
 					)
 					.result();
 				expect(result.ok).toBe(true);
@@ -396,7 +415,7 @@ describe("Result Utilities", () => {
 						async () => {
 							throw new Error("failed");
 						},
-						e => format_error(e)
+						(e) => format_error(e),
 					)
 					.result();
 				expect(result.ok).toBe(false);
@@ -408,7 +427,11 @@ describe("Result Utilities", () => {
 			test("pipe.fetch wraps fetch operation", async () => {
 				mockFetch(() => Promise.resolve(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
 
-				const result = await pipe.fetch<{ id: number }, string>("https://api.example.com/item", undefined, e => (e.type === "http" ? `HTTP ${e.status}` : "Network error")).result();
+				const result = await pipe
+					.fetch<{ id: number }, string>("https://api.example.com/item", undefined, (e) =>
+						e.type === "http" ? `HTTP ${e.status}` : "Network error",
+					)
+					.result();
 
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -421,7 +444,7 @@ describe("Result Utilities", () => {
 			test("map transforms ok value", async () => {
 				const result = await pipe
 					.ok(10)
-					.map(x => x * 2)
+					.map((x) => x * 2)
 					.result();
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -432,7 +455,7 @@ describe("Result Utilities", () => {
 			test("map skips error", async () => {
 				const initial: Result<number, string> = err("error");
 				const result = await pipe(initial)
-					.map(x => x * 2)
+					.map((x) => x * 2)
 					.result();
 				expect(result.ok).toBe(false);
 				if (!result.ok) {
@@ -443,8 +466,8 @@ describe("Result Utilities", () => {
 			test("map_async transforms ok value asynchronously", async () => {
 				const result = await pipe
 					.ok(5)
-					.map_async(async x => {
-						await new Promise(r => setTimeout(r, 1));
+					.map_async(async (x) => {
+						await new Promise((r) => setTimeout(r, 1));
 						return x * 3;
 					})
 					.result();
@@ -457,7 +480,7 @@ describe("Result Utilities", () => {
 			test("map_err transforms error value", async () => {
 				const initial: Result<number, string> = err("raw error");
 				const result = await pipe(initial)
-					.map_err(e => ({ message: e, code: 500 }))
+					.map_err((e) => ({ message: e, code: 500 }))
 					.result();
 				expect(result.ok).toBe(false);
 				if (!result.ok) {
@@ -468,7 +491,7 @@ describe("Result Utilities", () => {
 			test("map_err skips ok value", async () => {
 				const initial: Result<number, string> = ok(42);
 				const result = await pipe(initial)
-					.map_err(e => ({ message: e }))
+					.map_err((e) => ({ message: e }))
 					.result();
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -477,11 +500,12 @@ describe("Result Utilities", () => {
 			});
 
 			test("flat_map chains result operations", async () => {
-				const divide = (a: number, b: number): Result<number, string> => (b === 0 ? err("division by zero") : ok(a / b));
+				const divide = (a: number, b: number): Result<number, string> =>
+					b === 0 ? err("division by zero") : ok(a / b);
 
 				const initial: Result<number, string> = ok(10);
 				const result = await pipe(initial)
-					.flat_map(x => divide(x, 2))
+					.flat_map((x) => divide(x, 2))
 					.result();
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -490,12 +514,13 @@ describe("Result Utilities", () => {
 			});
 
 			test("flat_map short-circuits on error", async () => {
-				const divide = (a: number, b: number): Result<number, string> => (b === 0 ? err("division by zero") : ok(a / b));
+				const divide = (a: number, b: number): Result<number, string> =>
+					b === 0 ? err("division by zero") : ok(a / b);
 
 				const initial: Result<number, string> = ok(10);
 				const result = await pipe(initial)
-					.flat_map(x => divide(x, 0))
-					.flat_map(x => divide(x, 2))
+					.flat_map((x) => divide(x, 0))
+					.flat_map((x) => divide(x, 2))
 					.result();
 				expect(result.ok).toBe(false);
 				if (!result.ok) {
@@ -507,7 +532,7 @@ describe("Result Utilities", () => {
 				const captured: number[] = [];
 				const result = await pipe
 					.ok(42)
-					.tap(x => {
+					.tap((x) => {
 						captured.push(x);
 					})
 					.result();
@@ -519,7 +544,7 @@ describe("Result Utilities", () => {
 				const captured: number[] = [];
 				const initial: Result<number, string> = err("error");
 				const result = await pipe(initial)
-					.tap(x => {
+					.tap((x) => {
 						captured.push(x);
 					})
 					.result();
@@ -531,7 +556,7 @@ describe("Result Utilities", () => {
 				const captured: string[] = [];
 				const initial: Result<number, string> = err("error message");
 				const result = await pipe(initial)
-					.tap_err(e => {
+					.tap_err((e) => {
 						captured.push(e);
 					})
 					.result();
@@ -543,7 +568,7 @@ describe("Result Utilities", () => {
 				const captured: string[] = [];
 				const initial: Result<number, string> = ok(42);
 				const result = await pipe(initial)
-					.tap_err(e => {
+					.tap_err((e) => {
 						captured.push(e);
 					})
 					.result();
@@ -565,9 +590,9 @@ describe("Result Utilities", () => {
 			test("chains multiple operations", async () => {
 				const result = await pipe
 					.ok({ x: 5, y: 10 })
-					.map(coords => coords.x + coords.y)
-					.map(sum => sum * 2)
-					.map(doubled => `result: ${doubled}`)
+					.map((coords) => coords.x + coords.y)
+					.map((sum) => sum * 2)
+					.map((doubled) => `result: ${doubled}`)
 					.result();
 				expect(result.ok).toBe(true);
 				if (result.ok) {
@@ -625,24 +650,24 @@ describe("Result Utilities", () => {
 	describe("null_on", () => {
 		test("returns value for ok result", () => {
 			const result: Result<string, string> = ok("data");
-			expect(null_on(result, e => e === "not_found")).toBe("data");
+			expect(null_on(result, (e) => e === "not_found")).toBe("data");
 		});
 
 		test("returns null when predicate matches error", () => {
 			const result = err({ kind: "not_found" });
-			expect(null_on(result, e => e.kind === "not_found")).toBeNull();
+			expect(null_on(result, (e) => e.kind === "not_found")).toBeNull();
 		});
 
 		test("throws when predicate does not match error", () => {
 			const result = err({ kind: "server_error" });
-			expect(() => null_on(result, e => e.kind === "not_found")).toThrow();
+			expect(() => null_on(result, (e) => e.kind === "not_found")).toThrow();
 		});
 
 		test("throws the actual error object", () => {
 			const error = { kind: "server_error", code: 500 };
 			const result = err(error);
 			try {
-				null_on(result, e => e.kind === "not_found");
+				null_on(result, (e) => e.kind === "not_found");
 				expect(true).toBe(false);
 			} catch (e) {
 				expect(e).toEqual(error);
@@ -652,7 +677,7 @@ describe("Result Utilities", () => {
 		test("predicate receives error value", () => {
 			let captured: unknown = null;
 			const result = err("specific error");
-			null_on(result, e => {
+			null_on(result, (e) => {
 				captured = e;
 				return true;
 			});
@@ -663,24 +688,24 @@ describe("Result Utilities", () => {
 	describe("fallback_on", () => {
 		test("returns value for ok result", () => {
 			const result: Result<number, string> = ok(42);
-			expect(fallback_on(result, e => e === "not_found", 0)).toBe(42);
+			expect(fallback_on(result, (e) => e === "not_found", 0)).toBe(42);
 		});
 
 		test("returns fallback when predicate matches error", () => {
 			const result: Result<number, { kind: string }> = err({ kind: "not_found" });
-			expect(fallback_on(result, e => e.kind === "not_found", 0)).toBe(0);
+			expect(fallback_on(result, (e) => e.kind === "not_found", 0)).toBe(0);
 		});
 
 		test("throws when predicate does not match error", () => {
 			const result: Result<number, { kind: string }> = err({ kind: "server_error" });
-			expect(() => fallback_on(result, e => e.kind === "not_found", 0)).toThrow();
+			expect(() => fallback_on(result, (e) => e.kind === "not_found", 0)).toThrow();
 		});
 
 		test("throws the actual error object", () => {
 			const error = { kind: "forbidden" };
 			const result: Result<number, typeof error> = err(error);
 			try {
-				fallback_on(result, e => e.kind === "not_found", 0);
+				fallback_on(result, (e) => e.kind === "not_found", 0);
 				expect(true).toBe(false);
 			} catch (e) {
 				expect(e).toEqual(error);
@@ -690,7 +715,7 @@ describe("Result Utilities", () => {
 		test("uses custom fallback value", () => {
 			const fallback = { items: [] as number[], total: 0 };
 			const result: Result<typeof fallback, { kind: string }> = err({ kind: "empty" });
-			expect(fallback_on(result, e => e.kind === "empty", fallback)).toEqual(fallback);
+			expect(fallback_on(result, (e) => e.kind === "empty", fallback)).toEqual(fallback);
 		});
 	});
 
