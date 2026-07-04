@@ -9,3 +9,4 @@
  */
 
 export { error_path_exhaustive, DEFAULT_NUM_RUNS } from "./error-path-exhaustive.js";
+export { functor, type FunctorLawOpts } from "./functor.js";
