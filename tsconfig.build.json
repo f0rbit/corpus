@@ -32,7 +32,8 @@
 		"backend/*.ts",
 		"codecs/*.ts",
 		"observations/*.ts",
-		"testing/*.ts"
+		"testing/*.ts",
+		"testing/laws/*.ts"
 	],
 	"exclude": ["node_modules", "dist", "tests"]
 }
