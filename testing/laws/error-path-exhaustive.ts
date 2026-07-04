@@ -30,7 +30,7 @@ import type { Result } from "../../types.js";
  * total work is `variants * default_runs`. 50 keeps a 12-variant union (the
  * corpus error case) under a couple of seconds on a warm machine.
  */
-export const DEFAULT_NUM_RUNS = 50;
+const DEFAULT_NUM_RUNS = 50;
 
 /**
  * Assert that `fn` correctly surfaces every variant of its error union when
