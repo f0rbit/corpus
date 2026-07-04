@@ -50,6 +50,12 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - [Transactions](https://f0rbit.github.io/corpus/guides/transactions/): Commit cross-store writes atomically with corpus.transaction(async tx => …) — buffered ops, read-your-writes, per-backend guarantees stated honestly.
 - [Version Sets](https://f0rbit.github.io/corpus/guides/version-sets/): Immutable, content-addressed manifests tying together every artifact in a deployable release — worker bundle, D1 plan, assets, env, infra — with tag-only promotion to environments.
 
+### Testing
+- [Arbitraries](https://f0rbit.github.io/corpus/testing/arbitraries/): Generate test data from Zod schemas and register domain-specific generators.
+- [Laws](https://f0rbit.github.io/corpus/testing/laws/): Five pre-built property checkers for common code contracts.
+- [Testing Substrate](https://f0rbit.github.io/corpus/testing/overview/): Property-based testing framework for corpus with arbitraries, laws, and vending.
+- [Vending](https://f0rbit.github.io/corpus/testing/vending/): Share arbitraries across packages via the registry and auto-loading.
+
 ## Quickstart
 
 ```typescript
@@ -182,13 +188,33 @@ Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)
 - Types: `Draw`
 
 ### testing/registry.ts
-- Values: `arbitrary`, `lookup`, `failure`, `lookup_failure`, `__reset_registry_for_tests`
+- Values: `arbitrary`, `lookup`, `__reset_registry_for_tests`
+
+### testing/failure.ts
+- Values: `failure`, `lookup_failure`, `list_registered_variants`
+
+### testing/vending/auto-load.ts
+- Values: `load_from`
+
+### testing/register.ts
+- Values: `register`, `CORPUS_ERROR_BRAND`, `SNAPSHOT_META_BRAND`, `BATCH_OP_BRAND`
+
+### testing/cover.ts
+- Values: `cover`, `CoverageError`, `DEFAULT_NUM_RUNS`
+- Types: `CoverageLabel`, `CoverageStat`
+
+### testing/commands.ts
+- Values: `commands`, `async_commands`, `model_run`, `async_model_run`
+- Types: `Command`, `AsyncCommand`, `ICommand`, `ModelRunSetup`, `ModelRunAsyncSetup`, `CommandsConstraints`
 
 ### testing/types.ts
 - Types: `ArbBrand`, `FailureKey`
 
 ### fast-check
 - Values: `fc`
+
+### testing/laws/index.ts
+Namespace re-export: `law` (e.g. `import { law } from '@f0rbit/corpus'`)
 
 ## Links
 

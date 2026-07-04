@@ -1,0 +1,209 @@
+---
+title: Arbitraries
+description: Generate test data from Zod schemas and register domain-specific generators.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An **arbitrary** is a fast-check generator that produces random test data. Corpus provides two ways to get them: derive from Zod schemas, or register custom generators for your domain types.
+
+## Deriving from Zod Schemas
+
+The simplest path: pass any Zod schema to `testing.arb()` and get an `fc.Arbitrary` that generates valid values.
+
+```typescript
+import { z } from "zod";
+import { testing } from "@f0rbit/corpus";
+
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  email: z.string().email(),
+  age: z.number().int().min(0).max(150).optional(),
+});
+
+const user_arb = testing.arb(UserSchema);
+
+// Use it in a property test
+await testing.law.round_trip(
+  user_arb,
+  (user) => JSON.stringify(user),
+  (json) => JSON.parse(json),
+);
+```
+
+The walker understands ~14 common Zod kinds:
+
+- **Primitives:** `string()`, `number()`, `bigint()`, `boolean()`, `date()`
+- **Constraints:** `uuid()`, `email()`, `regex()`, `min()`, `max()`, `length()`
+- **Combinators:** `object()`, `array()`, `tuple()`, `record()`, `union()`, `discriminatedUnion()`
+- **Modifiers:** `optional()`, `nullable()`, `default()`, `branded()`, `lazy()`
+- **Special:** `any()`, `unknown()`
+
+For `string()` with custom constraints (e.g., `datetime()`), the walker generates domain-specific strings that will pass validation.
+
+<Aside type="note">
+  If you need a generator for an unsupported schema kind (e.g., `ZodEffects`, `ZodPipe`), you'll get a clear error pointing at the manual registration escape hatch.
+</Aside>
+
+## Composing Dependent Generators
+
+Sometimes you need later test data to depend on earlier data — e.g., generating an array whose length comes from a prior draw.
+
+Use `testing.compose()` for inline dependent generation:
+
+```typescript
+const order_arb = testing.compose((draw) => {
+  const id = draw(testing.arb(OrderIdSchema));
+  const count = draw(testing.fc.integer({ min: 1, max: 10 }));
+  const items = draw(
+    testing.fc.array(testing.arb(ItemSchema), {
+      minLength: count,
+      maxLength: count,
+    })
+  );
+  return { id, items, item_count: items.length };
+});
+
+// Use it like any other arbitrary
+await testing.law.round_trip(order_arb, encode, decode);
+```
+
+The `draw` function is synchronous — it pulls a single value from the arbitrary you pass. You can nest draws: draw depends on a prior draw, and so on.
+
+<Aside type="caution">
+  **Shrinking note:** `testing.compose` uses `fc.gen()` under the hood. Fast-check's `fc.gen()` shrinker does not reliably terminate when used with dependent draws in complex compositions. The `law.error_path_exhaustive` law disables shrinking (`endOnFailure: true`) for this reason. If you're combining `compose` with complex command sequences, consider using `fc.sample()` to pre-generate a fixed set of values instead.
+</Aside>
+
+## Registering Custom Generators
+
+If `testing.arb(schema)` doesn't fit — you need a hand-tuned generator, or you want to ensure the same generator is reused everywhere — register it once:
+
+### Branded Type Registration
+
+Use a **branded symbol** for identity-bearing types (UserId, OrderId, Money, error types):
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+import { type ArbBrand } from "@f0rbit/corpus/testing";
+
+type UserId = string & { readonly __brand: "UserId" };
+const USER_ID_BRAND = Symbol("UserId") as ArbBrand<UserId>;
+
+// Register once (e.g., in a test file or registrar)
+testing.arbitrary(
+  USER_ID_BRAND,
+  testing.fc.uuid().map((id) => id as UserId)
+);
+
+// Now every test using USER_ID_BRAND gets the same generator
+const user_id = await testing.lookup(USER_ID_BRAND);
+```
+
+### Zod Schema Registration
+
+For ad-hoc schemas without a long-lived brand, register the schema instance directly:
+
+```typescript
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
+// Register this specific schema instance
+testing.arbitrary(
+  UserSchema,
+  testing.fc.record({
+    id: testing.fc.uuid(),
+    name: testing.fc.string({ minLength: 1 }),
+  })
+);
+
+// Later lookups for this schema instance get the registered generator
+const user_arb = await testing.lookup(UserSchema);
+```
+
+## Looking Up Registered Generators
+
+Once a generator is registered (either via the registry or a dependency's registrar), use `lookup()` to retrieve it:
+
+```typescript
+// Returns a Promise<Arbitrary<T> | undefined>
+// If the generator is registered, you get it; otherwise undefined
+const user_id_gen = await testing.lookup(USER_ID_BRAND);
+if (user_id_gen) {
+  // Use the canonical generator
+  await testing.law.round_trip(user_id_gen, encode, decode);
+}
+```
+
+<Aside>
+  **Auto-loading:** The first call to `testing.lookup()` triggers the vending system to discover and load registrars declared in your dependencies' `package.json` files. Subsequent calls see the cached result. Use `testing.__reset_registry_for_tests()` in test setup to clear the cache.
+</Aside>
+
+## Hybrid Registry
+
+The registry uses two key spaces:
+
+1. **Branded symbols** — For identity-bearing types where you want a single canonical generator reused everywhere.
+   - Register: `testing.arbitrary(BRAND, gen)`
+   - Look up: `await testing.lookup(BRAND)`
+
+2. **Zod schema instances** — For ad-hoc schemas without a brand.
+   - Register: `testing.arbitrary(schema, gen)`
+   - Look up: `await testing.lookup(schema)`
+
+<Aside type="note">
+  The registry stores schema instances in a `WeakMap`, so registered schemas can be garbage-collected when no longer referenced. Branded registrations use a plain `Map<symbol, Arbitrary>`.
+</Aside>
+
+## Failure Generators for Error Variants
+
+When testing error paths (see the `error_path_exhaustive` law), you need generators that produce specific error variants. Register failure generators the same way:
+
+```typescript
+const CORPUS_ERROR_BRAND = Symbol("CorpusError") as ArbBrand<CorpusError>;
+
+// Register a generator for the "not_found" variant
+testing.failure(
+  CORPUS_ERROR_BRAND,
+  "not_found",
+  testing.compose((draw) => ({
+    kind: "not_found",
+    store_id: draw(testing.arb(StoreIdSchema)),
+    version: draw(testing.fc.integer()),
+  }))
+);
+
+// Look it up
+const gen = await testing.lookup_failure(CORPUS_ERROR_BRAND, "not_found");
+```
+
+## Handling Unsupported Schemas
+
+If you use `testing.arb()` with an unsupported schema kind, you get a clear error:
+
+```
+Error: unsupported Zod kind: ZodEffects
+  Manually register via testing.arbitrary(schema, gen):
+  testing.arbitrary(mySchema, fc.integer().map(yourTransform))
+```
+
+The escape hatch is `testing.arbitrary(schema, gen)` — pass your schema and a hand-built generator. After registering, `arb(schema)` will use the registered generator.
+
+```typescript
+const EffectsSchema = z.string().pipe(z.string().email());
+
+// Register a custom generator
+testing.arbitrary(
+  EffectsSchema,
+  email_arb() // your custom arbitrary
+);
+
+// Now arb() finds and returns it
+const gen = testing.arb(EffectsSchema);
+```
+
+## Registrar Modules
+
+For sharing arbitraries across packages, see [Vending](./vending.mdx). The core idea: each package declares a `register.js` file in `package.json` that calls `testing.arbitrary()` and `testing.failure()`, and the registry auto-loads them.
