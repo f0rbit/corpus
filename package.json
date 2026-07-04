@@ -81,18 +81,12 @@
 		"fast-check": "^4.7.0"
 	},
 	"devDependencies": {
-		"@f0rbit/lint": "0.1.2",
+		"@f0rbit/lint": "0.1.3",
 		"@types/bun": "latest"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
 		"zod": "^3"
-	},
-	"overrides": {
-		"@f0rbit/eslint-config": "0.1.2",
-		"@f0rbit/eslint-plugin": "0.1.2",
-		"@f0rbit/oxfmt-config": "0.1.2",
-		"@f0rbit/oxlint-config": "0.1.2"
 	},
 	"corpus": {
 		"testing": "./dist/testing/register.js"

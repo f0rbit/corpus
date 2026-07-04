@@ -71,7 +71,7 @@ bun run fmt               # oxfmt .
 bun run fmt:check         # oxfmt --check .
 ```
 
-Typecheck + tests are the CI gate. Lint/format are wired (`@f0rbit/lint`, exact-pinned) but NOT yet gating — the violation baseline is being burned down first; do not add lint to CI until that lands. Lint exceptions live as `files`-scoped overrides in `eslint.config.ts` (never inline `eslint-disable`): `concurrency.ts` (Semaphore class), `corpus.ts`/`result.ts`/`testing/**` (documented intentional throws; `result.ts` also hosts the sanctioned try/catch → Result boundary), `tests/**` (functional rules + `must-use-result` relaxed). `.oxfmtrc.json` must stay a byte-copy of the canonical `@f0rbit/oxfmt-config` copy (`f0rbit-lint check` enforces); repo-specific format ignores go in `.prettierignore` — which excludes ALL of `tests/fixtures/` because fixture trees are byte-exact walker test data and one `package.json` is deliberately malformed. `bunfig.toml` pins `linker = "hoisted"` (the umbrella's transitive bins need it — don't remove).
+Typecheck, tests, and lint are all required CI gates — `.github/workflows/ci.yml`'s `test` job runs typecheck → `bun test` → `bun run lint && bun run fmt:check` → build, and the `test` status check is required by the `protect-main` branch ruleset (no merge without it passing). Lint exceptions live as `files`-scoped overrides — `eslint.config.ts` for the typed ESLint layer, `.oxlintrc.json` for the oxlint layer (never inline `eslint-disable`): `concurrency.ts` (Semaphore class), `corpus.ts`/`result.ts`/`testing/**` (documented intentional throws; `result.ts` also hosts the sanctioned try/catch → Result boundary), `tests/**` (functional rules + `must-use-result` relaxed). `.oxfmtrc.json` must stay a byte-copy of the canonical `@f0rbit/oxfmt-config` copy (`f0rbit-lint check` enforces); repo-specific format ignores go in `.prettierignore` — which excludes ALL of `tests/fixtures/` because fixture trees are byte-exact walker test data and one `package.json` is deliberately malformed. `bunfig.toml` pins `linker = "hoisted"` (the umbrella's transitive bins need it — don't remove).
 
 PRs on this repo merge with **squash only** — merge commits and rebase merges are disabled (settings flipped 2026-07-04; history before 0.7.0 predates this). The PR title becomes the squash commit title, so PR titles follow git-workflow commit rules: no "phase"/"task"/plan identifiers, describe the change itself.
 
@@ -93,12 +93,22 @@ Conventions:
 
 ### Style
 
-- **snake_case** for variables and functions (incl. exports — e.g. `create_corpus`, `compute_hash`)
-- **PascalCase** for types (e.g. `SnapshotMeta`, `CorpusError`)
-- **kebab-case** for filenames in tests / docs MDX. Source files are flat (`utils.ts`, `corpus.ts`).
-- Functional, composition-first. No classes except `Semaphore` (intentional — it owns mutable internal state).
-- Indentation is **mixed across the repo — match the file you're editing**. Tabs: `result.ts`, `backend/*`, `observations/*`, `testing/*`; 2-space: `types.ts`, `corpus.ts`, `version-set.ts`, `pipeline-template.ts`; `utils.ts` is mixed.
-- **No JSDoc churn** — existing source carries rich `@example` blocks because typedoc/llms.txt extract from them. When you add an exported function, mirror the surrounding doc style.
+- Naming (snake_case variables/functions incl. exports, PascalCase types, kebab-case filenames) is machine-enforced — `naming: "snake_case"` in `eslint.config.ts`'s `define_lint_config` call plus oxlint's `unicorn/filename-case: kebabCase`. See "Linting & formatting" below for the exception map when a name can't comply (documented public-API exceptions live there, not here). Source files are flat at repo root (`utils.ts`, `corpus.ts`), not nested into kebab-case directories.
+- Functional, composition-first. No classes except `Semaphore` (intentional — it owns mutable internal state; config-scoped exception, see below).
+- Indentation is oxfmt-owned (tabs, width 120, config in `.oxfmtrc.json` sourced from `@f0rbit/oxfmt-config`) — run `bun run fmt`; never hand-align or hand-pick tabs vs. spaces file-by-file.
+- **No JSDoc churn** — existing source carries rich `@example` blocks because typedoc/llms.txt extract from them. When you add an exported function, mirror the surrounding doc style. (Not machine-enforced — stays a review convention.)
+
+### Linting & formatting
+
+Toolchain is the `@f0rbit/lint` umbrella (exact-pinned in `devDependencies`; sub-packages `@f0rbit/eslint-config`, `@f0rbit/eslint-plugin`, `@f0rbit/oxfmt-config`, `@f0rbit/oxlint-config` resolve at the same version through the umbrella's own `dependencies` — no `overrides` block needed). Two layers:
+
+- **oxlint** — fast, syntactic. Runs first (`bun run lint` = `oxlint . && eslint .`); fails in milliseconds so it's the first thing CI reports.
+- **typed ESLint** — `typescript-eslint` `strictTypeChecked` + `eslint-plugin-functional` (no-classes, no-throw, no-try discipline) + the custom **`f0rbit/must-use-result`** rule, which enforces that every `Result<T, E>` returned from a function is actually checked (`.ok`, `match`, `pipe`, etc.) rather than silently dropped. `eslint-plugin-oxlint` de-dupes the overlap so no rule fires twice.
+
+Exception maps — new intentional exceptions go in one of these two, each entry with a why-comment; **never** an inline `eslint-disable`/oxlint disable comment (`reportUnusedDisableDirectives` is on, so an undocumented inline disable is itself a lint failure):
+
+- `eslint.config.ts` — `overrides: [{ files: [...], rules: {...} }]` array passed to `define_lint_config`. Current entries: `concurrency.ts` (Semaphore + its try/finally), `backend/file.ts` (`apply_batch`'s structural try/catch), `corpus.ts` (`build()`'s intentional throw), `result.ts` (the sanctioned throw/try-catch → Result boundary), `testing/**` (construction throws) and a couple of narrower per-file casts/naming allowances (`testing/arb.ts`, `testing/cover.ts`, `types.ts`/`corpus.ts`, `observations/**`, `sst.ts`, `version-set.ts`, `testing/registry.ts`, `testing/vending/auto-load.ts`), `tests/**` (functional + `must-use-result` relaxed for test code).
+- `.oxlintrc.json` — `overrides` array, same shape. Current entries: `tests/**` (non-null assertions after explicit setup), `testing/**` and `version-set.ts` (documented `_`/`__`-prefixed dunder allowances), `scripts/generate-llm-docs.js` (`__dirname` shim), `types.ts`/`corpus.ts` (`Store<any>` variance escape).
 
 ### Testing
 
