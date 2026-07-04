@@ -33,6 +33,10 @@ if (result.ok) {
 }
 ```
 
+## for package authors
+
+If you're building a package with types you want to test via property-based testing, add a testing registrar to vend arbitraries and failure cases. See [`docs/templates/testing/register.ts`](docs/templates/testing/register.ts) for a copy-paste template with full comments, and the [testing documentation](docs/src/content/docs/testing/) for the full substrate reference.
+
 ## todo
 
 - [ ] add gzip compression codec wrapper for large json blobs
