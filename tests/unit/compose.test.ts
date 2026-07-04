@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { compose, text_codec, binary_codec, json_codec, stream_to_bytes } from "../../utils";
-import type { BytesCodec, Codec } from "../../types";
+import { compose, text_codec, binary_codec, json_codec, stream_to_bytes } from "../../utils.js";
+import type { BytesCodec } from "../../types.js";
 
 const passthrough_codec = (): BytesCodec => ({
 	content_type: "application/octet-stream",
@@ -73,8 +73,8 @@ describe("compose", () => {
 		expect(typeof streamable.decode_stream).toBe("function");
 		expect(typeof streamable.encode_stream).toBe("function");
 
-		const Schema = { parse: (x: unknown) => x as { id: string } };
-		const non_streamable = compose(json_codec<{ id: string }>(Schema), passthrough_codec());
+		const schema = { parse: (x: unknown) => x as { id: string } };
+		const non_streamable = compose(json_codec<{ id: string }>(schema), passthrough_codec());
 		expect(non_streamable.decode_stream).toBeUndefined();
 		expect(non_streamable.encode_stream).toBeUndefined();
 	});
@@ -89,7 +89,7 @@ describe("compose", () => {
 	test("compose with zero layers returns the head codec unchanged", () => {
 		const head = text_codec();
 		const composed = compose(head);
-		expect(composed).toBe(head as unknown as Codec<string>);
+		expect(composed).toBe(head);
 	});
 
 	test("decode_stream pipes through layers in reverse order", async () => {

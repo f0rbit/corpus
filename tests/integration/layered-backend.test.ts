@@ -10,14 +10,14 @@ import {
 	type Store,
 	type Backend,
 	type SnapshotMeta,
-} from "../../index";
+} from "../../index.js";
 
-const ItemSchema = z.object({
+const item_schema = z.object({
 	id: z.string(),
 	text: z.string(),
 });
 
-type Item = z.infer<typeof ItemSchema>;
+type Item = z.infer<typeof item_schema>;
 
 describe("layered backend", () => {
 	let memory1: Backend;
@@ -467,7 +467,7 @@ describe("layered backend", () => {
 
 			corpus = create_corpus()
 				.with_backend(layered)
-				.with_store(define_store("items", json_codec(ItemSchema)))
+				.with_store(define_store("items", json_codec(item_schema)))
 				.build();
 
 			const put_result = await corpus.stores.items.put({ id: "1", text: "hello" });

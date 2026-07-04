@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { arbitrary } from "../../../../testing/registry";
+import { arbitrary } from "../../../../testing/registry.js";
 import type { ArbBrand } from "../../../../testing/types";
 
 export type HappyMarker = string & { readonly __brand: "HappyMarker" };

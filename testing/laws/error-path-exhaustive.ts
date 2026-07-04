@@ -75,7 +75,7 @@ export async function error_path_exhaustive<Args extends readonly unknown[], T, 
 	},
 ): Promise<void> {
 	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
-	const variants = (opts.only ?? (Object.keys(opts.provoke) as E["kind"][])) as readonly E["kind"][];
+	const variants = opts.only ?? Object.keys(opts.provoke);
 
 	for (const variant of variants) {
 		const gen = await lookup_failure(opts.error_brand, variant);

@@ -190,7 +190,7 @@ export function lookup_failure_sync<E extends { kind: string }>(
 export function list_failure_variants<E extends { kind: string }>(brand: ArbBrand<E>): readonly E["kind"][] {
 	const by_variant = failures.get(brand);
 	if (!by_variant) return [];
-	return Array.from(by_variant.keys()) as E["kind"][];
+	return Array.from(by_variant.keys());
 }
 
 /**

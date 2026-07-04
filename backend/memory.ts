@@ -34,6 +34,10 @@ const CORPUS_DEV: boolean = (() => {
 	}
 })();
 
+function make_meta_key(store_id: string, version: string): string {
+	return `${store_id}:${version}`;
+}
+
 /**
  * Creates an in-memory storage backend.
  * @category Backends
@@ -66,10 +70,6 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 	const observation_store = new Map<string, ObservationRow>();
 	const on_event = options?.on_event;
 	const emit = create_emitter(on_event);
-
-	function make_meta_key(store_id: string, version: string): string {
-		return `${store_id}:${version}`;
-	}
 
 	const metadata_storage: MetadataStorage = {
 		async get(store_id, version) {

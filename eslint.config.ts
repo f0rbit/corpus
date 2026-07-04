@@ -45,5 +45,16 @@ export default define_lint_config({
 				"f0rbit/must-use-result": "off",
 			},
 		},
+		{
+			// pre-convention public API names — renames are breaking:
+			// sst.ts exports createCorpusInfra (SST consumers), version-set.ts exports
+			// VersionSetManifestSchema (imported by devpad pipelines) and carries the
+			// `_`-prefixed compile-time manifest-shape assertion pair; testing/registry.ts
+			// and testing/vending/auto-load.ts export `__`-prefixed test-only escape
+			// hatches (documented convention in AGENTS.md). The naming rule can't allow
+			// these selectively without duplicating the org selector table.
+			files: ["sst.ts", "version-set.ts", "testing/registry.ts", "testing/vending/auto-load.ts"],
+			rules: { "@typescript-eslint/naming-convention": "off" },
+		},
 	],
 });

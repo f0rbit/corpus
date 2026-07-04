@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeEach, afterAll, spyOn } from "bun:test";
 import { join } from "node:path";
 import { z } from "zod";
-import { arb } from "../../testing/arb";
-import { lookup, __reset_registry_for_tests } from "../../testing/registry";
-import { load_from, __set_auto_load_cwd_for_tests } from "../../testing/vending/auto-load";
-import { HAPPY_MARKER_BRAND, calls as self_calls } from "../fixtures/vending/happy/self-register";
-import { calls as dep_calls } from "../fixtures/vending/happy/node_modules/dep-with-registrar/register";
+import { arb } from "../../testing/arb.js";
+import { lookup, __reset_registry_for_tests } from "../../testing/registry.js";
+import { load_from, __set_auto_load_cwd_for_tests } from "../../testing/vending/auto-load.js";
+import { HAPPY_MARKER_BRAND, calls as self_calls } from "../fixtures/vending/happy/self-register.js";
+import { calls as dep_calls } from "../fixtures/vending/happy/node_modules/dep-with-registrar/register.js";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures", "vending");
 const HAPPY = join(FIXTURES, "happy");

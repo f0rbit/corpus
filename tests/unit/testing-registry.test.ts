@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, spyOn } from "bun:test";
 import * as fc from "fast-check";
 import { z } from "zod";
-import { arbitrary, lookup, failure, lookup_failure, __reset_registry_for_tests } from "../../testing/registry";
+import { arbitrary, lookup, failure, lookup_failure, __reset_registry_for_tests } from "../../testing/registry.js";
 import type { ArbBrand } from "../../testing/types";
 
 type UserId = string & { readonly __brand: unique symbol };

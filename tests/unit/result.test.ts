@@ -14,12 +14,14 @@ import {
 	null_on,
 	fallback_on,
 	format_error,
-} from "../../result";
-import { ok, err, type Result } from "../../types";
+} from "../../result.js";
+import { ok, err, type Result } from "../../types.js";
 
-const mockFetch = (fn: () => Promise<Response>): void => {
+const mock_fetch = (fn: () => Promise<Response>): void => {
 	globalThis.fetch = fn as unknown as typeof fetch;
 };
+
+const divide = (a: number, b: number): Result<number, string> => (b === 0 ? err("division by zero") : ok(a / b));
 
 describe("Result Utilities", () => {
 	describe("match", () => {
@@ -27,8 +29,8 @@ describe("Result Utilities", () => {
 			const result = ok(42);
 			const output = match(
 				result,
-				(value) => `success: ${value}`,
-				(error) => `error: ${error}`,
+				(value) => `success: ${String(value)}`,
+				(error) => `error: ${String(error)}`,
 			);
 			expect(output).toBe("success: 42");
 		});
@@ -37,7 +39,7 @@ describe("Result Utilities", () => {
 			const result = err("something went wrong");
 			const output = match(
 				result,
-				(value) => `success: ${value}`,
+				(value) => `success: ${String(value)}`,
 				(error) => `error: ${error}`,
 			);
 			expect(output).toBe("error: something went wrong");
@@ -264,14 +266,14 @@ describe("Result Utilities", () => {
 	});
 
 	describe("fetch_result", () => {
-		const originalFetch = globalThis.fetch;
+		const original_fetch = globalThis.fetch;
 
 		afterEach(() => {
-			globalThis.fetch = originalFetch;
+			globalThis.fetch = original_fetch;
 		});
 
 		test("returns ok for successful fetch with JSON", async () => {
-			mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: "test" }), { status: 200 })));
+			mock_fetch(() => Promise.resolve(new Response(JSON.stringify({ data: "test" }), { status: 200 })));
 
 			const result = await fetch_result("https://api.example.com/data", undefined, (e) => e);
 
@@ -282,7 +284,7 @@ describe("Result Utilities", () => {
 		});
 
 		test("returns HTTP error for non-ok response", async () => {
-			mockFetch(() => Promise.resolve(new Response("Not Found", { status: 404, statusText: "Not Found" })));
+			mock_fetch(() => Promise.resolve(new Response("Not Found", { status: 404, statusText: "Not Found" })));
 
 			const result = await fetch_result<unknown, FetchError>("https://api.example.com/missing", undefined, (e) => e);
 
@@ -297,7 +299,7 @@ describe("Result Utilities", () => {
 		});
 
 		test("returns network error for fetch failure", async () => {
-			mockFetch(() => Promise.reject(new Error("Network failure")));
+			mock_fetch(() => Promise.reject(new Error("Network failure")));
 
 			const result = await fetch_result<unknown, FetchError>("https://api.example.com/data", undefined, (e) => e);
 
@@ -308,7 +310,7 @@ describe("Result Utilities", () => {
 		});
 
 		test("returns parse error when JSON parsing fails", async () => {
-			mockFetch(() => Promise.resolve(new Response("not json", { status: 200 })));
+			mock_fetch(() => Promise.resolve(new Response("not json", { status: 200 })));
 
 			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, (e) =>
 				e.type === "network" ? "parse failed" : "http error",
@@ -321,10 +323,10 @@ describe("Result Utilities", () => {
 		});
 
 		test("uses custom error mapper", async () => {
-			mockFetch(() => Promise.resolve(new Response("", { status: 500, statusText: "Server Error" })));
+			mock_fetch(() => Promise.resolve(new Response("", { status: 500, statusText: "Server Error" })));
 
 			const result = await fetch_result<unknown, string>("https://api.example.com/data", undefined, (e) =>
-				e.type === "http" ? `HTTP ${e.status}` : "Network error",
+				e.type === "http" ? `HTTP ${String(e.status)}` : "Network error",
 			);
 
 			expect(result.ok).toBe(false);
@@ -334,7 +336,7 @@ describe("Result Utilities", () => {
 		});
 
 		test("uses custom body parser", async () => {
-			mockFetch(() => Promise.resolve(new Response("plain text response", { status: 200 })));
+			mock_fetch(() => Promise.resolve(new Response("plain text response", { status: 200 })));
 
 			const result = await fetch_result<string, FetchError>(
 				"https://api.example.com/text",
@@ -350,12 +352,12 @@ describe("Result Utilities", () => {
 		});
 
 		test("passes request init options", async () => {
-			let capturedInit: RequestInit | undefined;
-			const mockFn = mock((_input: string | Request | URL, init?: RequestInit) => {
-				capturedInit = init;
+			let captured_init: RequestInit | undefined;
+			const mock_fn = mock((_input: string | Request | URL, init?: RequestInit) => {
+				captured_init = init;
 				return Promise.resolve(new Response("{}", { status: 200 }));
 			});
-			globalThis.fetch = mockFn as unknown as typeof fetch;
+			globalThis.fetch = mock_fn as unknown as typeof fetch;
 
 			await fetch_result(
 				"https://api.example.com/data",
@@ -367,16 +369,16 @@ describe("Result Utilities", () => {
 				(e) => e,
 			);
 
-			expect(capturedInit?.method).toBe("POST");
-			expect(capturedInit?.headers).toEqual({ "Content-Type": "application/json" });
+			expect(captured_init?.method).toBe("POST");
+			expect(captured_init?.headers).toEqual({ "Content-Type": "application/json" });
 		});
 	});
 
 	describe("pipe", () => {
-		const originalFetch = globalThis.fetch;
+		const original_fetch = globalThis.fetch;
 
 		afterEach(() => {
-			globalThis.fetch = originalFetch;
+			globalThis.fetch = original_fetch;
 		});
 
 		describe("factory methods", () => {
@@ -425,11 +427,11 @@ describe("Result Utilities", () => {
 			});
 
 			test("pipe.fetch wraps fetch operation", async () => {
-				mockFetch(() => Promise.resolve(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
+				mock_fetch(() => Promise.resolve(new Response(JSON.stringify({ id: 1 }), { status: 200 })));
 
 				const result = await pipe
 					.fetch<{ id: number }, string>("https://api.example.com/item", undefined, (e) =>
-						e.type === "http" ? `HTTP ${e.status}` : "Network error",
+						e.type === "http" ? `HTTP ${String(e.status)}` : "Network error",
 					)
 					.result();
 
@@ -500,9 +502,6 @@ describe("Result Utilities", () => {
 			});
 
 			test("flat_map chains result operations", async () => {
-				const divide = (a: number, b: number): Result<number, string> =>
-					b === 0 ? err("division by zero") : ok(a / b);
-
 				const initial: Result<number, string> = ok(10);
 				const result = await pipe(initial)
 					.flat_map((x) => divide(x, 2))
@@ -514,9 +513,6 @@ describe("Result Utilities", () => {
 			});
 
 			test("flat_map short-circuits on error", async () => {
-				const divide = (a: number, b: number): Result<number, string> =>
-					b === 0 ? err("division by zero") : ok(a / b);
-
 				const initial: Result<number, string> = ok(10);
 				const result = await pipe(initial)
 					.flat_map((x) => divide(x, 0))
@@ -592,7 +588,7 @@ describe("Result Utilities", () => {
 					.ok({ x: 5, y: 10 })
 					.map((coords) => coords.x + coords.y)
 					.map((sum) => sum * 2)
-					.map((doubled) => `result: ${doubled}`)
+					.map((doubled) => `result: ${String(doubled)}`)
 					.result();
 				expect(result.ok).toBe(true);
 				if (result.ok) {

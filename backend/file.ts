@@ -71,8 +71,8 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 
 		try {
 			const content = await file.text();
-			const entries = JSON.parse(content) as [string, unknown][];
-			return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw as any)]));
+			const entries = JSON.parse(content) as [string, Parameters<typeof parse_snapshot_meta>[0]][];
+			return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw)]));
 		} catch {
 			return new Map();
 		}
@@ -415,10 +415,11 @@ export async function recover(root_dir: string): Promise<Result<{ recovered: num
 		}
 	}
 
-	if (failures.length > 0) {
+	const [first_failure] = failures;
+	if (first_failure) {
 		return err({
 			kind: "storage_error",
-			cause: failures[0]!,
+			cause: first_failure,
 			operation: "recover",
 		});
 	}

@@ -8,10 +8,10 @@
 
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
-import { create_cloudflare_backend } from "../../backend/cloudflare";
-import { corpus_snapshots } from "../../schema";
-import { corpus_observations, define_observation_type } from "../../observations";
-import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare";
+import { create_cloudflare_backend } from "../../backend/cloudflare.js";
+import { corpus_snapshots } from "../../schema.js";
+import { corpus_observations, define_observation_type } from "../../observations/index.js";
+import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare.js";
 import type { BatchOp, CorpusEvent, EventHandler, SnapshotMeta } from "../../types";
 
 type ObservationRow = typeof corpus_observations.$inferSelect;
@@ -192,20 +192,20 @@ describe("CloudflareBackend - error mapping", () => {
 });
 
 describe("CloudflareBackend - observations through real SQL", () => {
-	const SentimentType = define_observation_type("sentiment", z.object({ score: z.number() }));
-	const TopicType = define_observation_type("topic", z.object({ name: z.string() }));
+	const sentiment_type = define_observation_type("sentiment", z.object({ score: z.number() }));
+	const topic_type = define_observation_type("topic", z.object({ name: z.string() }));
 
 	it("put + query filters by type and source", async () => {
 		const { backend } = setup();
 		const observations = backend.observations!;
 
 		const source = { store_id: "items", version: "v1" };
-		const a = await observations.put(SentimentType, { source, content: { score: 0.9 } });
-		const b = await observations.put(SentimentType, {
+		const a = await observations.put(sentiment_type, { source, content: { score: 0.9 } });
+		const b = await observations.put(sentiment_type, {
 			source: { store_id: "items", version: "v2" },
 			content: { score: 0.1 },
 		});
-		const c = await observations.put(TopicType, { source, content: { name: "testing" } });
+		const c = await observations.put(topic_type, { source, content: { name: "testing" } });
 		expect(a.ok && b.ok && c.ok).toBe(true);
 
 		const by_type: string[] = [];
@@ -218,14 +218,14 @@ describe("CloudflareBackend - observations through real SQL", () => {
 		for await (const obs of observations.query({ source_store: "items", source_version: "v1" })) {
 			by_source.push(obs.type);
 		}
-		expect(by_source.sort()).toEqual(["sentiment", "topic"]);
+		expect(by_source.toSorted()).toEqual(["sentiment", "topic"]);
 	});
 
 	it("get + delete round-trip", async () => {
 		const { backend } = setup();
 		const observations = backend.observations!;
 
-		const put = await observations.put(SentimentType, {
+		const put = await observations.put(sentiment_type, {
 			source: { store_id: "items", version: "v1" },
 			content: { score: 0.5 },
 		});

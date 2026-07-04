@@ -10,7 +10,7 @@ import {
 	generate_observation_id,
 	pointers_equal,
 	pointer_to_snapshot,
-} from "../../observations";
+} from "../../observations/index.js";
 
 describe("define_observation_type", () => {
 	it("creates type definition with name and schema", () => {
@@ -409,9 +409,9 @@ describe("generate_observation_id", () => {
 	it("generates sortable ids by time", () => {
 		const id1 = generate_observation_id();
 		const id2 = generate_observation_id();
-		const ts1 = id1.split("_")[1];
-		const ts2 = id2.split("_")[1];
-		expect(ts1!.localeCompare(ts2!)).toBeLessThanOrEqual(0);
+		const ts1 = id1.split("_")[1] ?? "";
+		const ts2 = id2.split("_")[1] ?? "";
+		expect(ts1.localeCompare(ts2)).toBeLessThanOrEqual(0);
 	});
 });
 

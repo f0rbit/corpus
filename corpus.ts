@@ -385,6 +385,10 @@ export function create_corpus(): CorpusBuilder<{}> {
 	return make_builder<{}>();
 }
 
+function meta_key(store_id: string, version: string): string {
+	return `${store_id}:${version}`;
+}
+
 function build_corpus<Stores extends Record<string, Store<any>>>(
 	b: Backend,
 	definitions: readonly StoreDefinition<string, any>[],
@@ -417,10 +421,6 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 		const tombstoned_meta = new Set<string>(); // key: `${store_id}:${version}` deleted in-tx
 		const commits: SnapshotMeta[] = [];
 		const observations: Observation[] = [];
-
-		function meta_key(store_id: string, version: string): string {
-			return `${store_id}:${version}`;
-		}
 
 		function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
 			const prefix = `${store_id}:`;
@@ -676,8 +676,7 @@ async function sequential_apply_with_compensation(
 		// non-undoable, surface partial_commit honestly.
 		let compensation_failed = false;
 		let compensation_cause: Error | undefined;
-		for (let i = applied.length - 1; i >= 0; i--) {
-			const applied_op = applied[i]!;
+		for (const applied_op of applied.toReversed()) {
 			if (applied_op.type === "meta_delete" || applied_op.type === "observation_delete") {
 				compensation_failed = true;
 				continue;

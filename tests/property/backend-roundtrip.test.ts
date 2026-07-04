@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, beforeEach } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import fc from "fast-check";
 import { lookup, __reset_registry_for_tests } from "../../testing/index.js";
 import { SNAPSHOT_META_BRAND, register } from "../../testing/register.js";

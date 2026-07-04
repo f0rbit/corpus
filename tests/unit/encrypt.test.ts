@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
-import { encrypt_codec } from "../../codecs/encrypt";
-import { compose, text_codec } from "../../utils";
+import { encrypt_codec } from "../../codecs/encrypt.js";
+import { compose, text_codec } from "../../utils.js";
 
 const make_key = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 

@@ -13,18 +13,18 @@ import {
 	type CorpusError,
 	type Result,
 	type Store,
-} from "../../index";
+} from "../../index.js";
 
-const ItemSchema = z.object({ id: z.string() });
-type Item = z.infer<typeof ItemSchema>;
+const item_schema = z.object({ id: z.string() });
+type Item = z.infer<typeof item_schema>;
 
 type TxStores = { items: Store<Item> };
 
 const make_corpus = (b: Backend): Corpus<TxStores> =>
 	create_corpus()
 		.with_backend(b)
-		.with_store(define_store("items", json_codec(ItemSchema)))
-		.build() as Corpus<TxStores>;
+		.with_store(define_store("items", json_codec(item_schema)))
+		.build();
 
 describe("layered backend - apply_batch", () => {
 	it("forwards apply_batch to the bottom write layer; cache stays cold until read", async () => {

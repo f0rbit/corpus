@@ -19,7 +19,7 @@ async function encrypt_bytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Ar
 async function decrypt_bytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
 	const iv = bytes.slice(0, IV_LENGTH);
 	const ciphertext = bytes.slice(IV_LENGTH);
-	const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext as Uint8Array<ArrayBuffer>);
+	const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
 	return new Uint8Array(plaintext);
 }
 

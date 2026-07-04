@@ -49,7 +49,7 @@ export function arb<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> {
 	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	const ctx: WalkContext = { lazy_ties: new WeakMap() };
-	return walk(schema, ctx) as Arbitrary<z.infer<S>>;
+	return walk(schema, ctx);
 }
 
 type WalkContext = {

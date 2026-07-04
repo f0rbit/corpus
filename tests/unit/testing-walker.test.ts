@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test";
 import { join } from "node:path";
-import { discover_registrars, load_registrars } from "../../testing/vending/walker";
-import { __reset_registry_for_tests } from "../../testing/registry";
-import { calls as self_calls } from "../fixtures/vending/happy/self-register";
-import { calls as dep_calls } from "../fixtures/vending/happy/node_modules/dep-with-registrar/register";
+import { discover_registrars, load_registrars } from "../../testing/vending/walker.js";
+import { __reset_registry_for_tests } from "../../testing/registry.js";
+import { calls as self_calls } from "../fixtures/vending/happy/self-register.js";
+import { calls as dep_calls } from "../fixtures/vending/happy/node_modules/dep-with-registrar/register.js";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures", "vending");
 

@@ -22,6 +22,11 @@ test("round_trip: JSON number", async () => {
 	await testing.law.round_trip(testing.fc.integer(), json_codec.encode, json_codec.decode);
 });
 
+const trim_op = (s: string) => s.trim();
+const custom_equals = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const broken_encode = (_x: string) => new Uint8Array([0, 1, 2]); // Always returns same bytes
+const broken_decode = () => "always_same";
+
 test("round_trip: JSON object", async () => {
 	const arb = testing.fc.record({
 		name: testing.fc.string(),
@@ -31,12 +36,10 @@ test("round_trip: JSON object", async () => {
 });
 
 test("idempotent: string trim", async () => {
-	const trim_op = (s: string) => s.trim();
 	await testing.law.idempotent(testing.fc.string(), trim_op);
 });
 
 test("round_trip: JSON with custom equals", async () => {
-	const custom_equals = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 	await testing.law.round_trip(
 		testing.fc.object({ withMap: false, withSet: false, maxDepth: 2 }),
 		json_codec.encode,
@@ -46,8 +49,6 @@ test("round_trip: JSON with custom equals", async () => {
 });
 
 test("round_trip: broken encoder surfaces actionable error", async () => {
-	const broken_encode = (_x: string) => new Uint8Array([0, 1, 2]); // Always returns same bytes
-	const broken_decode = () => "always_same";
 	let error_thrown = false;
 	let error_message = "";
 

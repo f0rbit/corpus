@@ -146,12 +146,12 @@ function create_cloudflare_storage(db: ReturnType<typeof drizzle>): Observations
 					conditions.push(eq(corpus_observations.source_path, path));
 				}
 
-				const toDelete = await db
+				const to_delete = await db
 					.select()
 					.from(corpus_observations)
 					.where(and(...conditions));
 
-				const count = toDelete.length;
+				const count = to_delete.length;
 
 				if (count > 0) {
 					await db.delete(corpus_observations).where(and(...conditions));
@@ -167,6 +167,10 @@ function create_cloudflare_storage(db: ReturnType<typeof drizzle>): Observations
 			}
 		},
 	};
+}
+
+function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
+	return parse_snapshot_meta(row);
 }
 
 /**
@@ -211,10 +215,6 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	const db = drizzle(config.d1);
 	const { r2, on_event } = config;
 	const emit = create_emitter(on_event);
-
-	function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
-		return parse_snapshot_meta(row);
-	}
 
 	const metadata: MetadataClient = {
 		async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {

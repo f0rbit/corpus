@@ -170,11 +170,7 @@ function register_corpus_error_variants(): void {
 		CORPUS_ERROR_BRAND,
 		"transaction_aborted",
 		compose((draw) => {
-			const reason = draw(
-				fc.constantFrom("returned_err", "threw", "apply_batch_failed") as fc.Arbitrary<
-					"returned_err" | "threw" | "apply_batch_failed"
-				>,
-			);
+			const reason = draw(fc.constantFrom("returned_err", "threw", "apply_batch_failed"));
 			const has_cause = draw(fc.boolean());
 			const base = { kind: "transaction_aborted" as const, reason };
 			return has_cause ? { ...base, cause: draw(error_arb) } : base;

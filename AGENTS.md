@@ -101,7 +101,7 @@ Conventions:
 ### Testing
 
 - `bun test` only. No vitest, no jest.
-- Backend integration tests share a single contract suite at `tests/integration/backend-contract.test.ts`. New backends should plug into it via `runBackendContractTests(name, factory, cleanup)`.
+- Backend integration tests share a single contract suite at `tests/integration/backend-contract.test.ts`. New backends should plug into it via `run_backend_contract_tests(name, factory, cleanup)`.
 - Real I/O over mocks: file backend tests touch `tests/.tmp/` (cleaned per-test).
 - The Cloudflare backend runs through the contract suite against in-memory **platform fakes** at `tests/fakes/cloudflare.ts` — a `bun:sqlite`-backed D1 fake and a Map-backed R2 fake. The code under test is the real `backend/cloudflare.ts` (real Drizzle d1 driver, real SQL). Real-platform smoke via `wrangler dev` remains out-of-band; the fakes are not a substitute for a deploy check.
 - Per the global `testing-strategy` skill: in-memory fakes, integration-first, Provider pattern. Memory backend itself doubles as the in-memory fake for downstream consumers.

@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import fc from "fast-check";
 import { z } from "zod";
-import { arb } from "../../testing/arb";
-import { arbitrary, __reset_registry_for_tests } from "../../testing/registry";
-import { VersionSetManifestSchema } from "../../version-set";
+import { arb } from "../../testing/arb.js";
+import { arbitrary, __reset_registry_for_tests } from "../../testing/registry.js";
+import { VersionSetManifestSchema } from "../../version-set.js";
 
 describe("testing/arb", () => {
 	beforeEach(() => {
@@ -305,18 +305,18 @@ describe("testing/arb", () => {
 			// generated depth stays small. We don't claim absolute bounds — just
 			// that generation + parsing don't blow up.
 			type Tree = { value: number; children: Tree[] };
-			const TreeSchema: z.ZodType<Tree> = z.lazy(() =>
+			const tree_schema: z.ZodType<Tree> = z.lazy(() =>
 				z.object({
 					value: z.number().int().min(0).max(100),
-					children: z.array(TreeSchema).max(2),
+					children: z.array(tree_schema).max(2),
 				}),
 			);
 			// fc.sample asserts only that we can produce a small batch without
 			// stack-overflowing. The schema validates structure.
-			const a = arb(TreeSchema);
+			const a = arb(tree_schema);
 			const samples = fc.sample(a, { numRuns: 10, seed: 7 });
 			for (const s of samples) {
-				expect(TreeSchema.safeParse(s).success).toBe(true);
+				expect(tree_schema.safeParse(s).success).toBe(true);
 			}
 		});
 	});

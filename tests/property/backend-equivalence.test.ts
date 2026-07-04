@@ -121,7 +121,7 @@ const norm_meta = (m: SnapshotMeta): NormMeta => ({
 
 /** Order-independent list comparison: canonical sort by version (unique per store). */
 const canonical = (metas: NormMeta[]): NormMeta[] =>
-	[...metas].sort((a, b) => (a.version < b.version ? -1 : a.version > b.version ? 1 : 0));
+	metas.toSorted((a, b) => (a.version < b.version ? -1 : a.version > b.version ? 1 : 0));
 
 const to_hex = (bytes: Uint8Array): string => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -137,10 +137,10 @@ const deep_equal = (a: unknown, b: unknown): boolean => {
 		const rec_b = b as Record<string, unknown>;
 		const keys_a = Object.keys(rec_a)
 			.filter((k) => rec_a[k] !== undefined)
-			.sort();
+			.toSorted();
 		const keys_b = Object.keys(rec_b)
 			.filter((k) => rec_b[k] !== undefined)
-			.sort();
+			.toSorted();
 		if (keys_a.length !== keys_b.length) return false;
 		return keys_a.every((k, i) => k === keys_b[i] && deep_equal(rec_a[k], rec_b[k]));
 	}
@@ -256,7 +256,7 @@ const put_data_commands = fc
 	.record({ data_key: data_key_arb, bytes: fc.uint8Array({ maxLength: 64 }) })
 	.map(({ data_key, bytes }) =>
 		equivalence_command<BackendModel, Backend, Result<void, CorpusError>>({
-			label: `put_data(${data_key},${bytes.length}B)`,
+			label: `put_data(${data_key},${String(bytes.length)}B)`,
 			on_model: (m) => {
 				bump("put_data");
 				m.data.set(data_key, bytes);
@@ -326,7 +326,7 @@ let dir_seq = 0;
 const spawned_dirs: string[] = [];
 
 const fresh_dir = (): string => {
-	const dir = join(ROOT, `run-${dir_seq++}`);
+	const dir = join(ROOT, `run-${String(dir_seq++)}`);
 	spawned_dirs.push(dir);
 	return dir;
 };

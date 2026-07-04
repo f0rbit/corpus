@@ -2,6 +2,25 @@ import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
 import { cover_property, CoverageError, DEFAULT_NUM_RUNS } from "../../testing/cover.js";
 
+const run_once = async (): Promise<number> => {
+	fc.configureGlobal({ seed: 0xc0ffee, randomType: "xorshift128plus" });
+	try {
+		await cover_property(fc.integer({ min: 0, max: 9 }), (_n) => true, {
+			// 100% requirement on a 10% predicate is guaranteed to fail
+			// and surface the stats.
+			labels: [{ name: "is_zero", min_percent: 100, matches: (n) => n === 0 }],
+			numRuns: 200,
+		});
+		return -1;
+	} catch (e) {
+		if (e instanceof CoverageError) {
+			const stat = e.stats.find((s) => s.name === "is_zero");
+			return stat?.hits ?? -1;
+		}
+		throw e;
+	}
+};
+
 describe("testing.cover", () => {
 	test("property passes + all labels met: resolves without throwing", async () => {
 		await cover_property(fc.integer({ min: -100, max: 100 }), (_n) => true, {
@@ -73,24 +92,6 @@ describe("testing.cover", () => {
 	test("deterministic seed: hit counts stable across runs", async () => {
 		// fc.assert reads its seed from the global config when none is passed
 		// directly. Pin both runs to the same seed and assert the stats line up.
-		const run_once = async (): Promise<number> => {
-			fc.configureGlobal({ seed: 0xc0ffee, randomType: "xorshift128plus" });
-			try {
-				await cover_property(fc.integer({ min: 0, max: 9 }), (_n) => true, {
-					// 100% requirement on a 10% predicate is guaranteed to fail
-					// and surface the stats.
-					labels: [{ name: "is_zero", min_percent: 100, matches: (n) => n === 0 }],
-					numRuns: 200,
-				});
-				return -1;
-			} catch (e) {
-				if (e instanceof CoverageError) {
-					const stat = e.stats.find((s) => s.name === "is_zero");
-					return stat?.hits ?? -1;
-				}
-				throw e;
-			}
-		};
 		const a = await run_once();
 		const b = await run_once();
 		fc.configureGlobal({});

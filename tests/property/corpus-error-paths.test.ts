@@ -9,8 +9,8 @@ import { define_store, ok, err } from "../../types.js";
 import { json_codec, compute_hash } from "../../utils.js";
 import type { Backend, CorpusError, Result, SnapshotMeta } from "../../types.js";
 
-const DocSchema = z.object({ id: z.string(), value: z.number() });
-type Doc = z.infer<typeof DocSchema>;
+const doc_schema = z.object({ id: z.string(), value: z.number() });
+type Doc = z.infer<typeof doc_schema>;
 
 const STORE_ID = "docs";
 const SEEDED_VERSION = "v-under-test";
@@ -82,7 +82,7 @@ async function get_store_version(spec: SetupSpec): Promise<Result<{ meta: Snapsh
 	const backend = create_memory_backend();
 	const corpus = create_corpus()
 		.with_backend(backend)
-		.with_store(define_store(STORE_ID, json_codec(DocSchema)))
+		.with_store(define_store(STORE_ID, json_codec(doc_schema)))
 		.build();
 
 	const version = await seed(backend, spec);

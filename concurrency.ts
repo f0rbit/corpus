@@ -29,7 +29,7 @@
  */
 export class Semaphore {
 	private permits: number;
-	private waiting: Array<() => void> = [];
+	private readonly waiting: Array<() => void> = [];
 
 	constructor(permits: number) {
 		this.permits = permits;
@@ -102,18 +102,15 @@ export const parallel_map = async <T, R>(
 	concurrency: number,
 ): Promise<R[]> => {
 	const semaphore = new Semaphore(concurrency);
-	const results: R[] = new Array(items.length);
 
-	await Promise.all(
+	return Promise.all(
 		items.map(async (item, index) => {
 			await semaphore.acquire();
 			try {
-				results[index] = await mapper(item, index);
+				return await mapper(item, index);
 			} finally {
 				semaphore.release();
 			}
 		}),
 	);
-
-	return results;
 };

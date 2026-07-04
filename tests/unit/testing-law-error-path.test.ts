@@ -41,6 +41,15 @@ const register_kb = (): void => {
 	);
 };
 
+// Wrong fn: always returns ka, even when provoked for kb.
+const broken = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
+	return err({ kind: "ka" });
+};
+
+const always_ok = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
+	return ok("nope");
+};
+
 describe("testing.law.error_path_exhaustive", () => {
 	beforeEach(() => {
 		__reset_registry_for_tests();
@@ -134,11 +143,6 @@ describe("testing.law.error_path_exhaustive", () => {
 		register_ka();
 		register_kb();
 
-		// Wrong fn: always returns ka, even when provoked for kb.
-		const broken = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
-			return err({ kind: "ka" });
-		};
-
 		let thrown: unknown;
 		try {
 			await error_path_exhaustive(broken, {
@@ -159,10 +163,6 @@ describe("testing.law.error_path_exhaustive", () => {
 
 	test("fails loudly when fn returns ok for an error-path call", async () => {
 		register_ka();
-
-		const always_ok = async (_input: DemoInput): Promise<Result<string, DemoError>> => {
-			return ok("nope");
-		};
 
 		let thrown: unknown;
 		try {

@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeEach, spyOn } from "bun:test";
 import fc from "fast-check";
-import { failure, lookup_failure, list_registered_variants } from "../../testing/failure";
-import { __reset_registry_for_tests } from "../../testing/registry";
-import { compose } from "../../testing/compose";
+import { failure, lookup_failure, list_registered_variants } from "../../testing/failure.js";
+import { __reset_registry_for_tests } from "../../testing/registry.js";
+import { compose } from "../../testing/compose.js";
 import type { ArbBrand } from "../../testing/types";
 import type { CorpusError } from "../../types";
-import { CORPUS_ERROR_BRAND, register } from "../../testing/register";
+import { CORPUS_ERROR_BRAND, register } from "../../testing/register.js";
 
 type DemoError = { kind: "boom"; reason: string } | { kind: "splat"; level: number };
 
@@ -85,7 +85,7 @@ describe("testing/failure module", () => {
 				})),
 			);
 			const variants = list_registered_variants(DEMO_ERROR_BRAND);
-			expect([...variants].sort()).toEqual(["boom", "splat"]);
+			expect([...variants].toSorted()).toEqual(["boom", "splat"]);
 		});
 
 		test("result is a fresh array — mutations do not affect the registry", () => {
@@ -111,7 +111,7 @@ describe("testing/failure module", () => {
 
 		test("list_registered_variants returns all 12 CorpusError variants", () => {
 			const variants = list_registered_variants(CORPUS_ERROR_BRAND);
-			expect([...variants].sort()).toEqual([...ALL_CORPUS_ERROR_VARIANTS].sort());
+			expect([...variants].toSorted()).toEqual([...ALL_CORPUS_ERROR_VARIANTS].toSorted());
 			expect(variants.length).toBe(12);
 		});
 
@@ -210,7 +210,7 @@ describe("testing/failure module", () => {
 
 	describe("exhaustive coverage check", () => {
 		test("every CorpusError kind is represented in ALL_CORPUS_ERROR_VARIANTS (type-level guard)", () => {
-			const _exhaustive: Record<CorpusError["kind"], true> = {
+			const exhaustive: Record<CorpusError["kind"], true> = {
 				not_found: true,
 				already_exists: true,
 				storage_error: true,
@@ -224,7 +224,7 @@ describe("testing/failure module", () => {
 				partial_commit: true,
 				concurrent_modification: true,
 			};
-			expect(Object.keys(_exhaustive).sort()).toEqual([...ALL_CORPUS_ERROR_VARIANTS].sort());
+			expect(Object.keys(exhaustive).toSorted()).toEqual([...ALL_CORPUS_ERROR_VARIANTS].toSorted());
 		});
 	});
 });

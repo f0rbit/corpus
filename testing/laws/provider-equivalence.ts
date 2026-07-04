@@ -128,12 +128,12 @@ const divergence = (
 		return results_agree(model_r, sut_r) ? undefined : "results disagree under results_agree";
 	}
 	if (model_shape.ok !== sut_shape.ok) {
-		return `ok flags disagree (model ok=${model_shape.ok}, sut ok=${sut_shape.ok})`;
+		return `ok flags disagree (model ok=${String(model_shape.ok)}, sut ok=${String(sut_shape.ok)})`;
 	}
-	if (model_shape.ok === true && sut_shape.ok === true) {
+	if (model_shape.ok && sut_shape.ok) {
 		return results_agree(model_shape.value, sut_shape.value) ? undefined : "ok values disagree under results_agree";
 	}
-	if (model_shape.ok === false && sut_shape.ok === false) {
+	if (!model_shape.ok && !sut_shape.ok) {
 		const model_kind = error_kind(model_shape.error);
 		const sut_kind = error_kind(sut_shape.error);
 		if (model_kind !== undefined && sut_kind !== undefined) {
@@ -254,7 +254,7 @@ export async function provider_equivalence<Model extends object, S>(opts: {
 					const reason = divergence(outcome.model_r, outcome.sut_r, opts.equivalence.results_agree);
 					if (reason !== undefined) {
 						throw new Error(
-							`provider_equivalence: ${reason} — provider "${pair.label}", command #${index} (${label}), sequence: [${[...executed, label].join(", ")}], model_r=${fc.stringify(outcome.model_r)}, sut_r=${fc.stringify(outcome.sut_r)}`,
+							`provider_equivalence: ${reason} — provider "${pair.label}", command #${String(index)} (${label}), sequence: [${[...executed, label].join(", ")}], model_r=${fc.stringify(outcome.model_r)}, sut_r=${fc.stringify(outcome.sut_r)}`,
 						);
 					}
 				}

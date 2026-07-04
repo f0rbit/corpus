@@ -168,14 +168,15 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 			return err({ kind: "not_found", store_id: data_key, version: "" });
 		},
 
-		async put(data_key, data): Promise<Result<void, CorpusError>> {
-			if (write.length === 0) return ok(undefined);
+		async put(data_key, payload): Promise<Result<void, CorpusError>> {
+			const [sole] = write;
+			if (!sole) return ok(undefined);
 
 			if (write.length === 1) {
-				return write[0]!.data.put(data_key, data);
+				return sole.data.put(data_key, payload);
 			}
 
-			const bytes = await to_bytes(data);
+			const bytes = await to_bytes(payload);
 			for (const backend of write) {
 				const result = await backend.data.put(data_key, bytes);
 				if (!result.ok) return result;
@@ -199,7 +200,7 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 		},
 	};
 
-	const observations = createLayeredObservationsClient(read, write);
+	const observations = create_layered_observations_client(read, write);
 
 	// Forward apply_batch to the bottom write layer (last entry in `write`).
 	// Cache layers above it are read accelerators only; transactional commits
@@ -207,12 +208,9 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 	// Only present if a bottom write layer exists and supports apply_batch —
 	// otherwise the layered backend hides the method, falling back to the
 	// sequential best-effort path in `corpus.transaction()`.
-	const bottom_write = write.length > 0 ? write[write.length - 1] : undefined;
-	const apply_batch = bottom_write?.apply_batch
-		? async (ops: BatchOp[]): Promise<Result<void, CorpusError>> => {
-				return bottom_write.apply_batch!(ops);
-			}
-		: undefined;
+	const bottom_write = write.at(-1);
+	const apply_batch: ((ops: BatchOp[]) => Promise<Result<void, CorpusError>>) | undefined =
+		bottom_write?.apply_batch?.bind(bottom_write);
 
 	return {
 		metadata,
@@ -222,30 +220,30 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 	};
 }
 
-function createLayeredObservationsClient(
-	readLayers: Backend[],
-	writeLayers: Backend[],
+function create_layered_observations_client(
+	read_layers: Backend[],
+	write_layers: Backend[],
 ): ObservationsClient | undefined {
-	const readLayer = readLayers.find((l) => l.observations);
-	const writeLayersWithObs = writeLayers.filter((l) => l.observations);
+	const primary = read_layers.map((l) => l.observations).find((o) => o !== undefined);
+	const write_clients = write_layers.map((l) => l.observations).filter((o) => o !== undefined);
 
-	if (!readLayer?.observations && writeLayersWithObs.length === 0) {
+	if (!primary && write_clients.length === 0) {
 		return undefined;
 	}
 
-	const primary = readLayer?.observations;
-
 	return {
 		async put(type, opts) {
-			if (writeLayersWithObs.length === 0) {
+			const [head, ...rest] = write_clients;
+			if (!head) {
 				return err({ kind: "invalid_config", message: "No write layers support observations" });
 			}
-			let result;
-			for (const layer of writeLayersWithObs) {
-				result = await layer.observations!.put(type, opts);
+			let result = await head.put(type, opts);
+			if (!result.ok) return result;
+			for (const client of rest) {
+				result = await client.put(type, opts);
 				if (!result.ok) return result;
 			}
-			return result!;
+			return result;
 		},
 
 		async get(id) {
@@ -266,20 +264,21 @@ function createLayeredObservationsClient(
 		},
 
 		async delete(id) {
-			if (writeLayersWithObs.length === 0) {
+			const [head, ...rest] = write_clients;
+			if (!head) {
 				return err({ kind: "observation_not_found", id });
 			}
-			let result;
-			for (const layer of writeLayersWithObs) {
-				result = await layer.observations!.delete(id);
+			let result = await head.delete(id);
+			for (const client of rest) {
+				result = await client.delete(id);
 			}
-			return result!;
+			return result;
 		},
 
 		async delete_by_source(source) {
 			let total = 0;
-			for (const layer of writeLayersWithObs) {
-				const result = await layer.observations!.delete_by_source(source);
+			for (const client of write_clients) {
+				const result = await client.delete_by_source(source);
 				if (result.ok) total += result.value;
 			}
 			return ok(total);
