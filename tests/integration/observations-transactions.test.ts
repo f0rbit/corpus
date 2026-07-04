@@ -114,7 +114,8 @@ describe("memory backend - apply_batch rollback", () => {
 				data_key: "docs/txhash",
 			},
 		};
-		const throwing_op = new Proxy({ type: "meta_put" } as BatchOp, {
+		const partial_op: unknown = { type: "meta_put" };
+		const throwing_op = new Proxy(partial_op as BatchOp, {
 			get(target, prop) {
 				if (prop === "meta") throw new Error("synthetic op failure");
 				return Reflect.get(target, prop) as unknown;

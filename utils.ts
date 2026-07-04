@@ -270,7 +270,7 @@ export function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T> {
 						const buffered = await stream_to_bytes(layer_in);
 						const layer_out = layer_fn(buffered);
 						const reader = layer_out.getReader();
-						while (true) {
+						for (;;) {
 							const { done, value: chunk } = await reader.read();
 							if (done) break;
 							controller.enqueue(chunk);
@@ -314,7 +314,7 @@ export function concat_bytes(chunks: Uint8Array[]): Uint8Array {
 export async function stream_to_bytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
 	const chunks: Uint8Array[] = [];
 	const reader = stream.getReader();
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -436,8 +436,12 @@ export function parse_snapshot_meta(raw: {
 				? raw.invoked_at
 				: new Date(raw.invoked_at)
 			: undefined,
-		parents: raw.parents ? (typeof raw.parents === "string" ? JSON.parse(raw.parents) : raw.parents) : [],
-		tags: raw.tags ? (typeof raw.tags === "string" ? JSON.parse(raw.tags) : raw.tags) : undefined,
+		parents: raw.parents
+			? typeof raw.parents === "string"
+				? (JSON.parse(raw.parents) as ParentRef[])
+				: raw.parents
+			: [],
+		tags: raw.tags ? (typeof raw.tags === "string" ? (JSON.parse(raw.tags) as string[]) : raw.tags) : undefined,
 		content_hash: raw.content_hash ?? "",
 		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,

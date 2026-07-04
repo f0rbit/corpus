@@ -4,7 +4,7 @@ import { text_codec, binary_codec, json_codec, stream_to_bytes, concat_bytes } f
 const collect_strings = async (stream: ReadableStream<string>): Promise<string[]> => {
 	const reader = stream.getReader();
 	const chunks: string[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -69,7 +69,7 @@ describe("Built-in codec stream methods", () => {
 		const decoded = codec.decode_stream!(stream);
 		const collected: Uint8Array[] = [];
 		const reader = decoded.getReader();
-		while (true) {
+		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			collected.push(value);

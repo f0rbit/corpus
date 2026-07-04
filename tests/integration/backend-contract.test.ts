@@ -28,7 +28,7 @@ const big_payload = (): Uint8Array => {
 const drain = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
 	const reader = stream.getReader();
 	const chunks: Uint8Array[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);
@@ -451,7 +451,7 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					const reader = stream.getReader();
 					const chunks: Uint8Array[] = [];
 
-					while (true) {
+					for (;;) {
 						const { done, value } = await reader.read();
 						if (done) break;
 						chunks.push(value);
@@ -788,7 +788,7 @@ const big = (size: number): Uint8Array => {
 const drain_chunks = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
 	const reader = stream.getReader();
 	const chunks: Uint8Array[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);

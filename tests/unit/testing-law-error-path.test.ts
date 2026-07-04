@@ -16,7 +16,7 @@ type DemoInput = "trigger_ka" | { trigger: "kb"; reason: string };
 
 async function demo(input: DemoInput): Promise<Result<string, DemoError>> {
 	if (input === "trigger_ka") return err({ kind: "ka" });
-	if (typeof input === "object" && input.trigger === "kb") {
+	if (typeof input === "object") {
 		return err({ kind: "kb", reason: input.reason });
 	}
 	return ok("happy");

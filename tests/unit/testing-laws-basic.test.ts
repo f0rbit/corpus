@@ -11,7 +11,7 @@ import { testing } from "../../index.js";
  */
 const json_codec = {
 	encode: (x: unknown) => new TextEncoder().encode(JSON.stringify(x)),
-	decode: (bytes: Uint8Array) => JSON.parse(new TextDecoder().decode(bytes)),
+	decode: (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes)),
 };
 
 test("round_trip: JSON string", async () => {

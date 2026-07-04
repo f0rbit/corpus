@@ -32,12 +32,14 @@ export default define_lint_config({
 			rules: { "functional/no-throw-statements": "off" },
 		},
 		{
-			// unwrap()/or_throw() throw by contract; try_catch/try_catch_async ARE the
-			// sanctioned try/catch → Result boundary
+			// unwrap()/or_throw()/null_on()/fallback_on() throw by contract — including
+			// non-Error error values (E is unconstrained); try_catch/try_catch_async ARE
+			// the sanctioned try/catch → Result boundary
 			files: ["result.ts"],
 			rules: {
 				"functional/no-throw-statements": "off",
 				"functional/no-try-statements": "off",
+				"@typescript-eslint/only-throw-error": "off",
 			},
 		},
 		{
@@ -46,7 +48,42 @@ export default define_lint_config({
 			rules: { "functional/no-throw-statements": "off" },
 		},
 		{
-			// test code: fakes and assertions may throw/try/use classes; Result discipline off
+			// The walker narrows Zod v3 schemas via instanceof, but Zod's own generics are
+			// any-parameterised (ZodObject<any, ...>, _def.shape() returns any) — every
+			// recursive walk() call trips the rule. The single boundary cast is documented
+			// in AGENTS.md; the internals are untypeable without forking Zod's types.
+			files: ["testing/arb.ts"],
+			rules: { "@typescript-eslint/no-unsafe-argument": "off" },
+		},
+		{
+			// CoverageError is an Error subclass so fast-check reporting and consumer
+			// instanceof checks work — a legitimate class, like Semaphore.
+			files: ["testing/cover.ts"],
+			rules: {
+				"functional/no-classes": "off",
+				"functional/no-this-expressions": "off",
+			},
+		},
+		{
+			// `{}` is the intersection-identity for the builder's accumulated stores map
+			// (CorpusBuilder<{}> → Stores & { [id]: Store<T> }); Record<string, never>
+			// would collapse every accumulated store type to never. Public API shape.
+			files: ["types.ts", "corpus.ts"],
+			rules: { "@typescript-eslint/no-empty-object-type": "off" },
+		},
+		{
+			// ObservationsCRUD is corpus's own deprecated legacy adapter type, retained
+			// (re-export + union member) until the next major; its removal is the
+			// documented migration, not this lint pass.
+			files: ["observations/index.ts", "observations/storage.ts"],
+			rules: { "@typescript-eslint/no-deprecated": "off" },
+		},
+		{
+			// test code: fakes and assertions may throw/try/use classes; Result discipline
+			// off. only-throw-error: tests deliberately throw strings/objects to exercise
+			// format_error/try_catch mapping. await-thenable + no-confusing-void-expression:
+			// bun's expect().rejects matcher typings return void, but the await IS required
+			// at runtime — dropping it would let tests pass before the assertion settles.
 			files: ["tests/**"],
 			rules: {
 				"functional/no-classes": "off",
@@ -54,7 +91,15 @@ export default define_lint_config({
 				"functional/no-throw-statements": "off",
 				"functional/no-try-statements": "off",
 				"f0rbit/must-use-result": "off",
+				"@typescript-eslint/only-throw-error": "off",
+				"@typescript-eslint/await-thenable": "off",
+				"@typescript-eslint/no-confusing-void-expression": "off",
 			},
+		},
+		{
+			// the enum exists to exercise arb()'s z.nativeEnum walker branch
+			files: ["tests/unit/testing-arb.test.ts"],
+			rules: { "no-restricted-syntax": "off" },
 		},
 		{
 			// pre-convention public API names — renames are breaking:

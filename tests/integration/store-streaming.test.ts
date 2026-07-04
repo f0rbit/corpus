@@ -18,7 +18,7 @@ import type { Codec } from "../../types";
 const drain_chunks = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
 	const reader = stream.getReader();
 	const chunks: T[] = [];
-	while (true) {
+	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		chunks.push(value);

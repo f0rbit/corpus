@@ -75,6 +75,8 @@ Typecheck + tests are the CI gate. Lint/format are wired (`@f0rbit/lint`, exact-
 
 PRs on this repo merge with **squash only** — merge commits and rebase merges are disabled (settings flipped 2026-07-04; history before 0.7.0 predates this). The PR title becomes the squash commit title, so PR titles follow git-workflow commit rules: no "phase"/"task"/plan identifiers, describe the change itself.
 
+One-time bootstrap after cloning: `git config blame.ignoreRevsFile .git-blame-ignore-revs` — keeps the oxfmt normalization commit out of `git blame`.
+
 ## Conventions
 
 These differ from or override global defaults — read them.

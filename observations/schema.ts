@@ -56,12 +56,12 @@ export const corpus_observations = sqliteTable(
 		// Derivation lineage
 		derived_from: text("derived_from"),
 	},
-	(table) => ({
-		type_idx: index("idx_obs_type").on(table.type),
-		source_idx: index("idx_obs_source").on(table.source_store_id, table.source_version),
-		type_observed_idx: index("idx_obs_type_observed").on(table.type, table.observed_at),
-		type_source_idx: index("idx_obs_type_source").on(table.type, table.source_store_id),
-	}),
+	(table) => [
+		index("idx_obs_type").on(table.type),
+		index("idx_obs_source").on(table.source_store_id, table.source_version),
+		index("idx_obs_type_observed").on(table.type, table.observed_at),
+		index("idx_obs_type_source").on(table.type, table.source_store_id),
+	],
 );
 
 export type ObservationRow = typeof corpus_observations.$inferSelect;

@@ -106,7 +106,7 @@ describe("compose", () => {
 		const out_stream = composed.decode_stream!(input);
 		const reader = out_stream.getReader();
 		let result = "";
-		while (true) {
+		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			result += value;

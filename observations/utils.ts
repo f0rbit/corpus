@@ -165,7 +165,7 @@ export function resolve_path<T = unknown>(value: unknown, path: string): Result<
 				store_id: "",
 				version: "",
 				message: `Path segment '${segment}' not found - parent is null/undefined`,
-			} as CorpusError);
+			});
 		}
 
 		if (typeof current !== "object") {
@@ -174,7 +174,7 @@ export function resolve_path<T = unknown>(value: unknown, path: string): Result<
 				store_id: "",
 				version: "",
 				message: `Path segment '${segment}' not found - parent is not an object`,
-			} as CorpusError);
+			});
 		}
 
 		const index = /^\d+$/.test(segment) ? parseInt(segment, 10) : segment;

@@ -29,7 +29,7 @@ export type MemoryBackendOptions = {
  */
 const CORPUS_DEV: boolean = to_fallback(
 	try_catch(
-		() => typeof process !== "undefined" && process.env?.CORPUS_DEV === "1",
+		() => typeof process !== "undefined" && process.env.CORPUS_DEV === "1",
 		() => false,
 	),
 	false,

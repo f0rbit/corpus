@@ -107,7 +107,7 @@ describe("testing/arb", () => {
 		test("literal pinned to the documented value", () => {
 			const a = arb(z.literal("yes"));
 			fc.assert(
-				fc.property(a, (v) => v === "yes"),
+				fc.property(a, (v: string) => v === "yes"),
 				{ numRuns: 20 },
 			);
 		});
@@ -115,7 +115,7 @@ describe("testing/arb", () => {
 		test("enum picks from values", () => {
 			const a = arb(z.enum(["red", "green", "blue"]));
 			fc.assert(
-				fc.property(a, (v) => v === "red" || v === "green" || v === "blue"),
+				fc.property(a, (v: string) => v === "red" || v === "green" || v === "blue"),
 				{ numRuns: 50 },
 			);
 		});
@@ -127,7 +127,7 @@ describe("testing/arb", () => {
 			}
 			const a = arb(z.nativeEnum(Color));
 			fc.assert(
-				fc.property(a, (v) => v === Color.Red || v === Color.Green),
+				fc.property(a, (v: string) => v === "red" || v === "green"),
 				{ numRuns: 50 },
 			);
 		});
@@ -183,7 +183,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			const seen = new Set<string>();
 			fc.assert(
-				fc.property(a, (v) => {
+				fc.property(a, (v: string) => {
 					seen.add(v);
 					return v === "a" || v === "b" || v === "c";
 				}),

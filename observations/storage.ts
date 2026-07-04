@@ -69,7 +69,7 @@ function row_to_base(row: ObservationRow) {
 		...(row.confidence !== null && { confidence: row.confidence }),
 		...(row.observed_at && { observed_at: new Date(row.observed_at) }),
 		created_at: new Date(row.created_at),
-		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) }),
+		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) as SnapshotPointer[] }),
 	};
 }
 
@@ -111,8 +111,8 @@ export function create_observation_row(
 		source_store_id: source.store_id,
 		source_version: source.version,
 		source_path: source.path ?? null,
-		source_span_start: source.span?.start?.toString() ?? null,
-		source_span_end: source.span?.end?.toString() ?? null,
+		source_span_start: source.span?.start.toString() ?? null,
+		source_span_end: source.span?.end.toString() ?? null,
 		content: JSON.stringify(content),
 		confidence: opts.confidence ?? null,
 		observed_at: opts.observed_at?.toISOString() ?? null,
@@ -198,17 +198,13 @@ export type ObservationsCRUD = {
  */
 export function create_observations_storage(adapter: ObservationsAdapter | ObservationsCRUD): ObservationsStorage {
 	const wrap_add_one = async (row: ObservationRow): Promise<Result<void, CorpusError>> => {
-		const result = await (adapter as ObservationsAdapter).add_one(row);
-		if (result === undefined || result === null) return ok(undefined);
-		if (typeof result === "object" && "ok" in result) return result;
-		return ok(undefined);
+		const result = await adapter.add_one(row);
+		return result ?? ok(undefined);
 	};
 
 	const wrap_remove_one = async (id: string): Promise<Result<boolean, CorpusError>> => {
-		const result = await (adapter as ObservationsAdapter).remove_one(id);
-		if (typeof result === "boolean") return ok(result);
-		if (typeof result === "object" && "ok" in result) return result;
-		return ok(false);
+		const result = await adapter.remove_one(id);
+		return typeof result === "boolean" ? ok(result) : result;
 	};
 
 	return {

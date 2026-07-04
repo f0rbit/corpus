@@ -225,7 +225,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		const encoded = await try_catch_async(async () => {
 			const encoded_chunks: Uint8Array[] = [];
 			const reader = stream.getReader();
-			while (true) {
+			for (;;) {
 				const { done, value } = await reader.read();
 				if (done) break;
 				encoded_chunks.push(await stream_to_bytes(encode_stream(value)));
@@ -641,7 +641,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 function corpus_error_to_native(e: CorpusError): Error {
 	// pull the original cause if present, otherwise synthesise one from the kind
 	if ("cause" in e && e.cause instanceof Error) return e.cause;
-	return new Error(`[${e.kind}] ${"message" in e ? e.message : JSON.stringify(e)}`);
+	return new Error(`[${e.kind}] ${("message" in e ? e.message : undefined) ?? JSON.stringify(e)}`);
 }
 
 /**

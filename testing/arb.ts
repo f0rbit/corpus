@@ -113,12 +113,12 @@ function string_arb(schema: z.ZodString): Arbitrary<string> {
 	const min = checks.find((c) => c.kind === "min");
 	const max = checks.find((c) => c.kind === "max");
 	const length = checks.find((c) => c.kind === "length");
-	if (length && length.kind === "length") {
+	if (length) {
 		return fc.string({ minLength: length.value, maxLength: length.value });
 	}
 	const opts: { minLength?: number; maxLength?: number } = {};
-	if (min && min.kind === "min") opts.minLength = min.value;
-	if (max && max.kind === "max") opts.maxLength = max.value;
+	if (min) opts.minLength = min.value;
+	if (max) opts.maxLength = max.value;
 	return fc.string(opts);
 }
 
@@ -127,8 +127,8 @@ function number_arb(schema: z.ZodNumber): Arbitrary<number> {
 	const is_int = checks.some((c) => c.kind === "int");
 	const min_check = checks.find((c) => c.kind === "min");
 	const max_check = checks.find((c) => c.kind === "max");
-	const min = min_check && min_check.kind === "min" ? min_check.value : undefined;
-	const max = max_check && max_check.kind === "max" ? max_check.value : undefined;
+	const min = min_check?.value;
+	const max = max_check?.value;
 	if (is_int) {
 		const opts: { min?: number; max?: number } = {};
 		if (min !== undefined) opts.min = Math.ceil(min);

@@ -141,7 +141,7 @@ describe("Result Utilities", () => {
 	describe("try_catch", () => {
 		test("returns ok for successful function", () => {
 			const result = try_catch(
-				() => JSON.parse('{"value": 42}'),
+				(): unknown => JSON.parse('{"value": 42}'),
 				(e) => format_error(e),
 			);
 			expect(result.ok).toBe(true);
@@ -152,7 +152,7 @@ describe("Result Utilities", () => {
 
 		test("returns error for thrown exception", () => {
 			const result = try_catch(
-				() => JSON.parse("invalid json"),
+				(): unknown => JSON.parse("invalid json"),
 				(e) => `parse error: ${format_error(e)}`,
 			);
 			expect(result.ok).toBe(false);

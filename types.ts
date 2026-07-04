@@ -43,7 +43,7 @@ import type { ObservationRow } from "./observations/schema.js";
  * ```
  */
 export type CorpusError =
-	| { kind: "not_found"; store_id: string; version: string }
+	| { kind: "not_found"; store_id: string; version: string; message?: string }
 	| { kind: "already_exists"; store_id: string; version: string }
 	| { kind: "storage_error"; cause: Error; operation: string }
 	| { kind: "decode_error"; cause: Error }
