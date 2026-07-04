@@ -8,9 +8,11 @@
  * report against a tagged error union.
  *
  * Registration is still explicit — neither this module nor `testing/register`
- * runs on import. Phase 4's vending walker will pick up the `"corpus.testing"`
- * package.json hook and call `register()` itself; until then, tests load the
- * registrar via `beforeAll(register)`.
+ * runs on import. The vending auto-loader picks up `"corpus": { "testing" }`
+ * package.json hooks and calls `register()` on the first awaited
+ * `lookup` / `lookup_failure`; `testing.load_from(...)` loads one explicitly.
+ * `list_registered_variants` stays synchronous and does NOT trigger the
+ * auto-loader — it enumerates what's registered right now.
  */
 
 import { failure, lookup_failure, list_failure_variants } from "./registry.js";

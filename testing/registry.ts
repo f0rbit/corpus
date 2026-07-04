@@ -20,11 +20,19 @@
  * signatures narrow the result back to the consumer's expected type via a
  * single `as` cast at the boundary — this is the documented escape hatch and
  * the only place in the registry where an unchecked cast lives.
+ *
+ * `lookup` and `lookup_failure` are async: the first call triggers the
+ * vending auto-loader (`./vending/auto-load.js`), which discovers and loads
+ * registrars declared via `"corpus": { "testing": ... }` package.json keys.
+ * Registration (`arbitrary` / `failure`) stays synchronous, as do the
+ * `_sync` accessors used by `arb()` — deriving an arbitrary from a schema
+ * must not spring filesystem walks on a synchronous call path.
  */
 
 import type { Arbitrary } from "fast-check";
 import type { z } from "zod";
 import type { ArbBrand } from "./types.js";
+import { __reset_auto_load_for_tests, ensure_loaded } from "./vending/auto-load.js";
 
 let brand_arbs = new Map<symbol, Arbitrary<unknown>>();
 let schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
@@ -67,16 +75,42 @@ export function arbitrary(key: symbol | z.ZodType, gen: Arbitrary<unknown>): voi
 /**
  * Look up the arbitrary registered against a branded symbol.
  *
+ * Async since 0.7.0: the first lookup per registry state triggers the vending
+ * auto-loader, so arbitraries registered by dependencies' registrars are
+ * visible with zero manual wiring.
+ *
+ * @example
+ * ```ts
+ * const user_arb = await testing.lookup(USER_ID_BRAND)
+ * ```
+ *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
+export function lookup<T>(key: ArbBrand<T>): Promise<Arbitrary<T> | undefined>;
 /**
  * Look up the arbitrary registered against a Zod schema instance.
  *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
-export function lookup(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+export function lookup<S extends z.ZodType>(schema: S): Promise<Arbitrary<z.infer<S>> | undefined>;
+export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown> | undefined> {
+	await ensure_loaded();
+	return lookup_now(key);
+}
+
+/**
+ * Synchronous lookup that does NOT trigger the vending auto-loader. Internal —
+ * used by `arb()`'s schema walker, which is a synchronous API and must not
+ * spring filesystem walks mid-derivation. Only sees registrations made in
+ * this process so far (manual calls, or a prior awaited `lookup`/`load_from`).
+ */
+export function lookup_sync<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
+export function lookup_sync<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
+export function lookup_sync(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+	return lookup_now(key);
+}
+
+function lookup_now(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
 	if (typeof key === "symbol") return brand_arbs.get(key);
 	return schema_arbs.get(key);
 }
@@ -117,10 +151,25 @@ export function failure<E extends { kind: string }, K extends E["kind"]>(
  * Look up the arbitrary registered for a specific variant of a tagged error
  * union.
  *
+ * Async since 0.7.0: the first lookup per registry state triggers the vending
+ * auto-loader (see {@link lookup}).
+ *
  * @returns the registered arbitrary, or `undefined` if none is registered for
  * the given `[brand, variant]` pair.
  */
-export function lookup_failure<E extends { kind: string }>(
+export async function lookup_failure<E extends { kind: string }>(
+	brand: ArbBrand<E>,
+	variant: E["kind"]
+): Promise<Arbitrary<E> | undefined> {
+	await ensure_loaded();
+	return lookup_failure_sync(brand, variant);
+}
+
+/**
+ * Synchronous failure lookup that does NOT trigger the vending auto-loader.
+ * Internal counterpart of {@link lookup_sync}.
+ */
+export function lookup_failure_sync<E extends { kind: string }>(
 	brand: ArbBrand<E>,
 	variant: E["kind"]
 ): Arbitrary<E> | undefined {
@@ -147,11 +196,14 @@ export function list_failure_variants<E extends { kind: string }>(
 }
 
 /**
- * Reset all three registries to fresh empty maps. Test-only helper — the
- * leading `__` is the convention for "do not call from production code".
+ * Reset all three registries to fresh empty maps AND clear the auto-load
+ * promise, so the next `lookup` / `lookup_failure` re-walks vended
+ * registrars. Test-only helper — the leading `__` is the convention for
+ * "do not call from production code".
  */
 export function __reset_registry_for_tests(): void {
 	brand_arbs = new Map<symbol, Arbitrary<unknown>>();
 	schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
 	failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
+	__reset_auto_load_for_tests();
 }

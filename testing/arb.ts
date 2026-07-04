@@ -25,7 +25,11 @@
 import { z } from "zod";
 import fc from "fast-check";
 import type { Arbitrary } from "fast-check";
-import { lookup } from "./registry.js";
+// lookup_sync, deliberately: arb() is a synchronous API, so it consults only
+// registrations already made in this process and never triggers the vending
+// auto-loader. Await testing.lookup(...) (or testing.load_from(...)) first if
+// vended registrations should be visible to the walker.
+import { lookup_sync } from "./registry.js";
 
 /**
  * Translate a Zod schema into an `fc.Arbitrary` producing values matching the
@@ -42,7 +46,7 @@ import { lookup } from "./registry.js";
  * ```
  */
 export function arb<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> {
-	const registered = lookup(schema);
+	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	const ctx: WalkContext = { lazy_ties: new WeakMap() };
 	return walk(schema, ctx) as Arbitrary<z.infer<S>>;
@@ -53,7 +57,7 @@ type WalkContext = {
 };
 
 function walk(schema: z.ZodType, ctx: WalkContext): Arbitrary<unknown> {
-	const registered = lookup(schema);
+	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	if (schema instanceof z.ZodString) return string_arb(schema);
 	if (schema instanceof z.ZodNumber) return number_arb(schema);

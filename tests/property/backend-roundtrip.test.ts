@@ -12,7 +12,7 @@ describe("property: backend metadata round-trip", () => {
 	});
 
 	test("metadata put → get round-trip preserves all fields (memory backend)", async () => {
-		const meta_arb = lookup(SNAPSHOT_META_BRAND);
+		const meta_arb = await lookup(SNAPSHOT_META_BRAND);
 		expect(meta_arb).toBeDefined();
 		if (!meta_arb) return;
 

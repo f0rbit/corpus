@@ -82,7 +82,7 @@ export async function error_path_exhaustive<
 	const variants = (opts.only ?? (Object.keys(opts.provoke) as E["kind"][])) as readonly E["kind"][];
 
 	for (const variant of variants) {
-		const gen = lookup_failure(opts.error_brand, variant);
+		const gen = await lookup_failure(opts.error_brand, variant);
 		if (!gen) {
 			throw new Error(
 				`error_path_exhaustive: no generator registered for variant '${variant}' of brand ${String(opts.error_brand)} — register via testing.failure(brand, '${variant}', () => ...)`,
