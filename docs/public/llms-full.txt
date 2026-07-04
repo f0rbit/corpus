@@ -56,6 +56,12 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - [Transactions](https://f0rbit.github.io/corpus/guides/transactions/): Commit cross-store writes atomically with corpus.transaction(async tx => …) — buffered ops, read-your-writes, per-backend guarantees stated honestly.
 - [Version Sets](https://f0rbit.github.io/corpus/guides/version-sets/): Immutable, content-addressed manifests tying together every artifact in a deployable release — worker bundle, D1 plan, assets, env, infra — with tag-only promotion to environments.
 
+### Testing
+- [Arbitraries](https://f0rbit.github.io/corpus/testing/arbitraries/): Generate test data from Zod schemas and register domain-specific generators.
+- [Laws](https://f0rbit.github.io/corpus/testing/laws/): Five pre-built property checkers for common code contracts.
+- [Testing Substrate](https://f0rbit.github.io/corpus/testing/overview/): Property-based testing framework for corpus with arbitraries, laws, and vending.
+- [Vending](https://f0rbit.github.io/corpus/testing/vending/): Share arbitraries across packages via the registry and auto-loading.
+
 ## Quickstart
 
 ```typescript
@@ -188,13 +194,33 @@ Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)
 - Types: `Draw`
 
 ### testing/registry.ts
-- Values: `arbitrary`, `lookup`, `failure`, `lookup_failure`, `__reset_registry_for_tests`
+- Values: `arbitrary`, `lookup`, `__reset_registry_for_tests`
+
+### testing/failure.ts
+- Values: `failure`, `lookup_failure`, `list_registered_variants`
+
+### testing/vending/auto-load.ts
+- Values: `load_from`
+
+### testing/register.ts
+- Values: `register`, `CORPUS_ERROR_BRAND`, `SNAPSHOT_META_BRAND`, `BATCH_OP_BRAND`
+
+### testing/cover.ts
+- Values: `cover`, `CoverageError`, `DEFAULT_NUM_RUNS`
+- Types: `CoverageLabel`, `CoverageStat`
+
+### testing/commands.ts
+- Values: `commands`, `async_commands`, `model_run`, `async_model_run`
+- Types: `Command`, `AsyncCommand`, `ICommand`, `ModelRunSetup`, `ModelRunAsyncSetup`, `CommandsConstraints`
 
 ### testing/types.ts
 - Types: `ArbBrand`, `FailureKey`
 
 ### fast-check
 - Values: `fc`
+
+### testing/laws/index.ts
+Namespace re-export: `law` (e.g. `import { law } from '@f0rbit/corpus'`)
 
 ## Links
 
@@ -7041,6 +7067,925 @@ import ScrollProgress from '../../components/landing/ScrollProgress.astro';
 
 ---
 
+### Arbitraries (testing/arbitraries.mdx)
+
+> Generate test data from Zod schemas and register domain-specific generators.
+
+import { Aside } from '@astrojs/starlight/components';
+
+An **arbitrary** is a fast-check generator that produces random test data. Corpus provides two ways to get them: derive from Zod schemas, or register custom generators for your domain types.
+
+## Deriving from Zod Schemas
+
+The simplest path: pass any Zod schema to `testing.arb()` and get an `fc.Arbitrary` that generates valid values.
+
+```typescript
+import { z } from "zod";
+import { testing } from "@f0rbit/corpus";
+
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  email: z.string().email(),
+  age: z.number().int().min(0).max(150).optional(),
+});
+
+const user_arb = testing.arb(UserSchema);
+
+// Use it in a property test
+await testing.law.round_trip(
+  user_arb,
+  (user) => JSON.stringify(user),
+  (json) => JSON.parse(json),
+);
+```
+
+The walker understands ~14 common Zod kinds:
+
+- **Primitives:** `string()`, `number()`, `bigint()`, `boolean()`, `date()`
+- **Constraints:** `uuid()`, `email()`, `regex()`, `min()`, `max()`, `length()`
+- **Combinators:** `object()`, `array()`, `tuple()`, `record()`, `union()`, `discriminatedUnion()`
+- **Modifiers:** `optional()`, `nullable()`, `default()`, `branded()`, `lazy()`
+- **Special:** `any()`, `unknown()`
+
+For `string()` with custom constraints (e.g., `datetime()`), the walker generates domain-specific strings that will pass validation.
+
+<Aside type="note">
+  If you need a generator for an unsupported schema kind (e.g., `ZodEffects`, `ZodPipe`), you'll get a clear error pointing at the manual registration escape hatch.
+</Aside>
+
+## Composing Dependent Generators
+
+Sometimes you need later test data to depend on earlier data — e.g., generating an array whose length comes from a prior draw.
+
+Use `testing.compose()` for inline dependent generation:
+
+```typescript
+const order_arb = testing.compose((draw) => {
+  const id = draw(testing.arb(OrderIdSchema));
+  const count = draw(testing.fc.integer({ min: 1, max: 10 }));
+  const items = draw(
+    testing.fc.array(testing.arb(ItemSchema), {
+      minLength: count,
+      maxLength: count,
+    })
+  );
+  return { id, items, item_count: items.length };
+});
+
+// Use it like any other arbitrary
+await testing.law.round_trip(order_arb, encode, decode);
+```
+
+The `draw` function is synchronous — it pulls a single value from the arbitrary you pass. You can nest draws: draw depends on a prior draw, and so on.
+
+<Aside type="caution">
+  **Shrinking note:** `testing.compose` uses `fc.gen()` under the hood. Fast-check's `fc.gen()` shrinker does not reliably terminate when used with dependent draws in complex compositions. The `law.error_path_exhaustive` law disables shrinking (`endOnFailure: true`) for this reason. If you're combining `compose` with complex command sequences, consider using `fc.sample()` to pre-generate a fixed set of values instead.
+</Aside>
+
+## Registering Custom Generators
+
+If `testing.arb(schema)` doesn't fit — you need a hand-tuned generator, or you want to ensure the same generator is reused everywhere — register it once:
+
+### Branded Type Registration
+
+Use a **branded symbol** for identity-bearing types (UserId, OrderId, Money, error types):
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+import { type ArbBrand } from "@f0rbit/corpus/testing";
+
+type UserId = string & { readonly __brand: "UserId" };
+const USER_ID_BRAND = Symbol("UserId") as ArbBrand<UserId>;
+
+// Register once (e.g., in a test file or registrar)
+testing.arbitrary(
+  USER_ID_BRAND,
+  testing.fc.uuid().map((id) => id as UserId)
+);
+
+// Now every test using USER_ID_BRAND gets the same generator
+const user_id = await testing.lookup(USER_ID_BRAND);
+```
+
+### Zod Schema Registration
+
+For ad-hoc schemas without a long-lived brand, register the schema instance directly:
+
+```typescript
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
+// Register this specific schema instance
+testing.arbitrary(
+  UserSchema,
+  testing.fc.record({
+    id: testing.fc.uuid(),
+    name: testing.fc.string({ minLength: 1 }),
+  })
+);
+
+// Later lookups for this schema instance get the registered generator
+const user_arb = await testing.lookup(UserSchema);
+```
+
+## Looking Up Registered Generators
+
+Once a generator is registered (either via the registry or a dependency's registrar), use `lookup()` to retrieve it:
+
+```typescript
+// Returns a Promise<Arbitrary<T> | undefined>
+// If the generator is registered, you get it; otherwise undefined
+const user_id_gen = await testing.lookup(USER_ID_BRAND);
+if (user_id_gen) {
+  // Use the canonical generator
+  await testing.law.round_trip(user_id_gen, encode, decode);
+}
+```
+
+<Aside>
+  **Auto-loading:** The first call to `testing.lookup()` triggers the vending system to discover and load registrars declared in your dependencies' `package.json` files. Subsequent calls see the cached result. Use `testing.__reset_registry_for_tests()` in test setup to clear the cache.
+</Aside>
+
+## Hybrid Registry
+
+The registry uses two key spaces:
+
+1. **Branded symbols** — For identity-bearing types where you want a single canonical generator reused everywhere.
+   - Register: `testing.arbitrary(BRAND, gen)`
+   - Look up: `await testing.lookup(BRAND)`
+
+2. **Zod schema instances** — For ad-hoc schemas without a brand.
+   - Register: `testing.arbitrary(schema, gen)`
+   - Look up: `await testing.lookup(schema)`
+
+<Aside type="note">
+  The registry stores schema instances in a `WeakMap`, so registered schemas can be garbage-collected when no longer referenced. Branded registrations use a plain `Map<symbol, Arbitrary>`.
+</Aside>
+
+## Failure Generators for Error Variants
+
+When testing error paths (see the `error_path_exhaustive` law), you need generators that produce specific error variants. Register failure generators the same way:
+
+```typescript
+const CORPUS_ERROR_BRAND = Symbol("CorpusError") as ArbBrand<CorpusError>;
+
+// Register a generator for the "not_found" variant
+testing.failure(
+  CORPUS_ERROR_BRAND,
+  "not_found",
+  testing.compose((draw) => ({
+    kind: "not_found",
+    store_id: draw(testing.arb(StoreIdSchema)),
+    version: draw(testing.fc.integer()),
+  }))
+);
+
+// Look it up
+const gen = await testing.lookup_failure(CORPUS_ERROR_BRAND, "not_found");
+```
+
+## Handling Unsupported Schemas
+
+If you use `testing.arb()` with an unsupported schema kind, you get a clear error:
+
+```
+Error: unsupported Zod kind: ZodEffects
+  Manually register via testing.arbitrary(schema, gen):
+  testing.arbitrary(mySchema, fc.integer().map(yourTransform))
+```
+
+The escape hatch is `testing.arbitrary(schema, gen)` — pass your schema and a hand-built generator. After registering, `arb(schema)` will use the registered generator.
+
+```typescript
+const EffectsSchema = z.string().pipe(z.string().email());
+
+// Register a custom generator
+testing.arbitrary(
+  EffectsSchema,
+  email_arb() // your custom arbitrary
+);
+
+// Now arb() finds and returns it
+const gen = testing.arb(EffectsSchema);
+```
+
+## Registrar Modules
+
+For sharing arbitraries across packages, see [Vending](./vending.mdx). The core idea: each package declares a `register.js` file in `package.json` that calls `testing.arbitrary()` and `testing.failure()`, and the registry auto-loads them.
+
+---
+
+### Laws (testing/laws.mdx)
+
+> Five pre-built property checkers for common code contracts.
+
+import { Aside } from '@astrojs/starlight/components';
+
+Laws are pre-built property checkers that verify your code respects a contract. Corpus ships five laws covering serialization, idempotence, functor structure, error exhaustiveness, and cross-implementation equivalence.
+
+## Round Trip
+
+**Contract:** `decode(encode(x)) === x` for all `x`.
+
+Use this for any codec, serializer, or bidirectional transformation.
+
+```typescript
+import { testing, text_codec } from "@f0rbit/corpus";
+
+const text_codec = {
+  encode: (x: string) => new TextEncoder().encode(x),
+  decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
+};
+
+await testing.law.round_trip(
+  testing.fc.string(),
+  text_codec.encode,
+  text_codec.decode
+);
+```
+
+The law generates 100 random strings by default, encodes each, decodes it, and asserts the result equals the original. Both `encode` and `decode` may be sync or async — the law awaits them.
+
+**Options:**
+- `numRuns` — property run count; default 100
+- `equals` — custom equality check; defaults to `Bun.deepEquals` under Bun (required on Node)
+
+```typescript
+await testing.law.round_trip(
+  testing.arb(UserSchema),
+  user => JSON.stringify(user),
+  json => JSON.parse(json),
+  {
+    equals: (a, b) => a.id === b.id && a.name === b.name,
+    numRuns: 200,
+  }
+);
+```
+
+## Idempotent
+
+**Contract:** `fn(fn(x)) === fn(x)` for all `x`.
+
+Use this for normalizers, canonicalizers, or any function that should stabilize after one application.
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const normalize_path = (p: string) => p.replace(/\/+/g, "/");
+
+await testing.law.idempotent(
+  testing.fc.string(),
+  normalize_path
+);
+```
+
+The law applies the function twice and asserts both results are equal.
+
+**Options:**
+- `numRuns` — default 100
+- `equals` — custom equality; defaults to `Bun.deepEquals`
+
+## Functor
+
+**Contract:** Structure is preserved through mapping: `x.map(f).map(g) === x.map(g ∘ f)` for all `x`, `f`, `g`.
+
+Use this for types that implement the functor laws (arrays, optionals, Results, Promises, etc.).
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const arr = [1, 2, 3];
+const f = (x: number) => x * 2;
+const g = (x: number) => x + 1;
+
+await testing.law.functor({
+  arb: testing.arb(ArraySchema),
+  map: (arr, fn) => arr.map(fn),
+  equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+});
+```
+
+The law generates random values, applies two different function compositions, and asserts they agree.
+
+**Options:**
+- `numRuns` — default 100
+- `arb` — the arbitrary to generate test values
+- `map(value, fn)` — the map operation
+- `equals` — custom equality
+
+<Aside type="note">
+  The functor law verifies **composition law** (`map(map(x, f), g) === map(x, g ∘ f)`), not identity law. It's the most practical variant for property testing.
+</Aside>
+
+## Error Path Exhaustive
+
+**Contract:** Every variant of a function's error union can be provoked and is tested.
+
+The headline law: compile-time exhaustiveness (TypeScript enforces you handle every variant) + runtime verification (every variant has a generator and actually fails correctly).
+
+```typescript
+import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import type { Result } from "@f0rbit/corpus";
+
+// Example: a function that returns multiple error kinds
+async function get_user(
+  id: string,
+  opts?: { timeout?: number }
+): Promise<Result<User, CorpusError>> {
+  // Can return: not_found, decode_error, timeout, or ok
+}
+
+await testing.law.error_path_exhaustive(get_user, {
+  error_brand: CORPUS_ERROR_BRAND,
+  provoke: {
+    not_found: (f) => [f.user_id],
+    decode_error: (f) => [corrupt_bytes(f)],
+    timeout: (f) => [undefined, { timeout: f.duration }],
+    // TypeScript enforces every variant is listed here
+  },
+  only: ["not_found", "decode_error"], // optional: test only a subset
+  numRuns: 200,
+});
+```
+
+**How it works:**
+
+1. TypeScript's mapped type `provoke: { [K in E["kind"]: ... }` enforces you provide a handler for every error variant. If you add a variant without updating `provoke`, it's a compile error.
+
+2. For each variant (or the `only` subset), the law:
+   - Looks up the failure generator via `testing.lookup_failure(brand, variant_kind)`
+   - Generates failure inputs from that generator
+   - Calls your function with those inputs
+   - Asserts it returns an `err` with the matching `kind`
+
+3. If a generator is missing, you get a clear error naming the exact registration call needed:
+   ```
+   error_path_exhaustive: no generator registered for variant 'not_found' of brand Symbol(CorpusError)
+   — register via testing.failure(CORPUS_ERROR_BRAND, 'not_found', () => ...)
+   ```
+
+**Options:**
+- `error_brand` — the branded symbol for your error union
+- `provoke` — mapped-type object with one entry per error variant; each entry is a function that takes a failure instance and returns the args to call your function with
+- `only` — optional subset of variants to test (useful during development)
+- `numRuns` — per-variant run count; default 50
+
+<Aside type="tip">
+  The `provoke` type signature uses `NoInfer` internally to enforce compile-time exhaustiveness. Missing a variant is a hard TypeScript error, not a silent omission.
+</Aside>
+
+## Provider Equivalence
+
+**Contract:** Multiple implementations (or backends) behave the same way under the same command sequence.
+
+The most powerful law: run fast-check's stateful command generator against a reference model and N systems-under-test (providers), and assert per-command that results agree.
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+interface Counter {
+  increment(): Promise<Result<number, CounterError>>;
+  reset(): Promise<Result<void, CounterError>>;
+}
+
+type CounterModel = { count: number };
+
+const increment_cmd = testing.law.equivalence_command<CounterModel, Counter, Result<number, CounterError>>({
+  label: "increment()",
+  on_model: (m) => {
+    if (m.count >= 100) return err({ kind: "overflow" });
+    m.count += 1;
+    return ok(m.count);
+  },
+  on_sut: (c) => c.increment(),
+});
+
+const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, void>({
+  label: "reset()",
+  on_model: (m) => {
+    m.count = 0;
+  },
+  on_sut: (c) => c.reset(),
+});
+
+await testing.law.provider_equivalence({
+  model: () => ({ count: 0 }),
+  providers: {
+    memory: () => new MemoryCounter(),
+    persistent: () => new FileBackedCounter(),
+  },
+  commands: [increment_cmd, reset_cmd],
+  equivalence: {
+    results_agree: (a, b) => a === b,
+  },
+  numRuns: 50,
+  maxCommands: 20,
+});
+```
+
+**How it works:**
+
+1. Fast-check generates a **shrinkable sequence of commands** — the same sequence runs against the model AND each provider.
+
+2. Each command runs twice:
+   - `on_model(model)` — synchronous reference implementation
+   - `on_sut(sut)` — the system-under-test (may be async)
+
+3. After every command, results are compared:
+   - If both are Result-shaped: `ok` flags must agree; when both ok, values must satisfy `results_agree`; when both err, `error.kind` must match
+   - Otherwise: results must satisfy `results_agree`
+
+4. If results diverge, the property fails with the provider label, command index, and the **minimal shrunk command sequence** — fast-check's native command shrinker finds the smallest reproduction.
+
+**Using `equivalence_command`:**
+
+```typescript
+const cmd = testing.law.equivalence_command({
+  label: "operation name",
+  check: (m) => precondition(m), // optional: only run if true
+  on_model: (m) => operation_on_model(m),
+  on_sut: (sut) => operation_on_sut(sut), // may be async
+});
+```
+
+The command carries both results and compares them automatically.
+
+**Options:**
+- `model()` — factory returning a fresh model instance per run (must return fresh, not reused)
+- `providers` — labelled object of provider factories (one per SUT)
+- `commands` — pool of `equivalence_command` instances and/or arbitraries of commands
+- `equivalence.results_agree(model_r, sut_r)` — equality check for ok-values (or raw results when non-Result-shaped)
+- `numRuns` — property runs; default 100
+- `maxCommands` — max commands per generated sequence; default depends on fast-check's sizing
+- `size` — bias for sequence length; default uses fast-check's heuristics
+
+<Aside type="caution">
+  **Command payload limitation:** Command arbitraries inside the pool must be plain fast-check arbitraries (`fc.integer`, `fc.string`, etc.). Avoid `testing.compose` or `testing.arb` as command payloads — the `fc.gen()` shrinker can hang. If you need dependent payloads, pre-sample with `fc.sample()` and pass fixed instances instead.
+</Aside>
+
+<Aside type="tip">
+  The backend-equivalence pilot in `tests/property/backend-equivalence.test.ts` is the canonical reference implementation. Future equivalence tests in any package should mirror its structure and command patterns.
+</Aside>
+
+## Common Patterns
+
+### Testing with Coverage Labels
+
+Use `testing.cover()` (Hedgehog-style) to assert parts of your test space got exercised:
+
+```typescript
+await testing.law.round_trip(
+  testing.compose((draw) => {
+    const x = draw(testing.fc.integer());
+    testing.cover(x > 0, "positive");
+    testing.cover(x < 0, "negative");
+    testing.cover(x === 0, "zero");
+    return x;
+  }),
+  encode,
+  decode,
+  { numRuns: 200 }
+);
+
+// If the labels don't hit, the law throws with coverage stats
+```
+
+### Opting Out of Shrinking
+
+The `round_trip`, `idempotent`, and `error_path_exhaustive` laws disable shrinking (`endOnFailure: true`) by default. This is intentional: codecs and failure generators may rely on subtle interactions that break under partial shrinks, and `testing.compose` uses `fc.gen()` whose shrinker doesn't reliably terminate.
+
+If you need shrinking, use `fc.assert` directly with a plain fast-check property.
+
+### Custom Equality
+
+Several laws accept an `equals` option for custom value comparison:
+
+```typescript
+await testing.law.round_trip(
+  arb,
+  encode,
+  decode,
+  {
+    equals: (a, b) => {
+      // Ignore the `_internal_cache` field
+      const { _internal_cache: _, ...a_clean } = a;
+      const { _internal_cache: __, ...b_clean } = b;
+      return JSON.stringify(a_clean) === JSON.stringify(b_clean);
+    },
+  }
+);
+```
+
+Under Bun, `round_trip` and `idempotent` default to `Bun.deepEquals`. On Node or workerd, you must provide `equals` or the law throws an error.
+
+---
+
+### Testing Substrate (testing/overview.mdx)
+
+> Property-based testing framework for corpus with arbitraries, laws, and vending.
+
+import { Aside } from '@astrojs/starlight/components';
+
+Property-based testing lets you verify laws your code must obey — round-trip serialization, idempotence, error handling exhaustiveness — by generating arbitrary inputs and checking they all satisfy your assertion. Corpus ships a property-testing substrate built on [fast-check](https://github.com/dubzzz/fast-check) with domain-specific helpers for your data types.
+
+## Why Property-Based Testing?
+
+Traditional example-based tests check a few handpicked cases. Property tests generate hundreds of random cases and shrink failing inputs to a minimal reproduction. This catches edge cases you wouldn't think to write by hand.
+
+```typescript
+// Example-based: you pick specific cases
+test("round-trip encodes and decodes", () => {
+  const text = "hello";
+  const encoded = text_codec.encode(text);
+  const decoded = text_codec.decode(encoded);
+  expect(decoded).toBe(text);
+});
+
+// Property-based: fast-check generates cases for you
+import { testing } from "@f0rbit/corpus";
+
+test("round-trip works for all strings", async () => {
+  await testing.law.round_trip(
+    fc.string(),
+    text_codec.encode,
+    text_codec.decode
+  );
+});
+```
+
+## The Substrate: Arbitraries, Laws, and Registry
+
+Corpus provides four layers:
+
+1. **Arbitraries** — Generators that produce test data matching your types.
+   - Use `testing.arb(schema)` to derive a generator from any Zod schema.
+   - Or `testing.compose(draw => ...)` for dependent generation (later values depend on earlier ones).
+
+2. **Laws** — Pre-built property checkers for common patterns.
+   - `law.round_trip` — serialization round-trips correctly.
+   - `law.idempotent` — applying a function twice gives the same result as once.
+   - `law.functor` — a function respects the functor structure.
+   - `law.error_path_exhaustive` — every error variant the function can return is tested.
+   - `law.provider_equivalence` — multiple implementations behave the same way.
+
+3. **Registry** — Canonical arbitraries for your domain types, auto-loaded from dependencies.
+   - Register a type once with `testing.arbitrary(brand, gen)`.
+   - Every test using that brand gets the same generator.
+   - Dependencies vend arbitraries via `package.json` and are auto-discovered.
+
+4. **Vending** — How packages share test generators with each other.
+   - Each package declares `"corpus": { "testing": "./path/to/register.js" }` in `package.json`.
+   - That file exports a `register()` function that calls `testing.arbitrary(...)` and `testing.failure(...)`.
+   - The first call to `testing.lookup(...)` auto-loads all registered generators.
+
+<Aside type="tip">
+  You don't need to learn all of this at once. Start with `testing.law.round_trip` + `testing.arb(schema)` for a single test file, then graduate to the registry and laws as your test suite grows.
+</Aside>
+
+## Import Paths
+
+The testing substrate is exposed under two paths — pick whichever fits your use:
+
+```typescript
+// Direct entry point (preferred in hot-path tests — skips main barrel)
+import * as testing from "@f0rbit/corpus/testing";
+
+// Or via the main barrel (only one import for everything)
+import { testing } from "@f0rbit/corpus";
+
+// Both resolve to the same API
+const arb = testing.arb(MySchema);
+const result = await testing.law.round_trip(arb, encode, decode);
+```
+
+The second path (`import { testing }`) is the main barrel and pulls in the full @f0rbit/corpus API, which you might not need in a test file. The first path (`import * as testing`) is a direct entry point and skips the main barrel's transitive imports.
+
+<Aside>
+  **Note:** Corpus is the only place fast-check is configured in your project. Always import fast-check through the testing substrate — consumers must never do `import fc from "fast-check"` directly. The re-export `testing.fc` is a convenience so you don't need a separate import.
+</Aside>
+
+## What's Inside
+
+- **`testing.arb(schema)`** — Derive a fast-check `Arbitrary` from a Zod schema.
+- **`testing.compose(draw => ...)`** — Build dependent generators with inline draws.
+- **`testing.arbitrary(brand, gen)` / `testing.lookup(brand)`** — Register and look up canonicals.
+- **`testing.failure(brand, kind, gen)` / `testing.lookup_failure(brand, kind)`** — Register error variants.
+- **`testing.law.*`** — Five pre-built laws: `round_trip`, `idempotent`, `functor`, `error_path_exhaustive`, `provider_equivalence`.
+- **`testing.cover(...)`** — Hedgehog-style coverage assertions (label parts of your test space and assert they got exercised).
+- **`testing.load_from(dir)` / `testing.__reset_registry_for_tests()`** — Explicit control for test setup.
+- **`testing.fc`** — fast-check re-exported (same as `import fc from "fast-check"`).
+
+## Next Steps
+
+- **[Arbitraries](./arbitraries.mdx)** — How to generate test data from schemas and register canonicals.
+- **[Laws](./laws.mdx)** — Five pre-built property checkers with examples.
+- **[Vending](./vending.mdx)** — How to share arbitraries across packages via the registry.
+
+---
+
+### Vending (testing/vending.mdx)
+
+> Share arbitraries across packages via the registry and auto-loading.
+
+import { Aside } from '@astrojs/starlight/components';
+
+Vending is how packages share test generators with each other. Instead of duplicating arbitraries in every package that needs them, declare them once and the registry auto-discovers them.
+
+## The Package.json Key
+
+Each package declares where its test generators live:
+
+```json
+{
+  "name": "@my/auth",
+  "version": "1.0.0",
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+The `"corpus": { "testing": ... }` path points to a JavaScript file that runs at import time and registers arbitraries via `testing.arbitrary()` and `testing.failure()`.
+
+## Writing a Registrar
+
+A registrar module exports side-effects: it imports the testing substrate and registers generators.
+
+```typescript
+// src/testing/register.ts
+import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import type { ArbBrand } from "@f0rbit/corpus/testing";
+import type { AuthToken, AuthError } from "../types.js";
+import { fc } from "@f0rbit/corpus";
+
+// Brand for your domain type
+export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
+
+// Side-effects: register when this module loads
+testing.arbitrary(
+  AUTH_TOKEN_BRAND,
+  fc.uuid().map(id => ({ id, secret: fc.string().generate() }))
+);
+
+testing.failure(
+  CORPUS_ERROR_BRAND,
+  "auth_error",
+  testing.compose((draw) => ({
+    kind: "auth_error" as const,
+    message: draw(fc.string()),
+  }))
+);
+
+// Optional export (only needed if you want explicit control)
+export async function register() {
+  // Re-register if needed, but the side-effects above already ran
+}
+```
+
+Then compile to JavaScript:
+
+```bash
+bun run build  # produces dist/testing/register.js
+```
+
+And your package.json knows where to find it:
+
+```json
+{
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+<Aside type="note">
+  The path can be `.ts` in development (bun/esbuild will resolve it), but for published packages, use the compiled `.js` path.
+</Aside>
+
+## Auto-Loading
+
+The first time a test calls `testing.lookup()` or `testing.lookup_failure()`, the registry **auto-discovers** and loads all registrars from your dependencies' `package.json` files:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+const result = await testing.lookup(USER_ID_BRAND);
+// ↓ First call triggers auto-load
+// ↓ Discovers "corpus" keys in all direct dependencies' package.json
+// ↓ Imports each registrar module
+// ↓ Runs side-effects (testing.arbitrary, testing.failure calls)
+// ↓ Returns the registered arbitrary
+```
+
+This is automatic — no manual wiring required. Every test that calls `lookup()` or `lookup_failure()` for the first time triggers the walk.
+
+<Aside type="tip">
+  Synchronous APIs like `testing.arb(schema)` and `testing.compose()` do NOT trigger auto-load. Only the async accessors `lookup()` and `lookup_failure()` do. This keeps the synchronous path fast for tests that don't need vended arbitraries.
+</Aside>
+
+## Explicit Loading with `load_from`
+
+When auto-discovery isn't enough (testing a fixture package, monorepo sibling, or offline scenario), use `load_from()` for explicit control:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+// Load from a directory
+const result = await testing.load_from("./fixtures/my-package");
+if (!result.ok) {
+  console.error("Failed to load:", result.error.message);
+}
+
+// Or by npm package name (resolves via import.meta.resolve)
+const result = await testing.load_from("@my/auth");
+```
+
+Explicit loads are **additive** — they don't stop auto-discovery. A later `lookup()` will still walk the full dependency graph as usual.
+
+## Registrar Scope
+
+The auto-loader discovers:
+
+1. **Direct dependencies** — packages in your `package.json` `dependencies` and `devDependencies`
+2. **The current package** — your own `"corpus": { "testing": ... }` entry, if present
+
+It does NOT discover transitive dependencies (your dependencies' dependencies). Instead, each package's registrar can register on behalf of its own deps, so arbitraries propagate upward naturally.
+
+In a monorepo with hoisting (npm v7+, pnpm, bun), all packages resolve via the same `node_modules`, so transitives are discovered anyway. The restriction is purely for non-hoisted setups.
+
+## Testing: Reset and Reload
+
+In test setup, you may want explicit control over which registrars are loaded. Use `testing.__reset_registry_for_tests()` to clear the cache and registries:
+
+```typescript
+import { testing } from "@f0rbit/corpus";
+
+beforeEach(async () => {
+  // Clear the registry and auto-load promise
+  testing.__reset_registry_for_tests();
+
+  // Now the next lookup() will walk fresh
+  const arb = await testing.lookup(MY_BRAND);
+});
+```
+
+Then use `load_from()` to load a specific registrar:
+
+```typescript
+beforeEach(async () => {
+  testing.__reset_registry_for_tests();
+
+  // Load only the fixture registrar, not the full dependency graph
+  const result = await testing.load_from("./fixtures/test-package");
+  if (!result.ok) {
+    throw new Error(`Failed to load fixture: ${result.error.message}`);
+  }
+});
+```
+
+<Aside type="caution">
+  The `__reset_registry_for_tests()` function is marked with `__` (double underscore) to signal it's test-only. Never call it in production code.
+</Aside>
+
+## Dev Checkout Safety
+
+If a dependency is installed from a local checkout (e.g., `file:../local/package` in package.json), the registrar is loaded from its **`src/`** directory (uncompiled TypeScript), not `dist/`. This requires:
+
+1. The local package has bun/esbuild installed and can resolve TypeScript imports
+2. The registrar path in package.json uses `.ts` during development
+
+Example setup:
+
+```json
+{
+  "name": "@my/library",
+  "corpus": {
+    "testing": "./src/testing/register.ts"
+  }
+}
+```
+
+When someone installs from a local checkout, the registrar loads from `./src/testing/register.ts` directly. When published to npm, package.json is updated to point at `./dist/...`.
+
+<Aside type="note">
+  Corpus handles the path resolution automatically — no special configuration needed. Just point at the source file in development, and publish with the compiled path.
+</Aside>
+
+## Troubleshooting
+
+### Registrar fails to load
+
+If a registrar throws an error:
+
+```
+[corpus/testing] auto-load: registrar for '@my/auth' failed to load: [error message]
+Fix that package's "corpus": { "testing": ... } entry, or load a corrected registrar via testing.load_from(...).
+```
+
+Check:
+
+1. **The path exists** — Does the file at `"corpus": { "testing": ... }` exist?
+2. **It exports a `register()` function** (optional — side-effects are enough) or runs side-effects on import
+3. **It doesn't throw on import** — If it does, provide an explicit `try/catch` in the registrar
+4. **No circular imports** — The registrar shouldn't import the test suite
+
+As a workaround, use `testing.__reset_registry_for_tests()` + `testing.load_from()` to load a corrected version manually.
+
+### Registrar not discovered
+
+If a registrar never loads:
+
+1. **Check it's a direct dependency** — Auto-load only walks direct deps, not transitives
+2. **Check the `package.json` key** — It must be `"corpus": { "testing": ... }`, not `"test_corpus"` or similar
+3. **Use `load_from()` explicitly** — If the package isn't a direct dep, load it by path
+
+### Performance: Auto-load is slow
+
+The first `lookup()` call walks the dependency graph and imports each registrar. On a large monorepo, this can take a second or two. Options:
+
+1. **Move to devDependencies** — Only test packages need registrars; trim unnecessary deps
+2. **Pre-load in your test setup** — Call `await testing.lookup()` once in a top-level test hook
+3. **Use `load_from()` selectively** — Load only the registrars you need for a specific test
+
+## Best Practices
+
+1. **One registrar per package** — All arbitraries for a package go in one `register.ts` file
+2. **Keep it side-effect heavy** — The module runs on import; registration should happen at the top level
+3. **Export the brands** — Let downstream packages import your `AUTH_TOKEN_BRAND` and use it with `lookup()`
+4. **Avoid transitive dependencies** — If your registrar imports your domain code, don't import test utilities that aren't in the published package
+5. **Test the registrar** — Add a smoke test that calls `testing.load_from()` and verifies a known brand is registered
+
+## Example: Complete Registrar
+
+Here's a full example from a hypothetical `@my/auth` package:
+
+```typescript
+// src/testing/register.ts
+import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import type { ArbBrand } from "@f0rbit/corpus/testing";
+import type { AuthToken, Session, InvalidCredential } from "../types.js";
+import { fc } from "@f0rbit/corpus";
+
+export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
+export const SESSION_BRAND = Symbol("Session") as ArbBrand<Session>;
+
+// AuthToken arbitrary
+testing.arbitrary(
+  AUTH_TOKEN_BRAND,
+  testing.compose((draw) => ({
+    id: draw(fc.uuid()),
+    secret: draw(fc.hexaString({ minLength: 32, maxLength: 32 })),
+    expires_at: draw(testing.fc.date()),
+  }))
+);
+
+// Session arbitrary
+testing.arbitrary(
+  SESSION_BRAND,
+  testing.compose((draw) => ({
+    token: draw(testing.lookup(AUTH_TOKEN_BRAND) || fc.constant(null)),
+    user_id: draw(fc.uuid()),
+    created_at: draw(fc.date()),
+  }))
+);
+
+// Invalid credential error variant
+testing.failure(
+  CORPUS_ERROR_BRAND,
+  "invalid_credential",
+  testing.compose((draw) => ({
+    kind: "invalid_credential" as const,
+    field: draw(fc.constantFrom("email", "password")),
+    reason: draw(fc.string()),
+  }))
+);
+
+// Optional export for explicit control
+export async function register() {
+  // Side-effects above already ran, but this function exists
+  // in case the loader wants to verify or trigger re-registration
+}
+```
+
+Then in `package.json`:
+
+```json
+{
+  "name": "@my/auth",
+  "version": "1.0.0",
+  "corpus": {
+    "testing": "./dist/testing/register.js"
+  }
+}
+```
+
+Build with `bun run build` (or your build tool), and downstream packages automatically get these arbitraries on the first `lookup()` call.
+
+---
+
 ## Full Source Code
 
 All source files reachable from the public entry points.
@@ -7727,9 +8672,9 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	 * `corpus.gc()` cleans them up by listing R2 objects not referenced by
 	 * any live `data_key` in D1 — out of scope here, tracked in README.
 	 *
-	 * TODO: integration test against `wrangler dev` — repo convention is
-	 * out-of-band manual testing for the Cloudflare backend, no D1/R2 mocks
-	 * in the suite.
+	 * Covered by the contract suite + tests/integration/cloudflare-backend.test.ts
+	 * running against in-memory platform fakes (tests/fakes/cloudflare.ts).
+	 * Real-platform smoke via `wrangler dev` remains out-of-band.
 	 */
 	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
 		// Step 1: R2 data_put ops, sequential to short-circuit on first failure.
@@ -9078,12 +10023,29 @@ export const parallel_map = async <T, R>(items: T[], mapper: (item: T, index: nu
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, BatchOp, Corpus, CorpusBuilder, StoreDefinition, Store, Snapshot, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient, PutOpts, TransactionHandle, TransactionResult } from './types.js';
+import type { Backend, BatchOp, Corpus, CorpusBuilder, StoreDefinition, Store, Snapshot, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, PutOpts, TransactionHandle, TransactionResult } from './types.js';
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from './observations/types.js';
 import { ok, err } from './types.js';
 import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from './utils.js';
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from './observations/utils.js';
 import { create_observation_row } from './observations/storage.js';
+
+// Internal construction shapes for the public conditional types. `stream` /
+// `put_stream` are `T extends StreamableValue ? fn : never` on the public
+// side, which can never resolve inside generic `create_store<T>` — so we build
+// against these and cast once at the boundary, gated on the same runtime
+// condition (codec stream support) the conditional encodes.
+type SnapshotHandleImpl<T> = Omit<SnapshotHandle<T>, 'stream'> & {
+  stream?: () => Promise<Result<ReadableStream<T>, CorpusError>>
+}
+
+type StoreImpl<T> = Omit<Store<T>, 'put_stream'> & {
+  put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+}
+
+function to_error(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause))
+}
 
 /**
  * Creates a typed Store instance bound to a Backend.
@@ -9132,7 +10094,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return `${ctx.store_id}/${ctx.content_hash}`
   }
 
-  async function do_put(bytes: Uint8Array, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+  async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
     const version = generate_version()
     const content_hash = await compute_hash(bytes)
     const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
@@ -9176,13 +10138,13 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
   }
 
   function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
-    const handle: any = {
+    const handle: SnapshotHandleImpl<T> = {
       async value(): Promise<Result<T, CorpusError>> {
         const bytes = await data_handle.bytes()
         try {
           return ok(await codec.decode(bytes))
         } catch (cause) {
-          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          const error: CorpusError = { kind: 'decode_error', cause: to_error(cause) }
           emit({ type: 'error', error })
           return err(error)
         }
@@ -9198,13 +10160,15 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
         try {
           return ok(decode_stream(data_handle.stream()))
         } catch (cause) {
-          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          const error: CorpusError = { kind: 'decode_error', cause: to_error(cause) }
           emit({ type: 'error', error })
           return err(error)
         }
       }
     }
 
+    // invariant: `stream` is set iff the codec streams — the runtime mirror of
+    // SnapshotHandle's `T extends StreamableValue` conditional
     return handle as SnapshotHandle<T>
   }
 
@@ -9240,7 +10204,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return ok({ meta, handle: build_handle(data_result.value) })
   }
 
-  async function put_stream_impl(stream: ReadableStream<T>, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+  async function put_stream_impl(stream: ReadableStream<T>, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
     if (!codec.encode_stream) {
       const error: CorpusError = { kind: 'invalid_config', message: 'codec does not support encode_stream' }
       emit({ type: 'error', error })
@@ -9263,7 +10227,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       }
       encoded = concat_bytes(encoded_chunks)
     } catch (cause) {
-      const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+      const error: CorpusError = { kind: 'encode_error', cause: to_error(cause) }
       emit({ type: 'error', error })
       return err(error)
     }
@@ -9271,16 +10235,16 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return do_put(encoded, opts)
   }
 
-  const store: any = {
+  const store: StoreImpl<T> = {
     id,
     codec,
 
-    async put(data: T, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    async put(data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
       let bytes: Uint8Array
       try {
         bytes = await codec.encode(data)
       } catch (cause) {
-        const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+        const error: CorpusError = { kind: 'encode_error', cause: to_error(cause) }
         emit({ type: 'error', error })
         return err(error)
       }
@@ -9316,7 +10280,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       return backend.metadata.get(id, version)
     },
 
-    list(opts?: Parameters<Store<T>['list']>[0]) {
+    list(opts) {
       return backend.metadata.list(id, opts)
     },
 
@@ -9336,6 +10300,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     },
   }
 
+  // invariant: `put_stream` returns invalid_config for non-streaming codecs —
+  // the runtime mirror of Store's `T extends StreamableValue` conditional
   return store as Store<T>
 }
 
@@ -9384,274 +10350,283 @@ export function create_corpus(): CorpusBuilder<{}> {
   const definitions: StoreDefinition<string, any>[] = []
   let observation_types: ObservationTypeDef<unknown>[] = []
 
-  const builder: CorpusBuilder<any> = {
-    with_backend(b) {
-      backend = b
-      return builder
-    },
+  function make_builder<Stores extends Record<string, Store<any>>>(): CorpusBuilder<Stores> {
+    return {
+      with_backend(b) {
+        backend = b
+        return make_builder<Stores>()
+      },
 
-    with_store(definition) {
-      definitions.push(definition)
-      return builder
-    },
+      with_store<Id extends string, T>(definition: StoreDefinition<Id, T>) {
+        definitions.push(definition)
+        return make_builder<Stores & Record<Id, Store<T>>>()
+      },
 
-    with_observations(types) {
-      observation_types = types
-      return builder
-    },
+      with_observations(types) {
+        observation_types = types
+        return make_builder<Stores>()
+      },
 
-    build() {
-      if (!backend) {
-        throw new Error('Backend is required. Call with_backend() first.')
-      }
-
-      const b = backend
-
-      const stores: Record<string, Store<any>> = {}
-      const definitions_by_id: Record<string, StoreDefinition<string, any>> = {}
-      for (const def of definitions) {
-        stores[def.id] = create_store(b, def)
-        definitions_by_id[def.id] = def
-      }
-
-      const observations_client = observation_types.length > 0 && 'observations' in b
-        ? (b as Backend & { observations: ObservationsClient }).observations
-        : undefined
-
-      let in_transaction = false
-
-      async function transaction_impl<R>(
-        body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
-      ): Promise<Result<TransactionResult<R>, CorpusError>> {
-        if (in_transaction) {
-          return err({ kind: 'invalid_config', message: 'nested transactions are not supported' })
+      build(): Corpus<Stores> {
+        if (!backend) {
+          throw new Error('create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()')
         }
-        in_transaction = true
-
-        // op buffer + read-your-writes caches
-        const ops: BatchOp[] = []
-        const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
-        const buffered_data = new Map<string, Uint8Array>()          // key: data_key
-        const buffered_observations = new Map<string, Observation>() // key: id
-        const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
-        const commits: SnapshotMeta[] = []
-        const observations: Observation[] = []
-
-        function meta_key(store_id: string, version: string): string {
-          return `${store_id}:${version}`
-        }
-
-        function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
-          const prefix = `${store_id}:`
-          for (const [k, m] of buffered_meta) {
-            if (k.startsWith(prefix) && m.content_hash === content_hash) return m
-          }
-          return undefined
-        }
-
-        const handle: TransactionHandle = {
-          async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
-            const def = definitions_by_id[store.id]
-            if (!def) {
-              return err({ kind: 'invalid_config', message: `store '${store.id}' is not registered on this corpus` })
-            }
-
-            let bytes: Uint8Array
-            try {
-              bytes = await store.codec.encode(data)
-            } catch (cause) {
-              return err({ kind: 'encode_error', cause: cause as Error })
-            }
-
-            const version = generate_version()
-            const content_hash = await compute_hash(bytes)
-
-            // dedup against buffer first, then live backend
-            let existing_data_key: string | undefined =
-              find_buffered_by_hash(store.id, content_hash)?.data_key
-            if (!existing_data_key) {
-              const live = await b.metadata.find_by_hash(store.id, content_hash)
-              if (live) existing_data_key = live.data_key
-            }
-
-            const data_key = existing_data_key
-              ?? (def.data_key_fn
-                ? def.data_key_fn({ store_id: store.id, version, content_hash, tags: opts?.tags })
-                : `${store.id}/${content_hash}`)
-
-            if (!existing_data_key) {
-              ops.push({ type: 'data_put', data_key, bytes })
-              buffered_data.set(data_key, bytes)
-            }
-
-            const meta: SnapshotMeta = {
-              store_id: store.id,
-              version,
-              parents: opts?.parents ?? [],
-              created_at: new Date(),
-              invoked_at: opts?.invoked_at,
-              content_hash,
-              content_type: store.codec.content_type,
-              size_bytes: bytes.length,
-              data_key,
-              tags: opts?.tags,
-            }
-
-            ops.push({ type: 'meta_put', meta })
-            buffered_meta.set(meta_key(store.id, version), meta)
-            commits.push(meta)
-            return ok(meta)
-          },
-
-          async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
-            const key = meta_key(store.id, version)
-            if (tombstoned_meta.has(key)) {
-              return err({ kind: 'not_found', store_id: store.id, version })
-            }
-            const buffered = buffered_meta.get(key)
-            if (buffered) {
-              const bytes = buffered_data.get(buffered.data_key)
-              if (bytes) {
-                try {
-                  const value = await store.codec.decode(bytes)
-                  return ok({ meta: buffered, data: value })
-                } catch (cause) {
-                  return err({ kind: 'decode_error', cause: cause as Error })
-                }
-              }
-              // dedup hit on live data — fall through to backend read by data_key
-              const live = await b.data.get(buffered.data_key)
-              if (!live.ok) return live
-              try {
-                const value = await store.codec.decode(await live.value.bytes())
-                return ok({ meta: buffered, data: value })
-              } catch (cause) {
-                return err({ kind: 'decode_error', cause: cause as Error })
-              }
-            }
-            return store.get(version)
-          },
-
-          async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
-            const key = meta_key(store.id, version)
-            ops.push({ type: 'meta_delete', store_id: store.id, version })
-            buffered_meta.delete(key)
-            tombstoned_meta.add(key)
-            return ok(undefined)
-          },
-
-          async observe<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
-            const validation = type.schema.safeParse(opts.content)
-            if (!validation.success) {
-              return err({ kind: 'validation_error', cause: validation.error, message: validation.error.message })
-            }
-            const id = generate_observation_id()
-            const row = create_observation_row(id, type.name, opts.source, validation.data, {
-              confidence: opts.confidence,
-              observed_at: opts.observed_at,
-              derived_from: opts.derived_from,
-            })
-            ops.push({ type: 'observation_put', row })
-            const observation: Observation<T> = {
-              id,
-              type: type.name,
-              source: opts.source,
-              content: validation.data,
-              ...(opts.confidence !== undefined && { confidence: opts.confidence }),
-              ...(opts.observed_at && { observed_at: opts.observed_at }),
-              created_at: new Date(row.created_at),
-              ...(opts.derived_from && { derived_from: opts.derived_from }),
-            }
-            buffered_observations.set(id, observation as Observation)
-            observations.push(observation as Observation)
-            return ok(observation)
-          },
-
-          async observation_delete(id: string): Promise<Result<void, CorpusError>> {
-            ops.push({ type: 'observation_delete', id })
-            buffered_observations.delete(id)
-            return ok(undefined)
-          },
-        }
-
-        let body_result: Result<R, CorpusError>
-        try {
-          body_result = await body(handle)
-        } catch (cause) {
-          in_transaction = false
-          return err({ kind: 'transaction_aborted', reason: 'threw', cause: cause as Error })
-        }
-
-        if (!body_result.ok) {
-          in_transaction = false
-          return err({ kind: 'transaction_aborted', reason: 'returned_err', cause: corpus_error_to_native(body_result.error) })
-        }
-
-        // commit phase
-        const commit_result = b.apply_batch
-          ? await b.apply_batch(ops)
-          : await sequential_apply_with_compensation(b, ops)
-
-        in_transaction = false
-        if (!commit_result.ok) {
-          if (commit_result.error.kind === 'partial_commit') {
-            return commit_result
-          }
-          return err({
-            kind: 'transaction_aborted',
-            reason: 'apply_batch_failed',
-            cause: corpus_error_to_native(commit_result.error),
-          })
-        }
-
-        return ok({ value: body_result.value, commits, observations })
-      }
-
-      async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
-        const store = stores[pointer.store_id]
-        if (!store) {
-          return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
-        }
-
-        const snapshot_result = await store.get(pointer.version)
-        if (!snapshot_result.ok) return snapshot_result
-
-        let value: unknown = snapshot_result.value.data
-
-        if (pointer.path) {
-          const path_result = resolve_path(value, pointer.path)
-          if (!path_result.ok) return path_result
-          value = path_result.value
-        }
-
-        if (pointer.span && typeof value === 'string') {
-          const span_result = apply_span(value, pointer.span)
-          if (!span_result.ok) return span_result
-          value = span_result.value
-        }
-
-        return ok(value as T)
-      }
-
-      async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
-        if (!observations_client?.is_stale) return false
-        return observations_client.is_stale(pointer)
-      }
-
-      return {
-        stores,
-        metadata: b.metadata,
-        data: b.data,
-        observations: observations_client,
-        create_pointer,
-        resolve_pointer: resolve_pointer_impl,
-        is_superseded: is_superseded_impl,
-        transaction: transaction_impl,
-      } as Corpus<any>
-    },
+        return build_corpus<Stores>(backend, definitions, observation_types)
+      },
+    }
   }
 
-  return builder as CorpusBuilder<{}>
+  return make_builder<{}>()
+}
+
+function build_corpus<Stores extends Record<string, Store<any>>>(
+  b: Backend,
+  definitions: readonly StoreDefinition<string, any>[],
+  observation_types: readonly ObservationTypeDef<unknown>[]
+): Corpus<Stores> {
+  const stores: Record<string, Store<any>> = {}
+  const definitions_by_id: Record<string, StoreDefinition<string, any>> = {}
+  for (const def of definitions) {
+    stores[def.id] = create_store(b, def)
+    definitions_by_id[def.id] = def
+  }
+
+  const observations_client = observation_types.length > 0 ? b.observations : undefined
+
+  let in_transaction = false
+
+  async function transaction_impl<R>(
+    body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
+  ): Promise<Result<TransactionResult<R>, CorpusError>> {
+    if (in_transaction) {
+      return err({ kind: 'invalid_config', message: 'nested transactions are not supported' })
+    }
+    in_transaction = true
+
+    // op buffer + read-your-writes caches
+    const ops: BatchOp[] = []
+    const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
+    const buffered_data = new Map<string, Uint8Array>()          // key: data_key
+    const buffered_observations = new Map<string, Observation>() // key: id
+    const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
+    const commits: SnapshotMeta[] = []
+    const observations: Observation[] = []
+
+    function meta_key(store_id: string, version: string): string {
+      return `${store_id}:${version}`
+    }
+
+    function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
+      const prefix = `${store_id}:`
+      for (const [k, m] of buffered_meta) {
+        if (k.startsWith(prefix) && m.content_hash === content_hash) return m
+      }
+      return undefined
+    }
+
+    const handle: TransactionHandle = {
+      async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+        const def = definitions_by_id[store.id]
+        if (!def) {
+          return err({ kind: 'invalid_config', message: `store '${store.id}' is not registered on this corpus` })
+        }
+
+        let bytes: Uint8Array
+        try {
+          bytes = await store.codec.encode(data)
+        } catch (cause) {
+          return err({ kind: 'encode_error', cause: to_error(cause) })
+        }
+
+        const version = generate_version()
+        const content_hash = await compute_hash(bytes)
+
+        // dedup against buffer first, then live backend
+        let existing_data_key: string | undefined =
+          find_buffered_by_hash(store.id, content_hash)?.data_key
+        if (!existing_data_key) {
+          const live = await b.metadata.find_by_hash(store.id, content_hash)
+          if (live) existing_data_key = live.data_key
+        }
+
+        const data_key = existing_data_key
+          ?? (def.data_key_fn
+            ? def.data_key_fn({ store_id: store.id, version, content_hash, tags: opts?.tags })
+            : `${store.id}/${content_hash}`)
+
+        if (!existing_data_key) {
+          ops.push({ type: 'data_put', data_key, bytes })
+          buffered_data.set(data_key, bytes)
+        }
+
+        const meta: SnapshotMeta = {
+          store_id: store.id,
+          version,
+          parents: opts?.parents ?? [],
+          created_at: new Date(),
+          invoked_at: opts?.invoked_at,
+          content_hash,
+          content_type: store.codec.content_type,
+          size_bytes: bytes.length,
+          data_key,
+          tags: opts?.tags,
+        }
+
+        ops.push({ type: 'meta_put', meta })
+        buffered_meta.set(meta_key(store.id, version), meta)
+        commits.push(meta)
+        return ok(meta)
+      },
+
+      async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
+        const key = meta_key(store.id, version)
+        if (tombstoned_meta.has(key)) {
+          return err({ kind: 'not_found', store_id: store.id, version })
+        }
+        const buffered = buffered_meta.get(key)
+        if (buffered) {
+          const bytes = buffered_data.get(buffered.data_key)
+          if (bytes) {
+            try {
+              const value = await store.codec.decode(bytes)
+              return ok({ meta: buffered, data: value })
+            } catch (cause) {
+              return err({ kind: 'decode_error', cause: to_error(cause) })
+            }
+          }
+          // dedup hit on live data — fall through to backend read by data_key
+          const live = await b.data.get(buffered.data_key)
+          if (!live.ok) return live
+          try {
+            const value = await store.codec.decode(await live.value.bytes())
+            return ok({ meta: buffered, data: value })
+          } catch (cause) {
+            return err({ kind: 'decode_error', cause: to_error(cause) })
+          }
+        }
+        return store.get(version)
+      },
+
+      async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
+        const key = meta_key(store.id, version)
+        ops.push({ type: 'meta_delete', store_id: store.id, version })
+        buffered_meta.delete(key)
+        tombstoned_meta.add(key)
+        return ok(undefined)
+      },
+
+      async observe<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
+        const validation = type.schema.safeParse(opts.content)
+        if (!validation.success) {
+          return err({ kind: 'validation_error', cause: validation.error, message: validation.error.message })
+        }
+        const id = generate_observation_id()
+        const row = create_observation_row(id, type.name, opts.source, validation.data, {
+          confidence: opts.confidence,
+          observed_at: opts.observed_at,
+          derived_from: opts.derived_from,
+        })
+        ops.push({ type: 'observation_put', row })
+        const observation: Observation<T> = {
+          id,
+          type: type.name,
+          source: opts.source,
+          content: validation.data,
+          ...(opts.confidence !== undefined && { confidence: opts.confidence }),
+          ...(opts.observed_at && { observed_at: opts.observed_at }),
+          created_at: new Date(row.created_at),
+          ...(opts.derived_from && { derived_from: opts.derived_from }),
+        }
+        buffered_observations.set(id, observation)
+        observations.push(observation)
+        return ok(observation)
+      },
+
+      async observation_delete(id: string): Promise<Result<void, CorpusError>> {
+        ops.push({ type: 'observation_delete', id })
+        buffered_observations.delete(id)
+        return ok(undefined)
+      },
+    }
+
+    let body_result: Result<R, CorpusError>
+    try {
+      body_result = await body(handle)
+    } catch (cause) {
+      in_transaction = false
+      return err({ kind: 'transaction_aborted', reason: 'threw', cause: to_error(cause) })
+    }
+
+    if (!body_result.ok) {
+      in_transaction = false
+      return err({ kind: 'transaction_aborted', reason: 'returned_err', cause: corpus_error_to_native(body_result.error) })
+    }
+
+    // commit phase
+    const commit_result = b.apply_batch
+      ? await b.apply_batch(ops)
+      : await sequential_apply_with_compensation(b, ops)
+
+    in_transaction = false
+    if (!commit_result.ok) {
+      if (commit_result.error.kind === 'partial_commit') {
+        return commit_result
+      }
+      return err({
+        kind: 'transaction_aborted',
+        reason: 'apply_batch_failed',
+        cause: corpus_error_to_native(commit_result.error),
+      })
+    }
+
+    return ok({ value: body_result.value, commits, observations })
+  }
+
+  async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
+    const store = stores[pointer.store_id]
+    if (!store) {
+      return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
+    }
+
+    const snapshot_result = await store.get(pointer.version)
+    if (!snapshot_result.ok) return snapshot_result
+
+    let value: unknown = snapshot_result.value.data
+
+    if (pointer.path) {
+      const path_result = resolve_path(value, pointer.path)
+      if (!path_result.ok) return path_result
+      value = path_result.value
+    }
+
+    if (pointer.span && typeof value === 'string') {
+      const span_result = apply_span(value, pointer.span)
+      if (!span_result.ok) return span_result
+      value = span_result.value
+    }
+
+    // pointer paths resolve dynamically — T is the caller's assertion
+    // about what lives at the pointed-to location
+    return ok(value as T)
+  }
+
+  async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
+    if (!observations_client?.is_stale) return false
+    return observations_client.is_stale(pointer)
+  }
+
+  return {
+    // stores is populated from exactly the definitions that accumulated
+    // the Stores type parameter through the with_store chain
+    stores: stores as Stores,
+    metadata: b.metadata,
+    data: b.data,
+    observations: observations_client,
+    create_pointer,
+    resolve_pointer: resolve_pointer_impl,
+    is_superseded: is_superseded_impl,
+    transaction: transaction_impl,
+  }
 }
 
 /**
@@ -11727,7 +12702,11 @@ export function createCorpusInfra(
 import { z } from "zod";
 import fc from "fast-check";
 import type { Arbitrary } from "fast-check";
-import { lookup } from "./registry.js";
+// lookup_sync, deliberately: arb() is a synchronous API, so it consults only
+// registrations already made in this process and never triggers the vending
+// auto-loader. Await testing.lookup(...) (or testing.load_from(...)) first if
+// vended registrations should be visible to the walker.
+import { lookup_sync } from "./registry.js";
 
 /**
  * Translate a Zod schema into an `fc.Arbitrary` producing values matching the
@@ -11744,7 +12723,7 @@ import { lookup } from "./registry.js";
  * ```
  */
 export function arb<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> {
-	const registered = lookup(schema);
+	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	const ctx: WalkContext = { lazy_ties: new WeakMap() };
 	return walk(schema, ctx) as Arbitrary<z.infer<S>>;
@@ -11755,7 +12734,7 @@ type WalkContext = {
 };
 
 function walk(schema: z.ZodType, ctx: WalkContext): Arbitrary<unknown> {
-	const registered = lookup(schema);
+	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	if (schema instanceof z.ZodString) return string_arb(schema);
 	if (schema instanceof z.ZodNumber) return number_arb(schema);
@@ -11930,6 +12909,81 @@ function unsupported_message(schema: z.ZodType): string {
 
 ---
 
+### testing/commands.ts
+
+```typescript
+/**
+ * @module testing/commands
+ * @description Typed pin of fast-check's model-based command API.
+ *
+ * Corpus is the only place fast-check is configured — downstream packages go
+ * through `testing.*` rather than importing `"fast-check"` directly. This
+ * module re-exports the command surface so that a fast-check upgrade renaming
+ * or reshaping `commands`, `modelRun`, `asyncModelRun`, or the command
+ * interfaces becomes a COMPILE error here in corpus, not a runtime failure in
+ * a downstream package.
+ *
+ * fast-check has no separate `asyncCommands` entry point — `fc.commands` is
+ * overloaded over both `Command` and `AsyncCommand` arrays. {@link async_commands}
+ * pins the async overload explicitly so its exact signature is compile-checked
+ * too.
+ */
+
+import { commands } from "fast-check";
+import type { Arbitrary, AsyncCommand, CommandsContraints } from "fast-check";
+
+export { commands, modelRun as model_run, asyncModelRun as async_model_run } from "fast-check";
+export type {
+	Command,
+	AsyncCommand,
+	ICommand,
+	ModelRunSetup,
+	ModelRunAsyncSetup,
+	// fast-check spells this `CommandsContraints` (sic, missing an `s`) — corpus
+	// exports the corrected name. If fast-check ever fixes the typo upstream,
+	// this re-export breaks the build, which is exactly the point of this module.
+	CommandsContraints as CommandsConstraints,
+} from "fast-check";
+
+/**
+ * Generate shrinkable sequences of {@link AsyncCommand}s.
+ *
+ * This is the async overload of `fc.commands`, pinned with an explicit
+ * signature: sequences generated here shrink natively (fast-check's command
+ * shrinker drops commands and shrinks their payload arbitraries) and are what
+ * `testing.law.provider_equivalence` runs internally.
+ *
+ * @param command_arbs - One arbitrary per command shape; mix payload-free
+ * `fc.constant(cmd)` entries with payload-carrying `fc.integer().map((n) => cmd(n))` entries
+ * @param constraints - Optional fast-check command constraints (e.g. `maxCommands`)
+ *
+ * @example
+ * ```ts
+ * import * as testing from "@f0rbit/corpus/testing"
+ *
+ * const sequences = testing.async_commands<CounterModel, Counter>([
+ *   testing.fc.constant(increment_command),
+ *   testing.fc.integer({ min: 1, max: 5 }).map((n) => add_command(n)),
+ * ], { maxCommands: 20 })
+ *
+ * await testing.fc.assert(
+ *   testing.fc.asyncProperty(sequences, (cmds) =>
+ *     testing.async_model_run(() => ({ model: { count: 0 }, real: make_counter() }), cmds),
+ *   ),
+ * )
+ * ```
+ */
+export function async_commands<Model extends object, S>(
+	command_arbs: ReadonlyArray<Arbitrary<AsyncCommand<Model, S>>>,
+	constraints?: CommandsContraints,
+): Arbitrary<Iterable<AsyncCommand<Model, S>>> {
+	return commands([...command_arbs], constraints);
+}
+
+```
+
+---
+
 ### testing/compose.ts
 
 ```typescript
@@ -11978,6 +13032,243 @@ export function compose<T>(fn: (draw: Draw) => T): Arbitrary<T> {
 
 ---
 
+### testing/cover.ts
+
+```typescript
+/**
+ * @module testing/cover
+ * @description Hedgehog-style coverage assertion for property-based tests.
+ *
+ * Declare "this generator must produce values matching label X at least N% of
+ * the time" via {@link cover_property}. Hit counts are tallied per-label as
+ * fast-check samples the underlying arbitrary; once the property completes
+ * successfully, any shortfall raises a {@link CoverageError} listing every
+ * label's observed proportion against its minimum.
+ *
+ * Coverage state is local to a single `cover_property` call — there is no
+ * module-global registry — so labels never leak between tests.
+ *
+ * Reference: Hedgehog's `cover` combinator (see Hackage docs).
+ */
+
+import fc from "fast-check";
+import type { Arbitrary } from "fast-check";
+
+/**
+ * A single coverage requirement.
+ *
+ * - `name`        — human label surfaced in error messages.
+ * - `min_percent` — minimum observed proportion (0..100 inclusive).
+ * - `matches`     — predicate over the generated sample; truthy → count as hit.
+ */
+export type CoverageLabel<T> = {
+	name: string;
+	min_percent: number;
+	matches: (sample: T) => boolean;
+};
+
+/**
+ * Per-label coverage report. Returned inside {@link CoverageError} for callers
+ * that need to inspect numbers programmatically.
+ */
+export type CoverageStat = {
+	name: string;
+	hits: number;
+	total: number;
+	observed_percent: number;
+	min_percent: number;
+	met: boolean;
+};
+
+/**
+ * Thrown by {@link cover_property} when one or more labels failed to meet their
+ * `min_percent` after the property ran successfully. The message lists ALL
+ * labels (met + unmet) so failures are diagnosable from a single line of log
+ * output.
+ */
+export class CoverageError extends Error {
+	override readonly name = "CoverageError";
+	readonly stats: readonly CoverageStat[];
+
+	constructor(stats: readonly CoverageStat[]) {
+		super(format_message(stats));
+		this.stats = stats;
+	}
+}
+
+/**
+ * Default number of property runs when `opts.numRuns` is omitted.
+ *
+ * Set to 200 — the same default as the phase-1 backend round-trip pilot.
+ * Coverage at 5% with 200 runs requires ≥ 10 hits, comfortable for typical
+ * domain-error generators.
+ */
+export const DEFAULT_NUM_RUNS = 200;
+
+/**
+ * Run an `fc.asyncProperty(arb, predicate)` with `numRuns` (default
+ * {@link DEFAULT_NUM_RUNS}) iterations, tallying hits per coverage label as
+ * samples flow through. After the property completes:
+ *
+ * - If the property failed, fast-check's normal counterexample is re-thrown
+ *   (the coverage report is suppressed — the bug comes first).
+ * - If the property passed, each label's `(hits / total) * 100` is checked
+ *   against its `min_percent`. Any shortfall raises {@link CoverageError}.
+ *
+ * Hit counting happens inside the wrapped predicate, NOT inside fast-check
+ * internals — every sample fed to the predicate is also fed to every label's
+ * `matches` callback.
+ *
+ * @example
+ * ```ts
+ * await testing.cover(
+ *   fc.integer({ min: -100, max: 100 }),
+ *   async (n) => n * 2 === n + n,
+ *   {
+ *     labels: [
+ *       { name: "negative", min_percent: 30, matches: (n) => n < 0 },
+ *       { name: "zero",     min_percent: 1,  matches: (n) => n === 0 },
+ *       { name: "positive", min_percent: 30, matches: (n) => n > 0 },
+ *     ],
+ *   },
+ * )
+ * ```
+ */
+export async function cover_property<T>(
+	arb: Arbitrary<T>,
+	predicate: (sample: T) => boolean | Promise<boolean>,
+	opts: {
+		labels: ReadonlyArray<CoverageLabel<T>>;
+		numRuns?: number;
+	}
+): Promise<void> {
+	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
+	const tallies: HitTally<T>[] = opts.labels.map((label) => ({
+		name: label.name,
+		min_percent: label.min_percent,
+		matches: label.matches,
+		hits: 0,
+		total: 0,
+	}));
+
+	const wrapped = async (sample: T): Promise<boolean> => {
+		for (const tally of tallies) {
+			tally.total += 1;
+			if (tally.matches(sample)) tally.hits += 1;
+		}
+		return await predicate(sample);
+	};
+
+	await fc.assert(fc.asyncProperty(arb, wrapped), { numRuns: num_runs });
+
+	const stats = tallies.map(to_stat);
+	if (stats.some((s) => !s.met)) throw new CoverageError(stats);
+}
+
+type HitTally<T> = {
+	name: string;
+	min_percent: number;
+	matches: (sample: T) => boolean;
+	hits: number;
+	total: number;
+};
+
+function to_stat<T>(tally: HitTally<T>): CoverageStat {
+	const observed_percent = tally.total === 0 ? 0 : (tally.hits / tally.total) * 100;
+	return {
+		name: tally.name,
+		hits: tally.hits,
+		total: tally.total,
+		observed_percent,
+		min_percent: tally.min_percent,
+		met: observed_percent >= tally.min_percent,
+	};
+}
+
+function format_message(stats: readonly CoverageStat[]): string {
+	const lines = stats.map((s) => {
+		const status = s.met ? "OK  " : "FAIL";
+		const observed = s.observed_percent.toFixed(2);
+		const min = s.min_percent.toFixed(2);
+		return `  [${status}] ${s.name}: observed ${observed}% (${s.hits}/${s.total}), required >= ${min}%`;
+	});
+	return `testing.cover: coverage shortfall\n${lines.join("\n")}`;
+}
+
+```
+
+---
+
+### testing/failure.ts
+
+```typescript
+/**
+ * @module testing/failure
+ * @description Ergonomic surface over the registry's failure-variant primitives.
+ *
+ * Re-exports {@link failure} and {@link lookup_failure} from the registry with
+ * richer JSDoc plus adds {@link list_registered_variants} — the enumeration
+ * helper consumers reach for when writing a `provoke` table or a coverage
+ * report against a tagged error union.
+ *
+ * Registration is still explicit — neither this module nor `testing/register`
+ * runs on import. The vending auto-loader picks up `"corpus": { "testing" }`
+ * package.json hooks and calls `register()` on the first awaited
+ * `lookup` / `lookup_failure`; `testing.load_from(...)` loads one explicitly.
+ * `list_registered_variants` stays synchronous and does NOT trigger the
+ * auto-loader — it enumerates what's registered right now.
+ */
+
+import { failure, lookup_failure, list_failure_variants } from "./registry.js";
+import type { ArbBrand } from "./types.js";
+
+/**
+ * Register an arbitrary for one variant of a tagged error union.
+ *
+ * Thin re-export of the registry's `failure` primitive — provided here so
+ * consumers can `import { failure } from "@f0rbit/corpus/testing"` without
+ * reaching into the registry module.
+ *
+ * @example
+ * ```ts
+ * import { testing } from "@f0rbit/corpus"
+ * import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing"
+ *
+ * testing.failure(CORPUS_ERROR_BRAND, "not_found", testing.compose((draw) => ({
+ *   kind: "not_found" as const,
+ *   store_id: draw(testing.fc.string({ minLength: 1 })),
+ *   version: draw(testing.fc.string({ minLength: 1 })),
+ * })))
+ * ```
+ */
+export { failure, lookup_failure };
+
+/**
+ * Enumerate every variant currently registered for `brand`.
+ *
+ * The return type is `readonly E["kind"][]` — narrower than `string[]`, so
+ * downstream call sites get exhaustiveness checks for free when used in
+ * mapped-type positions.
+ *
+ * @example
+ * ```ts
+ * import { testing } from "@f0rbit/corpus"
+ * import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing"
+ *
+ * const variants = testing.list_registered_variants(CORPUS_ERROR_BRAND)
+ * // readonly ('not_found' | 'already_exists' | ... )[]
+ * ```
+ */
+export function list_registered_variants<E extends { kind: string }>(
+	brand: ArbBrand<E>
+): readonly E["kind"][] {
+	return list_failure_variants(brand);
+}
+
+```
+
+---
+
 ### testing/index.ts
 
 ```typescript
@@ -11989,7 +13280,16 @@ export function compose<T>(fn: (draw: Draw) => T): Arbitrary<T> {
  * - {@link arb} — Zod schema → `fc.Arbitrary` deriver with registry integration
  * - {@link compose} — Hypothesis-style composite generator with dependent draws
  * - {@link arbitrary} / {@link lookup} — Register and look up arbitraries by brand or schema
- * - {@link failure} / {@link lookup_failure} — Register error-variant-specific generators
+ *   (`lookup` is async — the first call auto-loads registrars vended via
+ *   `"corpus": { "testing": ... }` package.json keys of direct dependencies)
+ * - {@link failure} / {@link lookup_failure} — Register / look up error-variant-specific generators
+ * - {@link load_from} — Explicitly load one package's registrar by name or directory
+ * - {@link list_registered_variants} — Enumerate the variants registered under a brand
+ * - {@link register} — Corpus's own registrar (explicit call; does not auto-run on import)
+ * - {@link CORPUS_ERROR_BRAND} / {@link SNAPSHOT_META_BRAND} / {@link BATCH_OP_BRAND} — Brand symbols for corpus types
+ * - {@link cover} — Hedgehog-style coverage assertion ({@link cover_property} aliased)
+ * - {@link commands} / {@link async_commands} / {@link model_run} / {@link async_model_run} — Typed pin of fast-check's model-based command API
+ * - {@link law} — Law helpers namespace: `law.round_trip`, `law.idempotent`, `law.functor`, `law.error_path_exhaustive`, `law.provider_equivalence`, `law.equivalence_command`
  * - {@link ArbBrand} / {@link FailureKey} — Type-level utilities for branded registration
  * - {@link __reset_registry_for_tests} — Clear registries (test-only)
  * - {@link fc} — fast-check as a convenience re-export (consumers don't need separate import)
@@ -11997,9 +13297,767 @@ export function compose<T>(fn: (draw: Draw) => T): Arbitrary<T> {
 
 export { arb } from './arb.js';
 export { compose, type Draw } from './compose.js';
-export { arbitrary, lookup, failure, lookup_failure, __reset_registry_for_tests } from './registry.js';
+export { arbitrary, lookup, __reset_registry_for_tests } from './registry.js';
+export { failure, lookup_failure, list_registered_variants } from './failure.js';
+export { load_from } from './vending/auto-load.js';
+export { register, CORPUS_ERROR_BRAND, SNAPSHOT_META_BRAND, BATCH_OP_BRAND } from './register.js';
+export { cover_property as cover, CoverageError, DEFAULT_NUM_RUNS, type CoverageLabel, type CoverageStat } from './cover.js';
+export { commands, async_commands, model_run, async_model_run } from './commands.js';
+export type { Command, AsyncCommand, ICommand, ModelRunSetup, ModelRunAsyncSetup, CommandsConstraints } from './commands.js';
 export type { ArbBrand, FailureKey } from './types.js';
+export * as law from './laws/index.js';
 export { default as fc } from 'fast-check';
+
+```
+
+---
+
+### testing/laws/equality.ts
+
+```typescript
+/**
+ * @module testing/laws/equality
+ * @description Shared default-equality resolution for law helpers.
+ *
+ * Laws default to `Bun.deepEquals` when running under Bun. Outside Bun (Node,
+ * workerd) there is no ambient deep-equality, so the resolver throws an
+ * actionable error naming the law — callers pass `opts.equals` explicitly.
+ * Resolution is lazy (only runs when the caller omitted `equals`) and guards
+ * `typeof Bun`, so no top-level Bun reference leaks into Node imports of the
+ * barrel.
+ */
+
+export function default_equals<T>(law: string): (a: T, b: T) => boolean {
+	if (typeof Bun !== "undefined") {
+		return (a: T, b: T) => Bun.deepEquals(a, b);
+	}
+	throw new Error(
+		`${law}: no equality function provided and Bun is unavailable — pass opts.equals when running outside Bun`,
+	);
+}
+
+```
+
+---
+
+### testing/laws/error-path-exhaustive.ts
+
+```typescript
+/**
+ * @module testing/laws/error-path-exhaustive
+ * @description Headline law: every tagged error variant a function can return
+ * is exercised against a registered failure generator.
+ *
+ * The mapped-type `provoke: { [K in E["kind"]]: ... }` shape is the compile-time
+ * exhaustiveness guarantee — adding a variant to `E` without updating `provoke`
+ * is a TypeScript error at the call site. The runtime guarantee is that every
+ * variant that gets exercised has a registered failure generator (registered via
+ * `testing.failure(brand, kind, gen)`); a missing generator throws an actionable
+ * error pointing at the exact registration call.
+ *
+ * Per-variant property runs are independent — `fc.assert` is called once per
+ * variant, so a counterexample under one variant doesn't poison another's run.
+ *
+ * Shrinking is disabled (`endOnFailure: true`). Failure generators are
+ * registered via `testing.compose`, which is built on `fc.gen()` — and
+ * `fc.gen()`'s shrinker does not reliably terminate (observed unbounded on
+ * fast-check 4.8 even for a single-draw generator). A failing variant still
+ * throws fast-check's normal counterexample report; it just isn't shrunk.
+ */
+
+import fc from "fast-check";
+import { lookup_failure } from "../failure.js";
+import type { ArbBrand } from "../types.js";
+import type { Result } from "../../types.js";
+
+/**
+ * Default per-variant runs. Each variant gets its own `fc.assert` call, so the
+ * total work is `variants * default_runs`. 50 keeps a 12-variant union (the
+ * corpus error case) under a couple of seconds on a warm machine.
+ */
+const DEFAULT_NUM_RUNS = 50;
+
+/**
+ * Assert that `fn` correctly surfaces every variant of its error union when
+ * provoked with the corresponding inputs.
+ *
+ * For each variant kind in `E["kind"]` (filtered by `opts.only` when present):
+ *
+ * 1. Look up the registered failure generator via `lookup_failure(opts.error_brand, kind)`.
+ * 2. If missing, throw a clear error naming the brand, the variant, and the
+ *    exact `testing.failure(...)` call needed to register it.
+ * 3. Otherwise run `fc.assert(fc.asyncProperty(gen, async (failure) => { ... }))`
+ *    where the property body calls `fn(...opts.provoke[failure.kind](failure))`
+ *    and asserts the result is an `err` with matching `kind`.
+ *
+ * @example
+ * ```ts
+ * await testing.law.error_path_exhaustive(store_get, {
+ *   error_brand: CORPUS_ERROR_BRAND,
+ *   provoke: {
+ *     not_found: (f) => [{ store_id: f.store_id, version: f.version }],
+ *     decode_error: (f) => [pre_seed_corrupt_bytes(f)],
+ *     // ...one entry per variant; missing entries are TS errors
+ *   },
+ *   only: ["not_found", "decode_error"],
+ *   numRuns: 200,
+ * });
+ * ```
+ */
+export async function error_path_exhaustive<
+	Args extends readonly unknown[],
+	T,
+	E extends { kind: string },
+>(
+	fn: (...args: Args) => Promise<Result<T, E>>,
+	opts: {
+		error_brand: ArbBrand<E>;
+		// NoInfer is load-bearing twice over: (1) it stops the provoke fns'
+		// return literals from becoming inference candidates for `Args`, so
+		// array literals get checked contextually against the tuple type and
+		// don't widen to `T[]`; (2) it pins `E` to what `fn` + `error_brand`
+		// declare, so a provoke table missing a variant is a hard compile
+		// error instead of narrowing `E["kind"]` to the keys provided.
+		provoke: NoInfer<{ [K in E["kind"]]: (failure: Extract<E, { kind: K }>) => Args }>;
+		only?: readonly E["kind"][];
+		numRuns?: number;
+	},
+): Promise<void> {
+	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
+	const variants = (opts.only ?? (Object.keys(opts.provoke) as E["kind"][])) as readonly E["kind"][];
+
+	for (const variant of variants) {
+		const gen = await lookup_failure(opts.error_brand, variant);
+		if (!gen) {
+			throw new Error(
+				`error_path_exhaustive: no generator registered for variant '${variant}' of brand ${String(opts.error_brand)} — register via testing.failure(brand, '${variant}', () => ...)`,
+			);
+		}
+
+		await fc.assert(
+			fc.asyncProperty(gen, async (failure) => {
+				// `provoke[failure.kind]` is typed as the union of all provoke
+				// fns; TS can't narrow it to the specific `Extract<E, { kind: K }>`
+				// callback after the runtime index. Cast here is the single
+				// escape hatch — `failure.kind === variant` by construction
+				// because `gen` was looked up under `variant`.
+				const provoke_fn = opts.provoke[failure.kind as E["kind"]] as (f: E) => Args;
+				const args = provoke_fn(failure);
+				const result = await fn(...args);
+				// Plain throws, NOT bun:test's `expect` — this module ships in the
+				// published package via the main barrel (`index.ts` re-exports
+				// `testing`), so it must not import `bun:test` (unresolvable under
+				// Node / workerd). fast-check surfaces thrown errors as property
+				// failures with the counterexample attached.
+				if (result.ok) {
+					throw new Error(
+						`error_path_exhaustive: provoked variant '${failure.kind}' but fn returned ok`,
+					);
+				}
+				if (result.error.kind !== failure.kind) {
+					throw new Error(
+						`error_path_exhaustive: provoked variant '${failure.kind}' but fn returned error kind '${result.error.kind}'`,
+					);
+				}
+			}),
+			{ numRuns: num_runs, endOnFailure: true },
+		);
+	}
+}
+
+```
+
+---
+
+### testing/laws/functor.ts
+
+```typescript
+/**
+ * @module testing/laws/functor
+ * @description Functor law checking — identity and composition properties.
+ *
+ * A functor must satisfy two laws:
+ * 1. **Identity**: `map(x, id) === x`
+ * 2. **Composition**: `map(map(x, f), g) === map(x, g ∘ f)`
+ *
+ * This checker is generic over the functor instance — it does not import Result
+ * or any specific type. `T` is the functor value (e.g. `Result<number, string>`),
+ * `A` is the wrapped element type the mapped functions operate on (e.g. `number`).
+ * Both flow through inference from `arb` and `fn_arb`, so call sites need no
+ * casts. Callers provide:
+ * - An arbitrary to generate test values
+ * - A `map(value, fn): mapped_value` operation
+ * - An `equals(a, b): boolean` equality predicate
+ * - An arbitrary of endomorphisms `(x: A) => A`
+ *
+ * Each law runs separately; shrinking is disabled (`endOnFailure: true`) due to
+ * potential issues with composed arbitraries (same rationale as
+ * `error_path_exhaustive`).
+ *
+ * @example
+ * ```ts
+ * import { testing } from "@f0rbit/corpus";
+ * import { pipe } from "./result.js";
+ *
+ * await testing.law.functor({
+ *   arb: result_arb,
+ *   map: (value, fn) => pipe(value).map(fn).result(),
+ *   equals: (a, b) => deepEqual(a, b),
+ *   fn_arb: testing.fc.func<[number], number>(testing.fc.integer()),
+ *   numRuns: 200,
+ * });
+ * ```
+ */
+
+import fc from "fast-check";
+import type { Arbitrary } from "fast-check";
+
+/**
+ * Options for the functor law checker.
+ *
+ * - `arb`      — Arbitrary for generating functor values (`T`).
+ * - `map`      — The functor's map operation: `(value, fn) => mapped_value`.
+ *                Can be sync or async (must return Promise for async).
+ * - `equals`   — Equality predicate for comparing mapped results.
+ *                Can be sync or async.
+ * - `fn_arb`   — Arbitrary of endomorphisms on the wrapped element type (`A → A`).
+ * - `numRuns`  — Number of property runs (default: 200).
+ */
+export type FunctorLawOpts<T, A> = {
+	arb: Arbitrary<T>;
+	map: (value: T, fn: (x: A) => A) => T | Promise<T>;
+	equals: (a: T, b: T) => boolean | Promise<boolean>;
+	fn_arb: Arbitrary<(x: A) => A>;
+	numRuns?: number;
+};
+
+const DEFAULT_NUM_RUNS = 200;
+
+/**
+ * Check the identity and composition laws for a functor.
+ *
+ * Generates test values and function pairs, then asserts:
+ * 1. **Identity law**: `map(x, id) === x` (where `id(x) = x`)
+ * 2. **Composition law**: `map(map(x, f), g) === map(x, g ∘ f)`
+ *
+ * If either law fails, the property failure is reported with fast-check's
+ * standard counterexample output. Coverage is implicit — both ok and err
+ * branches of the generated values are exercised by the caller's arbitrary.
+ *
+ * @param opts - Configuration object (see {@link FunctorLawOpts})
+ */
+export async function functor<T, A>(opts: FunctorLawOpts<T, A>): Promise<void> {
+	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
+
+	// Identity law: map(x, id) === x
+	await fc.assert(
+		fc.asyncProperty(opts.arb, async (x) => {
+			const mapped = await Promise.resolve(opts.map(x, (a) => a));
+			const is_equal = await Promise.resolve(opts.equals(x, mapped));
+			if (!is_equal) {
+				throw new Error(
+					`functor identity law failed: map(x, id) !== x\n` +
+					`  original: ${JSON.stringify(x)}\n` +
+					`  mapped:   ${JSON.stringify(mapped)}`,
+				);
+			}
+		}),
+		{ numRuns: num_runs, endOnFailure: true },
+	);
+
+	// Composition law: map(map(x, f), g) === map(x, g ∘ f)
+	await fc.assert(
+		fc.asyncProperty(opts.arb, opts.fn_arb, opts.fn_arb, async (x, f, g) => {
+			// Left side: map(map(x, f), g)
+			const map_f = await Promise.resolve(opts.map(x, f));
+			const left = await Promise.resolve(opts.map(map_f, g));
+
+			// Right side: map(x, g ∘ f)
+			const composed = (a: A): A => g(f(a));
+			const right = await Promise.resolve(opts.map(x, composed));
+
+			// Check equality
+			const is_equal = await Promise.resolve(opts.equals(left, right));
+			if (!is_equal) {
+				throw new Error(
+					`functor composition law failed: map(map(x, f), g) !== map(x, g ∘ f)\n` +
+					`  left:  ${JSON.stringify(left)}\n` +
+					`  right: ${JSON.stringify(right)}`,
+				);
+			}
+		}),
+		{ numRuns: num_runs, endOnFailure: true },
+	);
+}
+
+```
+
+---
+
+### testing/laws/idempotent.ts
+
+```typescript
+/**
+ * @module testing/laws/idempotent
+ * @description Idempotent law: op(op(x)) equals op(x) for all generated x.
+ *
+ * Enforces that applying an operation twice yields the same result as applying
+ * it once. Useful for tests of projections, normalizations, canonicalizations,
+ * and other naturally idempotent transformations.
+ *
+ * The operation may be sync or async; the property uses `fc.asyncProperty` and
+ * awaits the result unconditionally.
+ *
+ * Equality defaults to `Bun.deepEquals` (when running under Bun) but requires
+ * an explicit `opts.equals` if running outside Bun (Node, workerd). This
+ * avoids a top-level Bun reference that would break `import "@f0rbit/corpus"`
+ * under Node.
+ *
+ * Shrinking is disabled (`endOnFailure: true`). The operation may have
+ * stateful or path-dependent behavior that breaks under partial shrinks, and
+ * generators may be `testing.compose` instances whose `fc.gen()` shrinker does
+ * not reliably terminate.
+ *
+ * @example
+ * ```ts
+ * const trim_op = (s: string) => s.trim();
+ * await testing.law.idempotent(fc.string(), trim_op);
+ * ```
+ */
+
+import fc from "fast-check";
+import { default_equals } from "./equality.js";
+
+const DEFAULT_NUM_RUNS = 100;
+
+/**
+ * Assert that `op(op(x))` equals `op(x)` for all generated values.
+ *
+ * @param arb — Generator of values to test (from fc.* or testing.compose)
+ * @param op — Function to test for idempotence; may be sync or async
+ * @param opts — Optional `{ equals, numRuns }`
+ *   - `equals(a, b)`: Custom equality check; defaults to `Bun.deepEquals` under Bun
+ *   - `numRuns`: Property run count; defaults to 100
+ *
+ * @throws If `op(op(x)) !== op(x)` for any generated `x`, or if no
+ * equality function is available and running outside Bun.
+ */
+export async function idempotent<T>(
+	arb: fc.Arbitrary<T>,
+	op: (x: T) => T | Promise<T>,
+	opts?: {
+		equals?: (a: T, b: T) => boolean;
+		numRuns?: number;
+	},
+): Promise<void> {
+	const num_runs = opts?.numRuns ?? DEFAULT_NUM_RUNS;
+	const equals = opts?.equals ?? default_equals<T>("idempotent");
+
+	await fc.assert(
+		fc.asyncProperty(arb, async (x: T) => {
+			const once: T = await Promise.resolve(op(x));
+			const twice: T = await Promise.resolve(op(once));
+			if (!equals(twice, once)) {
+				throw new Error(
+					`idempotent: op(op(x)) !== op(x)\n  input: ${JSON.stringify(x)}\n  op(x): ${JSON.stringify(once)}\n  op(op(x)): ${JSON.stringify(twice)}`,
+				);
+			}
+		}),
+		{ numRuns: num_runs, endOnFailure: true },
+	);
+}
+
+```
+
+---
+
+### testing/laws/index.ts
+
+```typescript
+/**
+ * @module testing/laws
+ * @description Property-based law helpers. Each law is a higher-order assertion
+ * that drives a generator + predicate combo through fast-check and surfaces a
+ * structured failure when the law is violated.
+ *
+ * Re-exported from `testing/index.ts` under the `law` namespace —
+ * `testing.law.round_trip(...)` / `testing.law.provider_equivalence(...)` are
+ * the canonical call paths.
+ *
+ * Each law carries its own default run count tuned to its cost profile
+ * (documented per module); pass `numRuns` to override.
+ */
+
+export { error_path_exhaustive } from "./error-path-exhaustive.js";
+export { round_trip } from "./round-trip.js";
+export { idempotent } from "./idempotent.js";
+export { provider_equivalence, equivalence_command } from "./provider-equivalence.js";
+export { functor, type FunctorLawOpts } from "./functor.js";
+
+```
+
+---
+
+### testing/laws/provider-equivalence.ts
+
+```typescript
+/**
+ * @module testing/laws/provider-equivalence
+ * @description Cross-provider equivalence law: run the same shrinkable command
+ * sequence against an in-memory model and N provider-built systems-under-test,
+ * asserting PER COMMAND that the model's result and each SUT's result agree —
+ * `ok` flags match, ok-values agree under the caller's equality, error `kind`s
+ * match. A divergence fails the property naming the provider label and command
+ * index, and fast-check's native command shrinker reduces the failing sequence
+ * to a minimal reproduction.
+ *
+ * Mechanics: `fc.commands` wraps every generated command in an internal
+ * wrapper that only forwards `check`/`run`/`toString`, and `AsyncCommand.run`
+ * is typed `Promise<void>` — so per-command results can't ride on the command
+ * instance or its return value. The model object DOES flow through the wrapper
+ * untouched, so this module keeps a private `WeakMap` keyed by model instance:
+ * commands built with {@link equivalence_command} deposit `{ model_r, sut_r }`
+ * into the mailbox of the model they just ran against, and the runner reads it
+ * back right after each `run`. Hand-rolled `AsyncCommand`s that never deposit
+ * an outcome are treated as self-asserting (their `run` throws on violation)
+ * and skip the centralized equivalence check.
+ */
+
+import fc from "fast-check";
+import { async_commands } from "../commands.js";
+import type { AsyncCommand, CommandsConstraints } from "../commands.js";
+
+type CommandOutcome = {
+	readonly model_r: unknown;
+	readonly sut_r: unknown;
+};
+
+type Mailbox = { outcome: CommandOutcome | undefined };
+
+/**
+ * Model-instance → outcome mailbox. Keyed by the model object because it is
+ * the only value that passes through fast-check's command wrapper unchanged.
+ * WeakMap so per-run models are GC'd with their mailboxes.
+ */
+const mailboxes = new WeakMap<object, Mailbox>();
+
+/**
+ * Read the mailbox through a call boundary: after `box.outcome = undefined`,
+ * TS narrows the property to `undefined` and can't see that `cmd.run` mutates
+ * it through the model-keyed alias — the function call resets the narrowing.
+ */
+const take_outcome = (box: Mailbox): CommandOutcome | undefined => box.outcome;
+
+/**
+ * Build an {@link AsyncCommand} that applies one logical operation to both the
+ * model and the SUT, reporting both results to `provider_equivalence` for the
+ * centralized per-command comparison.
+ *
+ * `on_model` runs first (synchronously — the model is an in-memory reference
+ * implementation), then `on_sut`. Both share the result type `R` so the two
+ * arms can't silently drift apart at the type level. The command carries no
+ * run-scoped state of its own, so a single instance is safe to reuse across
+ * positions, runs, and shrink retries (fast-check reuses command instances).
+ *
+ * Outside a `provider_equivalence` run there is no mailbox on the model, so
+ * the command executes both arms but asserts nothing — these commands are
+ * meant to be driven by the law, not by a bare `async_model_run`.
+ *
+ * @example
+ * ```ts
+ * const increment = testing.law.equivalence_command<CounterModel, Counter, Result<number, CounterError>>({
+ *   label: "increment()",
+ *   on_model: (m) => (m.count + 1 > CAP ? err({ kind: "overflow" }) : ok((m.count += 1))),
+ *   on_sut: (c) => c.increment(),
+ * })
+ * ```
+ */
+export function equivalence_command<Model extends object, S, R>(opts: {
+	label: string;
+	check?: (m: Readonly<Model>) => boolean;
+	on_model: (m: Model) => R;
+	on_sut: (s: S) => R | Promise<R>;
+}): AsyncCommand<Model, S> {
+	return {
+		check: (m) => (opts.check ? opts.check(m) : true),
+		run: async (m, s) => {
+			const model_r = opts.on_model(m);
+			const sut_r = await opts.on_sut(s);
+			const box = mailboxes.get(m);
+			if (box) box.outcome = { model_r, sut_r };
+		},
+		toString: () => opts.label,
+	};
+}
+
+type ResultShape = { ok: true; value: unknown } | { ok: false; error: unknown };
+
+const as_result_shape = (v: unknown): ResultShape | undefined => {
+	if (typeof v !== "object" || v === null || !("ok" in v)) return undefined;
+	if (v.ok === true && "value" in v) return { ok: true, value: v.value };
+	if (v.ok === false && "error" in v) return { ok: false, error: v.error };
+	return undefined;
+};
+
+const error_kind = (e: unknown): string | undefined => {
+	if (typeof e !== "object" || e === null || !("kind" in e)) return undefined;
+	return typeof e.kind === "string" ? e.kind : undefined;
+};
+
+/**
+ * Distinguish command instances from command arbitraries in the `commands`
+ * pool. `instanceof` is the fast path; the structural fallback covers module
+ * graphs carrying a duplicate fast-check copy, where the consumer's
+ * `Arbitrary` is not an instance of OUR `fc.Arbitrary` class — without it, a
+ * foreign arbitrary would get lifted via `fc.constant` and fail later with an
+ * inscrutable `cmd.check is not a function`.
+ */
+const is_arbitrary = <Model extends object, S>(
+	c: AsyncCommand<Model, S> | fc.Arbitrary<AsyncCommand<Model, S>>,
+): c is fc.Arbitrary<AsyncCommand<Model, S>> => {
+	if (c instanceof fc.Arbitrary) return true;
+	return "generate" in c && typeof c.generate === "function" && "shrink" in c && typeof c.shrink === "function";
+};
+
+/** Returns a human-readable divergence reason, or undefined when results agree. */
+const divergence = (
+	model_r: unknown,
+	sut_r: unknown,
+	results_agree: (model_r: unknown, sut_r: unknown) => boolean,
+): string | undefined => {
+	const model_shape = as_result_shape(model_r);
+	const sut_shape = as_result_shape(sut_r);
+	if (model_shape === undefined || sut_shape === undefined) {
+		return results_agree(model_r, sut_r) ? undefined : "results disagree under results_agree";
+	}
+	if (model_shape.ok !== sut_shape.ok) {
+		return `ok flags disagree (model ok=${model_shape.ok}, sut ok=${sut_shape.ok})`;
+	}
+	if (model_shape.ok === true && sut_shape.ok === true) {
+		return results_agree(model_shape.value, sut_shape.value)
+			? undefined
+			: "ok values disagree under results_agree";
+	}
+	if (model_shape.ok === false && sut_shape.ok === false) {
+		const model_kind = error_kind(model_shape.error);
+		const sut_kind = error_kind(sut_shape.error);
+		if (model_kind !== undefined && sut_kind !== undefined) {
+			return model_kind === sut_kind
+				? undefined
+				: `error kinds disagree (model='${model_kind}', sut='${sut_kind}')`;
+		}
+		return results_agree(model_r, sut_r)
+			? undefined
+			: "errors disagree under results_agree (no string `kind` on both errors)";
+	}
+	return undefined;
+};
+
+/**
+ * Assert that every provider-built system behaves equivalently to the model
+ * under arbitrary command sequences.
+ *
+ * Per property run: a FRESH model and a FRESH SUT are built for every provider
+ * (the model factory is invoked once per provider so each pair evolves its own
+ * deterministic reference copy), then the same generated command sequence runs
+ * against each `(model, sut)` pair. After every command, results reported via
+ * {@link equivalence_command} are compared:
+ *
+ * - both Result-shaped: `ok` flags must agree; when both `ok`, the unwrapped
+ *   values must satisfy `equivalence.results_agree`; when both errors, string
+ *   `error.kind`s must match (falling back to `results_agree` on the full
+ *   results when either error carries no string `kind`)
+ * - otherwise: the raw results must satisfy `equivalence.results_agree`
+ *
+ * A divergence throws with the provider label, command index, command label,
+ * and the executed sequence — and fast-check's command shrinker reduces the
+ * failing sequence to a minimal counterexample. Shrinking is deliberately left
+ * ENABLED here (no `endOnFailure`): the minimal command sequence is the value
+ * of this law.
+ *
+ * WARNING — payload arbitraries inside commands must be plain fast-check
+ * arbitraries (`fc.integer`, `fc.string`, `fc.record`, ...). `testing.compose`
+ * is built on `fc.gen()`, whose shrinker does not reliably terminate
+ * (fast-check 4.8); a compose-based payload inside a command can hang the
+ * shrink phase of a failing run. If a command's payload must come from
+ * `testing.compose` / `testing.arb`-over-compose, pre-sample values with
+ * `fc.sample` (unaffected) and pass fixed-payload command instances instead.
+ *
+ * @param opts.model - Factory for the reference model; MUST return a fresh
+ * instance per call (enforced at runtime)
+ * @param opts.providers - Labelled factories, one per system-under-test
+ * @param opts.commands - Command pool: instances and/or arbitraries of
+ * commands (instances are lifted via `fc.constant`)
+ * @param opts.equivalence.results_agree - Equality for ok-values (or for raw
+ * results when they aren't Result-shaped)
+ * @param opts.numRuns - Property runs (default: fast-check's default, 100)
+ * @param opts.maxCommands - Max commands per generated sequence (default:
+ * fast-check's default sizing)
+ * @param opts.size - fast-check size bias for sequence LENGTH. With the
+ * default sizing, `maxCommands: 30` still averages ~5 commands per sequence
+ * (p90 ≈ 9); pass `"max"` to bias lengths toward `maxCommands` when deep
+ * stateful histories are the point of the law
+ *
+ * @example
+ * ```ts
+ * await testing.law.provider_equivalence({
+ *   model: () => ({ count: 0 }),
+ *   providers: [
+ *     { label: "memory", build: () => make_memory_counter() },
+ *     { label: "file", build: () => make_file_counter(tmp_dir()) },
+ *   ],
+ *   commands: [
+ *     increment_command,
+ *     testing.fc.integer({ min: 1, max: 5 }).map((n) => add_command(n)),
+ *   ],
+ *   equivalence: { results_agree: (a, b) => a === b },
+ *   numRuns: 200,
+ *   maxCommands: 30,
+ * })
+ * ```
+ */
+export async function provider_equivalence<Model extends object, S>(opts: {
+	model: () => Model | Promise<Model>;
+	providers: ReadonlyArray<{ label: string; build: () => S | Promise<S> }>;
+	commands: ReadonlyArray<AsyncCommand<Model, S> | fc.Arbitrary<AsyncCommand<Model, S>>>;
+	equivalence: { results_agree: (model_r: unknown, sut_r: unknown) => boolean };
+	numRuns?: number;
+	maxCommands?: number;
+	size?: CommandsConstraints["size"];
+}): Promise<void> {
+	const command_arbs = opts.commands.map((c) => (is_arbitrary(c) ? c : fc.constant(c)));
+	const sequences = async_commands<Model, S>(command_arbs, {
+		...(opts.maxCommands === undefined ? {} : { maxCommands: opts.maxCommands }),
+		...(opts.size === undefined ? {} : { size: opts.size }),
+	});
+
+	await fc.assert(
+		fc.asyncProperty(sequences, async (cmds) => {
+			const pairs: Array<{ label: string; model: Model; sut: S; box: Mailbox }> = [];
+			for (const provider of opts.providers) {
+				const model = await opts.model();
+				if (mailboxes.has(model)) {
+					throw new Error(
+						`provider_equivalence: model() returned an instance already in use (building provider "${provider.label}") — the factory must build a FRESH model per call`,
+					);
+				}
+				const box: Mailbox = { outcome: undefined };
+				mailboxes.set(model, box);
+				pairs.push({ label: provider.label, model, sut: await provider.build(), box });
+			}
+
+			const executed: string[] = [];
+			let index = 0;
+			for (const cmd of cmds) {
+				const label = String(cmd);
+				let ran = false;
+				for (const pair of pairs) {
+					if (!cmd.check(pair.model)) continue;
+					ran = true;
+					pair.box.outcome = undefined;
+					await cmd.run(pair.model, pair.sut);
+					const outcome = take_outcome(pair.box);
+					if (outcome === undefined) continue;
+					const reason = divergence(outcome.model_r, outcome.sut_r, opts.equivalence.results_agree);
+					if (reason !== undefined) {
+						throw new Error(
+							`provider_equivalence: ${reason} — provider "${pair.label}", command #${index} (${label}), sequence: [${[...executed, label].join(", ")}], model_r=${fc.stringify(outcome.model_r)}, sut_r=${fc.stringify(outcome.sut_r)}`,
+						);
+					}
+				}
+				if (ran) executed.push(label);
+				index += 1;
+			}
+		}),
+		// No endOnFailure: sequence shrinking is the point of this law. Safe
+		// because fc.commands' shrinker terminates — the non-terminating-shrink
+		// hazard is specific to fc.gen()/compose-based arbitraries (AGENTS.md).
+		opts.numRuns === undefined ? {} : { numRuns: opts.numRuns },
+	);
+}
+
+```
+
+---
+
+### testing/laws/round-trip.ts
+
+```typescript
+/**
+ * @module testing/laws/round-trip
+ * @description Round-trip law: decode(encode(x)) equals x for all generated x.
+ *
+ * Enforces serialization idempotence. Useful for codecs, encoders, data
+ * transformations, and any function pair satisfying a round-trip contract.
+ * The encoded form is generic — bytes, strings, wire shapes; anything `decode`
+ * can reverse.
+ *
+ * Both `encode` and `decode` may be sync or async; the property uses
+ * `fc.asyncProperty` and awaits both unconditionally.
+ *
+ * Equality defaults to `Bun.deepEquals` (when running under Bun) but requires
+ * an explicit `opts.equals` if running outside Bun (Node, workerd). This
+ * avoids a top-level Bun reference that would break `import "@f0rbit/corpus"`
+ * under Node.
+ *
+ * Shrinking is disabled (`endOnFailure: true`). Reasons: the encode/decode
+ * pair may rely on subtle interactions that break under partial shrinks, and
+ * generators may be `testing.compose` instances whose `fc.gen()` shrinker does
+ * not reliably terminate.
+ *
+ * @example
+ * ```ts
+ * const text_codec = {
+ *   encode: (x: string) => new TextEncoder().encode(x),
+ *   decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
+ * };
+ * await testing.law.round_trip(fc.string(), text_codec.encode, text_codec.decode);
+ * ```
+ */
+
+import fc from "fast-check";
+import { default_equals } from "./equality.js";
+
+const DEFAULT_NUM_RUNS = 100;
+
+/**
+ * Assert that `decode(encode(x))` equals `x` for all generated values.
+ *
+ * @param arb — Generator of values to round-trip (from fc.* or testing.compose)
+ * @param encode — Function to transform a value; may be sync or async
+ * @param decode — Function to reverse the transform; may be sync or async
+ * @param opts — Optional `{ equals, numRuns }`
+ *   - `equals(a, b)`: Custom equality check; defaults to `Bun.deepEquals` under Bun
+ *   - `numRuns`: Property run count; defaults to 100
+ *
+ * @throws If `decode(encode(x)) !== x` for any generated `x`, or if no
+ * equality function is available and running outside Bun.
+ */
+export async function round_trip<T, U>(
+	arb: fc.Arbitrary<T>,
+	encode: (x: T) => U | Promise<U>,
+	decode: (encoded: U) => T | Promise<T>,
+	opts?: {
+		equals?: (a: T, b: T) => boolean;
+		numRuns?: number;
+	},
+): Promise<void> {
+	const num_runs = opts?.numRuns ?? DEFAULT_NUM_RUNS;
+	const equals = opts?.equals ?? default_equals<T>("round_trip");
+
+	await fc.assert(
+		fc.asyncProperty(arb, async (x: T) => {
+			const encoded: U = await Promise.resolve(encode(x));
+			const decoded: T = await Promise.resolve(decode(encoded));
+			if (!equals(decoded, x)) {
+				throw new Error(
+					`round_trip: decode(encode(x)) !== x\n  input: ${JSON.stringify(x)}\n  decoded: ${JSON.stringify(decoded)}`,
+				);
+			}
+		}),
+		{ numRuns: num_runs, endOnFailure: true },
+	);
+}
 
 ```
 
@@ -12015,19 +14073,19 @@ export { default as fc } from 'fast-check';
  * Exports branded symbols for corpus types (CorpusError, SnapshotMeta, BatchOp)
  * and registers initial arbitraries for them. Downstream packages import these
  * symbols and call `testing.failure(CORPUS_ERROR_BRAND, "variant", ...)` to
- * register per-variant generators.
+ * register per-variant generators — or simply rely on the corpus-shipped ones
+ * registered by {@link register} below.
  *
  * Called explicitly by Phase 4's vending walker — this file does NOT auto-execute
- * on import. Phase 1 ships the stub with SnapshotMeta registration only; Phase 2
- * adds CorpusError failure registrations.
+ * on import. Phase 1 shipped the stub with SnapshotMeta registration only;
+ * Phase 2 lights up the CORPUS_ERROR_BRAND failure registrations (12 variants).
  */
 
 import fc from 'fast-check';
 import type { ArbBrand } from './types.js';
 import { arbitrary } from './registry.js';
 import { compose } from './compose.js';
-import { arb } from './arb.js';
-import { z } from 'zod';
+import { failure } from './failure.js';
 
 import type { CorpusError, SnapshotMeta, BatchOp } from '../types.js';
 
@@ -12049,21 +14107,25 @@ export const SNAPSHOT_META_BRAND = Symbol('SnapshotMeta') as ArbBrand<SnapshotMe
  */
 export const BATCH_OP_BRAND = Symbol('BatchOp') as ArbBrand<BatchOp>;
 
+const non_empty_string = fc.string({ minLength: 1, maxLength: 50 });
+const hex_hash = fc.stringMatching(/^[a-f0-9]{64}$/);
+const error_arb: fc.Arbitrary<Error> = fc.string({ minLength: 1, maxLength: 80 }).map((m) => new Error(m));
+
 /**
  * Register corpus's own arbitraries. Called explicitly during test setup or by
  * the vending walker (Phase 4). Idempotent — calling twice produces warnings
  * but does not corrupt the registry.
  */
 export function register(): void {
-	// Register SnapshotMeta arbitrary.
-	// Produces well-formed metadata with non-empty store_id, valid version string,
-	// 64-char hex content_hash, etc.
+	register_snapshot_meta();
+	register_corpus_error_variants();
+}
+
+function register_snapshot_meta(): void {
 	const snapshot_meta_arb = compose((draw) => {
-		const store_id = draw(fc.string({ minLength: 1, maxLength: 50 }));
-		const version = draw(fc.string({ minLength: 1, maxLength: 50 }));
-		const content_hash = draw(
-			fc.stringMatching(/^[a-f0-9]{64}$/)
-		);
+		const store_id = draw(non_empty_string);
+		const version = draw(non_empty_string);
+		const content_hash = draw(hex_hash);
 		const created_at = draw(fc.date());
 		const size_bytes = draw(fc.integer({ min: 0, max: 1000000000 }));
 		const data_key = draw(fc.string({ minLength: 1, maxLength: 100 }));
@@ -12083,6 +14145,126 @@ export function register(): void {
 	});
 
 	arbitrary(SNAPSHOT_META_BRAND, snapshot_meta_arb);
+}
+
+function register_corpus_error_variants(): void {
+	failure(
+		CORPUS_ERROR_BRAND,
+		'not_found',
+		compose((draw) => ({
+			kind: 'not_found' as const,
+			store_id: draw(non_empty_string),
+			version: draw(non_empty_string),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'already_exists',
+		compose((draw) => ({
+			kind: 'already_exists' as const,
+			store_id: draw(non_empty_string),
+			version: draw(non_empty_string),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'storage_error',
+		compose((draw) => ({
+			kind: 'storage_error' as const,
+			cause: draw(error_arb),
+			operation: draw(fc.constantFrom('meta_get', 'meta_put', 'meta_delete', 'data_get', 'data_put', 'data_delete')),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'decode_error',
+		compose((draw) => ({
+			kind: 'decode_error' as const,
+			cause: draw(error_arb),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'encode_error',
+		compose((draw) => ({
+			kind: 'encode_error' as const,
+			cause: draw(error_arb),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'hash_mismatch',
+		compose((draw) => ({
+			kind: 'hash_mismatch' as const,
+			expected: draw(hex_hash),
+			actual: draw(hex_hash),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'invalid_config',
+		compose((draw) => ({
+			kind: 'invalid_config' as const,
+			message: draw(fc.string({ minLength: 1, maxLength: 200 })),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'validation_error',
+		compose((draw) => ({
+			kind: 'validation_error' as const,
+			cause: draw(error_arb),
+			message: draw(fc.string({ minLength: 1, maxLength: 200 })),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'observation_not_found',
+		compose((draw) => ({
+			kind: 'observation_not_found' as const,
+			id: draw(non_empty_string),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'transaction_aborted',
+		compose((draw) => {
+			const reason = draw(fc.constantFrom('returned_err', 'threw', 'apply_batch_failed') as fc.Arbitrary<'returned_err' | 'threw' | 'apply_batch_failed'>);
+			const has_cause = draw(fc.boolean());
+			const base = { kind: 'transaction_aborted' as const, reason };
+			return has_cause ? { ...base, cause: draw(error_arb) } : base;
+		}),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'partial_commit',
+		compose((draw) => ({
+			kind: 'partial_commit' as const,
+			ops_completed: draw(fc.integer({ min: 0, max: 100 })),
+			ops_failed: draw(fc.integer({ min: 1, max: 100 })),
+			cause: draw(error_arb),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		'concurrent_modification',
+		compose((draw) => ({
+			kind: 'concurrent_modification' as const,
+			store_id: draw(non_empty_string),
+			version: draw(non_empty_string),
+		})),
+	);
 }
 
 ```
@@ -12114,11 +14296,19 @@ export function register(): void {
  * signatures narrow the result back to the consumer's expected type via a
  * single `as` cast at the boundary — this is the documented escape hatch and
  * the only place in the registry where an unchecked cast lives.
+ *
+ * `lookup` and `lookup_failure` are async: the first call triggers the
+ * vending auto-loader (`./vending/auto-load.js`), which discovers and loads
+ * registrars declared via `"corpus": { "testing": ... }` package.json keys.
+ * Registration (`arbitrary` / `failure`) stays synchronous, as do the
+ * `_sync` accessors used by `arb()` — deriving an arbitrary from a schema
+ * must not spring filesystem walks on a synchronous call path.
  */
 
 import type { Arbitrary } from "fast-check";
 import type { z } from "zod";
 import type { ArbBrand } from "./types.js";
+import { __reset_auto_load_for_tests, ensure_loaded } from "./vending/auto-load.js";
 
 let brand_arbs = new Map<symbol, Arbitrary<unknown>>();
 let schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
@@ -12161,16 +14351,42 @@ export function arbitrary(key: symbol | z.ZodType, gen: Arbitrary<unknown>): voi
 /**
  * Look up the arbitrary registered against a branded symbol.
  *
+ * Async since 0.7.0: the first lookup per registry state triggers the vending
+ * auto-loader, so arbitraries registered by dependencies' registrars are
+ * visible with zero manual wiring.
+ *
+ * @example
+ * ```ts
+ * const user_arb = await testing.lookup(USER_ID_BRAND)
+ * ```
+ *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
+export function lookup<T>(key: ArbBrand<T>): Promise<Arbitrary<T> | undefined>;
 /**
  * Look up the arbitrary registered against a Zod schema instance.
  *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
-export function lookup(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+export function lookup<S extends z.ZodType>(schema: S): Promise<Arbitrary<z.infer<S>> | undefined>;
+export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown> | undefined> {
+	await ensure_loaded();
+	return lookup_now(key);
+}
+
+/**
+ * Synchronous lookup that does NOT trigger the vending auto-loader. Internal —
+ * used by `arb()`'s schema walker, which is a synchronous API and must not
+ * spring filesystem walks mid-derivation. Only sees registrations made in
+ * this process so far (manual calls, or a prior awaited `lookup`/`load_from`).
+ */
+export function lookup_sync<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
+export function lookup_sync<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
+export function lookup_sync(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+	return lookup_now(key);
+}
+
+function lookup_now(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
 	if (typeof key === "symbol") return brand_arbs.get(key);
 	return schema_arbs.get(key);
 }
@@ -12211,10 +14427,25 @@ export function failure<E extends { kind: string }, K extends E["kind"]>(
  * Look up the arbitrary registered for a specific variant of a tagged error
  * union.
  *
+ * Async since 0.7.0: the first lookup per registry state triggers the vending
+ * auto-loader (see {@link lookup}).
+ *
  * @returns the registered arbitrary, or `undefined` if none is registered for
  * the given `[brand, variant]` pair.
  */
-export function lookup_failure<E extends { kind: string }>(
+export async function lookup_failure<E extends { kind: string }>(
+	brand: ArbBrand<E>,
+	variant: E["kind"]
+): Promise<Arbitrary<E> | undefined> {
+	await ensure_loaded();
+	return lookup_failure_sync(brand, variant);
+}
+
+/**
+ * Synchronous failure lookup that does NOT trigger the vending auto-loader.
+ * Internal counterpart of {@link lookup_sync}.
+ */
+export function lookup_failure_sync<E extends { kind: string }>(
 	brand: ArbBrand<E>,
 	variant: E["kind"]
 ): Arbitrary<E> | undefined {
@@ -12224,13 +14455,33 @@ export function lookup_failure<E extends { kind: string }>(
 }
 
 /**
- * Reset all three registries to fresh empty maps. Test-only helper — the
- * leading `__` is the convention for "do not call from production code".
+ * Enumerate every variant `kind` currently registered against `brand`.
+ *
+ * Returns the variants in insertion order. The result is a fresh array — safe
+ * for the consumer to mutate. The narrow return type `readonly E["kind"][]`
+ * is preserved so callers don't get back a plain `string[]`.
+ *
+ * @returns an array of variant discriminants; empty if no failures registered.
+ */
+export function list_failure_variants<E extends { kind: string }>(
+	brand: ArbBrand<E>
+): readonly E["kind"][] {
+	const by_variant = failures.get(brand);
+	if (!by_variant) return [];
+	return Array.from(by_variant.keys()) as E["kind"][];
+}
+
+/**
+ * Reset all three registries to fresh empty maps AND clear the auto-load
+ * promise, so the next `lookup` / `lookup_failure` re-walks vended
+ * registrars. Test-only helper — the leading `__` is the convention for
+ * "do not call from production code".
  */
 export function __reset_registry_for_tests(): void {
 	brand_arbs = new Map<symbol, Arbitrary<unknown>>();
 	schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
 	failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
+	__reset_auto_load_for_tests();
 }
 
 ```
@@ -12264,7 +14515,7 @@ export function __reset_registry_for_tests(): void {
  * ```ts
  * const USER_ID_BRAND = Symbol("UserId") as ArbBrand<UserId>
  * testing.arbitrary(USER_ID_BRAND, fc.uuid())
- * const arb = testing.lookup(USER_ID_BRAND) // fc.Arbitrary<UserId> | undefined
+ * const arb = await testing.lookup(USER_ID_BRAND) // fc.Arbitrary<UserId> | undefined
  * ```
  */
 export type ArbBrand<T> = symbol & { readonly __arb_type?: (x: T) => void };
@@ -12279,6 +14530,387 @@ export type ArbBrand<T> = symbol & { readonly __arb_type?: (x: T) => void };
  * ```
  */
 export type FailureKey<E extends { kind: string }> = E["kind"];
+
+```
+
+---
+
+### testing/vending/auto-load.ts
+
+```typescript
+/**
+ * @module testing/vending/auto-load
+ * @description At-most-once auto-loading of vended registrars, triggered by
+ * the registry's async accessors (`lookup` / `lookup_failure`).
+ *
+ * The first accessor call kicks off one walk (see `./walker.js`); concurrent
+ * callers share the same in-flight promise, and later callers see the settled
+ * one. `__reset_registry_for_tests()` clears the promise alongside the
+ * registry maps, so the next accessor call re-walks against fresh state.
+ *
+ * Auto-load never throws and never fails a lookup: discovery errors and
+ * per-registrar load failures degrade to a `console.warn` with a pointer at
+ * the explicit escape hatch ({@link load_from}). A broken registrar in one
+ * dependency must not take down every property test in the consumer's suite.
+ *
+ * The walker is imported dynamically so this module (which sits on the
+ * registry's static import path, and therefore on `@f0rbit/corpus`'s main
+ * barrel) never pulls `node:fs` / `node:path` into graphs that run on
+ * workerd. Synchronous registry paths — `arb(schema)` and `compose` — do NOT
+ * touch this module and never trigger auto-load.
+ */
+
+import type { Result } from "../../types.js";
+import type { DiscoveryError } from "./walker.js";
+
+let auto_load_promise: Promise<void> | null = null;
+let auto_load_cwd: string | null = null;
+
+/**
+ * Ensure vended registrars have been discovered and loaded. Idempotent per
+ * registry state: the walk runs at most once until the registry is reset, and
+ * concurrent callers share the same promise.
+ *
+ * Called by the registry's `lookup` / `lookup_failure` — consumers normally
+ * never call this directly.
+ */
+export function ensure_loaded(): Promise<void> {
+	auto_load_promise ??= run_auto_load();
+	return auto_load_promise;
+}
+
+async function run_auto_load(): Promise<void> {
+	const walker = await import("./walker.js");
+	const discovered = await walker.discover_registrars(auto_load_cwd === null ? undefined : { cwd: auto_load_cwd });
+	if (!discovered.ok) {
+		console.warn(
+			`[corpus/testing] auto-load: registrar discovery failed (${describe_discovery_error(discovered.error)}). ` +
+				`Vended arbitraries are unavailable — fix the manifest or load one explicitly via testing.load_from(<package-or-dir>).`,
+		);
+		return;
+	}
+	const outcome = await walker.load_registrars(discovered.value);
+	if (!outcome.ok) return;
+	for (const failure of outcome.value.failed) {
+		console.warn(
+			`[corpus/testing] auto-load: registrar for '${failure.package}' failed to load: ${failure.cause.message}. ` +
+				`Fix that package's "corpus": { "testing": ... } entry, or load a corrected registrar via testing.load_from(...).`,
+		);
+	}
+}
+
+/**
+ * Explicitly load one package's registrar by npm package name or directory
+ * path — the escape hatch when auto-discovery can't see the package (not a
+ * direct dependency, fixture trees, monorepo siblings) or when a test wants
+ * deterministic control over which registrar populates the registry.
+ *
+ * Additive: does not mark auto-load as done, so a later `lookup` still walks
+ * the dependency graph as usual.
+ *
+ * @example
+ * ```ts
+ * import { testing } from "@f0rbit/corpus"
+ *
+ * const loaded = await testing.load_from("/path/to/fixture-package")
+ * if (loaded.ok) {
+ *   const arb = await testing.lookup(AUTH_TOKEN_BRAND)
+ * }
+ * ```
+ */
+export async function load_from(
+	package_name_or_dir: string,
+): Promise<Result<{ loaded: string[]; failed: Array<{ package: string; cause: Error }> }, DiscoveryError>> {
+	const walker = await import("./walker.js");
+	return walker.load_one(package_name_or_dir);
+}
+
+/**
+ * Clear the cached auto-load promise so the next registry access re-walks.
+ * Invoked by `__reset_registry_for_tests()` — not part of the public surface.
+ */
+export function __reset_auto_load_for_tests(): void {
+	auto_load_promise = null;
+}
+
+/**
+ * Override the directory auto-load walks from (defaults to `process.cwd()`).
+ * Test-only seam — lets the suite point auto-load at a fixture tree instead
+ * of the real repository. Pass `null` to restore the default.
+ */
+export function __set_auto_load_cwd_for_tests(cwd: string | null): void {
+	auto_load_cwd = cwd;
+}
+
+function describe_discovery_error(error: DiscoveryError): string {
+	switch (error.kind) {
+		case "package_json_unreadable":
+			return `could not read ${error.path}: ${error.cause.message}`;
+		case "package_json_malformed":
+			return `could not parse ${error.path}: ${error.cause.message}`;
+		case "package_unresolvable":
+			return `could not resolve package '${error.package}': ${error.cause.message}`;
+		case "no_registrar":
+			return `${error.path} declares no "corpus": { "testing": ... } entry`;
+	}
+}
+
+```
+
+---
+
+### testing/vending/walker.ts
+
+```typescript
+/**
+ * @module testing/vending/walker
+ * @description Vending-protocol walker: discovers and loads testing registrars
+ * declared by a package and its DIRECT dependencies via the
+ * `"corpus": { "testing": "./path/to/register.js" }` package.json key.
+ *
+ * Discovery reads `{cwd}/package.json`, includes the cwd package itself (so a
+ * consumer's own registrar auto-loads alongside its dependencies'), then
+ * resolves each direct dependency (dependencies + devDependencies +
+ * peerDependencies) and follows its `corpus.testing` key when present.
+ *
+ * **No transitive walk — deliberate.** Only direct deps are inspected. A
+ * transitive dependency's arbitraries are an implementation detail of the
+ * direct dep that owns it; if the direct dep wants them vended it re-registers
+ * them in its own registrar. Walking the full graph would (a) make
+ * registration order — and therefore overwrite warnings — dependent on the
+ * package manager's hoisting layout, and (b) execute registrar code from
+ * packages the consumer never directly chose to trust.
+ *
+ * The walker NEVER throws: discovery-level problems (unreadable / malformed
+ * cwd package.json) surface as `Result.err(DiscoveryError)`; per-registrar
+ * import problems surface as `failed` entries from {@link load_registrars}.
+ *
+ * Resolution strategy: `import.meta.resolve(dep + "/package.json")` first —
+ * this handles hoisted / flat / linked installs from wherever corpus itself
+ * is installed. Two portability notes: Bun returns a string synchronously
+ * while older resolver shims return a Promise (both shapes are handled), and
+ * packages whose `exports` map omits `"./package.json"` make the resolver
+ * throw — for those (and for fixture trees that aren't real installs) we fall
+ * back to `{cwd}/node_modules/{dep}/package.json`.
+ */
+
+import { access, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { z } from "zod";
+import { try_catch, try_catch_async } from "../../result.js";
+import { err, ok, type Result } from "../../types.js";
+
+/**
+ * The name of the package that ships this walker. When the cwd package IS
+ * corpus itself (a dev checkout running its own suite from source), the self
+ * registrar in package.json points at `./dist/testing/register.js` — a build
+ * artifact of the very source that's currently running. Loading it would
+ * double-register through a parallel module graph (dist has its own registry
+ * instance) and make `bun test` behave differently depending on whether a
+ * stale `dist/` exists. The dev checkout registers itself from source
+ * explicitly (see `testing/register.ts`), so the walker skips it.
+ */
+const SELF_PACKAGE_NAME = "@f0rbit/corpus";
+
+/**
+ * A discovered registrar: which package vends it, the file-URL of the module
+ * to import, and whether it came from the cwd package itself or a dependency.
+ */
+export type RegistrarSpec = {
+	readonly package: string;
+	readonly registrar: string;
+	readonly origin: "self" | "dependency";
+};
+
+/**
+ * Discovery-level failures. Only the cwd package.json can fail discovery —
+ * dependency manifests that are missing, unreadable, or malformed are skipped
+ * (they simply didn't opt into vending); registrar files that fail to import
+ * surface later as `failed` entries from {@link load_registrars}.
+ */
+export type DiscoveryError =
+	| { kind: "package_json_unreadable"; path: string; cause: Error }
+	| { kind: "package_json_malformed"; path: string; cause: Error }
+	| { kind: "package_unresolvable"; package: string; cause: Error }
+	| { kind: "no_registrar"; path: string };
+
+const package_manifest = z
+	.object({
+		name: z.string().optional(),
+		dependencies: z.record(z.string()).optional(),
+		devDependencies: z.record(z.string()).optional(),
+		peerDependencies: z.record(z.string()).optional(),
+		corpus: z.object({ testing: z.string().optional() }).passthrough().optional(),
+	})
+	.passthrough();
+
+type PackageManifest = z.infer<typeof package_manifest>;
+
+type RegistrarModule = { register?: (() => void | Promise<void>) | undefined };
+
+const to_error = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
+
+/**
+ * Discover the registrars vended by `{cwd}/package.json` and its direct
+ * dependencies. The cwd package's own registrar (when declared) comes first,
+ * followed by dependency registrars in declaration order.
+ *
+ * Self-registrar carve-outs (both silent, both deliberate):
+ * - the cwd package is corpus itself → skipped (see {@link SELF_PACKAGE_NAME});
+ * - the declared registrar file doesn't exist → skipped. Manifests usually
+ *   point at build output (`./dist/...`); a dev checkout running from source
+ *   registers itself explicitly, and warning on every test run would be noise.
+ *   A DEPENDENCY with a missing registrar file is NOT skipped — installed
+ *   artifacts declaring a registrar that isn't there is a packaging bug, so it
+ *   surfaces as a `failed` entry from {@link load_registrars}.
+ *
+ * @example
+ * ```ts
+ * const discovered = await discover_registrars()
+ * if (discovered.ok) {
+ *   const outcome = await load_registrars(discovered.value)
+ * }
+ * ```
+ */
+export async function discover_registrars(opts?: { cwd?: string }): Promise<Result<RegistrarSpec[], DiscoveryError>> {
+	const cwd = resolve(opts?.cwd ?? process.cwd());
+	const manifest = await read_manifest(join(cwd, "package.json"));
+	if (!manifest.ok) return manifest;
+
+	const specs: RegistrarSpec[] = [];
+	const self = await self_spec(manifest.value, cwd);
+	if (self) specs.push(self);
+
+	for (const dep of direct_deps(manifest.value)) {
+		const spec = await dependency_spec(dep, cwd);
+		if (spec) specs.push(spec);
+	}
+	return ok(specs);
+}
+
+/**
+ * Dynamic-import each spec and invoke its exported `register()` when present.
+ * Modules without a `register` export are assumed to register via import
+ * side-effects (an exported `register()` is preferred — it keeps the module
+ * import-safe, so consumers can import brand symbols without registering).
+ *
+ * Per-spec errors (missing file, throwing registrar) are collected into
+ * `failed` — one broken registrar never blocks the others. Specs load
+ * sequentially so registration order (and any overwrite warnings) stays
+ * deterministic: self first, then dependencies in declaration order.
+ */
+export async function load_registrars(
+	specs: readonly RegistrarSpec[],
+): Promise<Result<{ loaded: string[]; failed: Array<{ package: string; cause: Error }> }, never>> {
+	const loaded: string[] = [];
+	const failed: Array<{ package: string; cause: Error }> = [];
+	for (const spec of specs) {
+		const attempt = await try_catch_async(async () => {
+			const mod = (await import(spec.registrar)) as RegistrarModule;
+			if (typeof mod.register === "function") await mod.register();
+		}, to_error);
+		if (attempt.ok) loaded.push(spec.package);
+		else failed.push({ package: spec.package, cause: attempt.error });
+	}
+	return ok({ loaded, failed });
+}
+
+/**
+ * Load a single package's registrar by name or directory — the explicit
+ * escape hatch behind `testing.load_from(...)`. Unlike auto-discovery this
+ * applies NO self carve-outs: an explicit call means the caller wants THIS
+ * registrar, so a missing file surfaces as a `failed` entry.
+ */
+export async function load_one(
+	target: string,
+): Promise<Result<{ loaded: string[]; failed: Array<{ package: string; cause: Error }> }, DiscoveryError>> {
+	const dir = await target_dir(target);
+	if (!dir.ok) return dir;
+
+	const manifest_path = join(dir.value, "package.json");
+	const manifest = await read_manifest(manifest_path);
+	if (!manifest.ok) return manifest;
+
+	const rel = manifest.value.corpus?.testing;
+	if (!rel) return err({ kind: "no_registrar", path: manifest_path });
+
+	const spec: RegistrarSpec = {
+		package: manifest.value.name ?? dir.value,
+		registrar: pathToFileURL(resolve(dir.value, rel)).href,
+		origin: "self",
+	};
+	return load_registrars([spec]);
+}
+
+async function self_spec(manifest: PackageManifest, dir: string): Promise<RegistrarSpec | null> {
+	const rel = manifest.corpus?.testing;
+	if (!rel) return null;
+	if (manifest.name === SELF_PACKAGE_NAME) return null;
+	const abs = resolve(dir, rel);
+	const exists = await try_catch_async(() => access(abs), to_error);
+	if (!exists.ok) return null;
+	return { package: manifest.name ?? dir, registrar: pathToFileURL(abs).href, origin: "self" };
+}
+
+async function dependency_spec(dep: string, cwd: string): Promise<RegistrarSpec | null> {
+	const manifest_path = await resolve_dep_manifest(dep, cwd);
+	if (!manifest_path) return null;
+	const manifest = await read_manifest(manifest_path);
+	if (!manifest.ok) return null;
+	const rel = manifest.value.corpus?.testing;
+	if (!rel) return null;
+	const abs = resolve(dirname(manifest_path), rel);
+	return { package: manifest.value.name ?? dep, registrar: pathToFileURL(abs).href, origin: "dependency" };
+}
+
+async function resolve_dep_manifest(dep: string, cwd: string): Promise<string | null> {
+	const via_resolver = await try_catch_async(async () => {
+		const resolved: string | Promise<string> = import.meta.resolve(`${dep}/package.json`);
+		return typeof resolved === "string" ? resolved : await resolved;
+	}, to_error);
+	if (via_resolver.ok) return to_path(via_resolver.value);
+
+	const fallback = join(cwd, "node_modules", dep, "package.json");
+	const exists = await try_catch_async(() => access(fallback), to_error);
+	return exists.ok ? fallback : null;
+}
+
+async function target_dir(target: string): Promise<Result<string, DiscoveryError>> {
+	if (isAbsolute(target) || target.startsWith(".")) return ok(resolve(target));
+	const manifest_path = await try_catch_async(async () => {
+		const resolved: string | Promise<string> = import.meta.resolve(`${target}/package.json`);
+		return typeof resolved === "string" ? resolved : await resolved;
+	}, to_error);
+	if (!manifest_path.ok) return err({ kind: "package_unresolvable", package: target, cause: manifest_path.error });
+	return ok(dirname(to_path(manifest_path.value)));
+}
+
+async function read_manifest(path: string): Promise<Result<PackageManifest, DiscoveryError>> {
+	const raw = await try_catch_async(() => readFile(path, "utf8"), to_error);
+	if (!raw.ok) return err({ kind: "package_json_unreadable", path, cause: raw.error });
+
+	const parsed = try_catch((): unknown => JSON.parse(raw.value), to_error);
+	if (!parsed.ok) return err({ kind: "package_json_malformed", path, cause: parsed.error });
+
+	const checked = package_manifest.safeParse(parsed.value);
+	if (!checked.success) return err({ kind: "package_json_malformed", path, cause: checked.error });
+	return ok(checked.data);
+}
+
+function direct_deps(manifest: PackageManifest): string[] {
+	return [
+		...new Set([
+			...Object.keys(manifest.dependencies ?? {}),
+			...Object.keys(manifest.devDependencies ?? {}),
+			...Object.keys(manifest.peerDependencies ?? {}),
+		]),
+	];
+}
+
+function to_path(resolved: string): string {
+	return resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved;
+}
 
 ```
 

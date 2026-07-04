@@ -1,0 +1,101 @@
+---
+title: Testing Substrate
+description: Property-based testing framework for corpus with arbitraries, laws, and vending.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Property-based testing lets you verify laws your code must obey — round-trip serialization, idempotence, error handling exhaustiveness — by generating arbitrary inputs and checking they all satisfy your assertion. Corpus ships a property-testing substrate built on [fast-check](https://github.com/dubzzz/fast-check) with domain-specific helpers for your data types.
+
+## Why Property-Based Testing?
+
+Traditional example-based tests check a few handpicked cases. Property tests generate hundreds of random cases and shrink failing inputs to a minimal reproduction. This catches edge cases you wouldn't think to write by hand.
+
+```typescript
+// Example-based: you pick specific cases
+test("round-trip encodes and decodes", () => {
+  const text = "hello";
+  const encoded = text_codec.encode(text);
+  const decoded = text_codec.decode(encoded);
+  expect(decoded).toBe(text);
+});
+
+// Property-based: fast-check generates cases for you
+import { testing } from "@f0rbit/corpus";
+
+test("round-trip works for all strings", async () => {
+  await testing.law.round_trip(
+    fc.string(),
+    text_codec.encode,
+    text_codec.decode
+  );
+});
+```
+
+## The Substrate: Arbitraries, Laws, and Registry
+
+Corpus provides four layers:
+
+1. **Arbitraries** — Generators that produce test data matching your types.
+   - Use `testing.arb(schema)` to derive a generator from any Zod schema.
+   - Or `testing.compose(draw => ...)` for dependent generation (later values depend on earlier ones).
+
+2. **Laws** — Pre-built property checkers for common patterns.
+   - `law.round_trip` — serialization round-trips correctly.
+   - `law.idempotent` — applying a function twice gives the same result as once.
+   - `law.functor` — a function respects the functor structure.
+   - `law.error_path_exhaustive` — every error variant the function can return is tested.
+   - `law.provider_equivalence` — multiple implementations behave the same way.
+
+3. **Registry** — Canonical arbitraries for your domain types, auto-loaded from dependencies.
+   - Register a type once with `testing.arbitrary(brand, gen)`.
+   - Every test using that brand gets the same generator.
+   - Dependencies vend arbitraries via `package.json` and are auto-discovered.
+
+4. **Vending** — How packages share test generators with each other.
+   - Each package declares `"corpus": { "testing": "./path/to/register.js" }` in `package.json`.
+   - That file exports a `register()` function that calls `testing.arbitrary(...)` and `testing.failure(...)`.
+   - The first call to `testing.lookup(...)` auto-loads all registered generators.
+
+<Aside type="tip">
+  You don't need to learn all of this at once. Start with `testing.law.round_trip` + `testing.arb(schema)` for a single test file, then graduate to the registry and laws as your test suite grows.
+</Aside>
+
+## Import Paths
+
+The testing substrate is exposed under two paths — pick whichever fits your use:
+
+```typescript
+// Direct entry point (preferred in hot-path tests — skips main barrel)
+import * as testing from "@f0rbit/corpus/testing";
+
+// Or via the main barrel (only one import for everything)
+import { testing } from "@f0rbit/corpus";
+
+// Both resolve to the same API
+const arb = testing.arb(MySchema);
+const result = await testing.law.round_trip(arb, encode, decode);
+```
+
+The second path (`import { testing }`) is the main barrel and pulls in the full @f0rbit/corpus API, which you might not need in a test file. The first path (`import * as testing`) is a direct entry point and skips the main barrel's transitive imports.
+
+<Aside>
+  **Note:** Corpus is the only place fast-check is configured in your project. Always import fast-check through the testing substrate — consumers must never do `import fc from "fast-check"` directly. The re-export `testing.fc` is a convenience so you don't need a separate import.
+</Aside>
+
+## What's Inside
+
+- **`testing.arb(schema)`** — Derive a fast-check `Arbitrary` from a Zod schema.
+- **`testing.compose(draw => ...)`** — Build dependent generators with inline draws.
+- **`testing.arbitrary(brand, gen)` / `testing.lookup(brand)`** — Register and look up canonicals.
+- **`testing.failure(brand, kind, gen)` / `testing.lookup_failure(brand, kind)`** — Register error variants.
+- **`testing.law.*`** — Five pre-built laws: `round_trip`, `idempotent`, `functor`, `error_path_exhaustive`, `provider_equivalence`.
+- **`testing.cover(...)`** — Hedgehog-style coverage assertions (label parts of your test space and assert they got exercised).
+- **`testing.load_from(dir)` / `testing.__reset_registry_for_tests()`** — Explicit control for test setup.
+- **`testing.fc`** — fast-check re-exported (same as `import fc from "fast-check"`).
+
+## Next Steps
+
+- **[Arbitraries](./arbitraries.mdx)** — How to generate test data from schemas and register canonicals.
+- **[Laws](./laws.mdx)** — Five pre-built property checkers with examples.
+- **[Vending](./vending.mdx)** — How to share arbitraries across packages via the registry.
