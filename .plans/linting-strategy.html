@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Plan: Linting Strategy — moved to f0rbit/lint</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+      }
+      html, body {
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 2rem;
+      }
+      main {
+        max-width: 700px;
+        margin: 4rem auto;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem 2rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.3em;
+      }
+      code {
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 0.9em;
+        background: var(--bg);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      a { color: var(--accent); }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Moved: this plan now lives in the lint monorepo</h1>
+      <p>The linting-strategy plan was completed after the user's decision and relocated to its implementation repo:</p>
+      <p><strong><a href="file:///Users/tom/dev/lint/.plans/linting-strategy.html"><code>~/dev/lint/.plans/linting-strategy.html</code></a></strong> (repo <a href="https://github.com/f0rbit/lint">f0rbit/lint</a>)</p>
+      <p><strong>Decision outcome (2026-07-04):</strong> Option 2 — hybrid oxlint fast gate + thin typed ESLint layer — with <strong>oxfmt as the formatter everywhere (hard requirement, alpha risk accepted)</strong>. Chosen over Option 4 because only an ESLint layer can host the custom type-aware <code>must-use-result</code> rule over the corpus <code>Result&lt;T,E&gt;</code> shape. All configs live in the new <code>@f0rbit/lint</code> monorepo; corpus is the phase-3 pilot (lint gate, oxfmt normalization + <code>.git-blame-ignore-revs</code>, AGENTS.md updates including replacing the "match the file you're editing" indentation rule).</p>
+      <p class="muted">This tombstone is kept so old links to <code>corpus/.plans/linting-strategy.html</code> don't dead-end. The original decision-stop content (root cause, convention→enforcement matrix, market research, four scored alternatives) is preserved in full inside the relocated plan.</p>
+    </main>
+  </body>
+</html>

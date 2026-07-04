@@ -1,0 +1,4 @@
+[install]
+# @f0rbit/lint's umbrella model needs transitive bins (oxlint, oxfmt, eslint)
+# surfaced in node_modules/.bin — bun's isolated linker breaks that.
+linker = "hoisted"

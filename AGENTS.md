@@ -65,11 +65,15 @@ bun run build             # tsc -p tsconfig.build.json → dist/
 bun run docs:dev          # Astro dev server for docs
 bun run docs:build        # Regenerates llms.txt then builds the docs site
 bun run build:llm         # Regenerate docs/public/llms{,-full}.txt only
+bun run lint              # oxlint . && eslint . (@f0rbit/lint toolchain)
+bun run lint:fix          # auto-fixable subset of the above
+bun run fmt               # oxfmt .
+bun run fmt:check         # oxfmt --check .
 ```
 
-There is no separate lint step — typecheck + tests are the gate.
+Typecheck + tests are the CI gate. Lint/format are wired (`@f0rbit/lint`, exact-pinned) but NOT yet gating — the violation baseline is being burned down first; do not add lint to CI until that lands. Lint exceptions live as `files`-scoped overrides in `eslint.config.ts` (never inline `eslint-disable`): `concurrency.ts` (Semaphore class), `corpus.ts`/`result.ts`/`testing/**` (documented intentional throws; `result.ts` also hosts the sanctioned try/catch → Result boundary), `tests/**` (functional rules + `must-use-result` relaxed). `.oxfmtrc.json` must stay a byte-copy of the canonical `@f0rbit/oxfmt-config` copy (`f0rbit-lint check` enforces); repo-specific format ignores go in `.prettierignore` — which excludes ALL of `tests/fixtures/` because fixture trees are byte-exact walker test data and one `package.json` is deliberately malformed. `bunfig.toml` pins `linker = "hoisted"` (the umbrella's transitive bins need it — don't remove).
 
-PRs on this repo merge with **merge commits only** — squash and rebase merges are disabled.
+PRs on this repo merge with **squash only** — merge commits and rebase merges are disabled (settings flipped 2026-07-04; history before 0.7.0 predates this). The PR title becomes the squash commit title, so PR titles follow git-workflow commit rules: no "phase"/"task"/plan identifiers, describe the change itself.
 
 ## Conventions
 
