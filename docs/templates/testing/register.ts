@@ -20,12 +20,12 @@
  * the branded symbols below for identity without triggering registrations.
  */
 
-import fc from "fast-check";
-import { z } from "zod";
-import { compose } from "@f0rbit/corpus/testing";
-import { failure } from "@f0rbit/corpus/testing";
-import { arbitrary } from "@f0rbit/corpus/testing";
+// fc comes through the substrate — never `import fc from "fast-check"`
+// directly. Corpus is the only place fast-check is configured, so every
+// package draws from the same version and settings.
+import { arbitrary, compose, failure, fc } from "@f0rbit/corpus/testing";
 import type { ArbBrand } from "@f0rbit/corpus/testing";
+import { z } from "zod";
 
 // ============================================================================
 // Move 1: Declare branded symbols for your domain types
@@ -80,6 +80,22 @@ const your_type_arb: fc.Arbitrary<YOUR_TYPE> = fc
 //   return { field1, field2 } as YOUR_TYPE;
 // });
 
+/**
+ * Ad-hoc shapes without a long-lived brand can be keyed by Zod schema
+ * INSTANCE instead. Why: the registry stores schema keys in a WeakMap, so
+ * the entry is GC'd with the schema — no brand bookkeeping for one-off
+ * shapes, and `testing.arb(YOUR_SCHEMA)` picks up the registered generator.
+ */
+export const YOUR_SCHEMA = z.object({
+	id: z.string().uuid(),
+	count: z.number().int(),
+});
+
+const your_schema_arb = fc.record({
+	id: fc.uuid(),
+	count: fc.integer({ min: 0, max: 100 }),
+});
+
 // ============================================================================
 // Move 3: Register the arbitrary and error failure cases
 // ============================================================================
@@ -92,6 +108,9 @@ const your_type_arb: fc.Arbitrary<YOUR_TYPE> = fc
 export function register(): void {
 	// Register the main arbitrary for YOUR_TYPE.
 	arbitrary(YOUR_TYPE_BRAND, your_type_arb);
+
+	// Register the schema-keyed arbitrary for YOUR_SCHEMA.
+	arbitrary(YOUR_SCHEMA, your_schema_arb);
 
 	// Register error failure cases. For each variant in YOUR_ERROR, call
 	// failure() with a compose() generator. Why: error-path laws (property

@@ -21,42 +21,46 @@ Each package declares where its test generators live:
 }
 ```
 
-The `"corpus": { "testing": ... }` path points to a JavaScript file that runs at import time and registers arbitraries via `testing.arbitrary()` and `testing.failure()`.
+The `"corpus": { "testing": ... }` path points to a module — the **registrar**. The auto-loader imports it and calls its exported `register()` function, which populates the registry via `testing.arbitrary()` and `testing.failure()`.
 
 ## Writing a Registrar
 
-A registrar module exports side-effects: it imports the testing substrate and registers generators.
+A registrar is **import-safe**: nothing registers at module load. All registration happens inside an exported `register()` function, so downstream code can import your brand symbols for identity without touching the registry.
 
 ```typescript
 // src/testing/register.ts
-import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
 import type { ArbBrand } from "@f0rbit/corpus/testing";
 import type { AuthToken, AuthError } from "../types.js";
-import { fc } from "@f0rbit/corpus";
 
-// Brand for your domain type
+// Brands for your domain types — export them so downstream tests can look them up
 export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
+export const AUTH_ERROR_BRAND = Symbol("AuthError") as ArbBrand<AuthError>;
 
-// Side-effects: register when this module loads
-testing.arbitrary(
-  AUTH_TOKEN_BRAND,
-  fc.uuid().map(id => ({ id, secret: fc.string().generate() }))
-);
+// Called by the auto-loader (or explicitly via testing.load_from)
+export function register(): void {
+  arbitrary(
+    AUTH_TOKEN_BRAND,
+    compose((draw) => ({
+      id: draw(fc.uuid()),
+      secret: draw(fc.stringMatching(/^[a-f0-9]{32}$/)),
+    }))
+  );
 
-testing.failure(
-  CORPUS_ERROR_BRAND,
-  "auth_error",
-  testing.compose((draw) => ({
-    kind: "auth_error" as const,
-    message: draw(fc.string()),
-  }))
-);
-
-// Optional export (only needed if you want explicit control)
-export async function register() {
-  // Re-register if needed, but the side-effects above already ran
+  failure(
+    AUTH_ERROR_BRAND,
+    "invalid_credential",
+    compose((draw) => ({
+      kind: "invalid_credential" as const,
+      reason: draw(fc.string()),
+    }))
+  );
 }
 ```
+
+<Aside type="note">
+  A registrar without a `register()` export is also loaded — the walker then assumes registration happened via import side-effects. The explicit export is the convention: it keeps the module import-safe, which is why corpus's own registrar and the [scaffolder template](https://github.com/f0rbit/corpus/blob/main/docs/templates/testing/register.ts) both use it.
+</Aside>
 
 Then compile to JavaScript:
 
@@ -89,7 +93,7 @@ const result = await testing.lookup(USER_ID_BRAND);
 // ↓ First call triggers auto-load
 // ↓ Discovers "corpus" keys in all direct dependencies' package.json
 // ↓ Imports each registrar module
-// ↓ Runs side-effects (testing.arbitrary, testing.failure calls)
+// ↓ Calls each registrar's exported register()
 // ↓ Returns the registered arbitrary
 ```
 
@@ -122,7 +126,7 @@ Explicit loads are **additive** — they don't stop auto-discovery. A later `loo
 
 The auto-loader discovers:
 
-1. **Direct dependencies** — packages in your `package.json` `dependencies` and `devDependencies`
+1. **Direct dependencies** — packages in your `package.json` `dependencies`, `devDependencies`, and `peerDependencies`
 2. **The current package** — your own `"corpus": { "testing": ... }` entry, if present
 
 It does NOT discover transitive dependencies (your dependencies' dependencies). Instead, each package's registrar can register on behalf of its own deps, so arbitraries propagate upward naturally.
@@ -165,26 +169,14 @@ beforeEach(async () => {
 
 ## Dev Checkout Safety
 
-If a dependency is installed from a local checkout (e.g., `file:../local/package` in package.json), the registrar is loaded from its **`src/`** directory (uncompiled TypeScript), not `dist/`. This requires:
+The walker loads exactly the path the `"corpus": { "testing": ... }` key declares — there's no automatic `src/` vs `dist/` switching. Two deliberate carve-outs keep dev checkouts sane:
 
-1. The local package has bun/esbuild installed and can resolve TypeScript imports
-2. The registrar path in package.json uses `.ts` during development
+1. **Missing self-registrar file → silently skipped.** Manifests usually point at build output (`./dist/...`). In a dev checkout of your own package that hasn't been built, the declared file doesn't exist — the walker skips it rather than warning on every test run. Register from source explicitly in your own suite (import your `register.ts` directly, or use `testing.load_from`). A *dependency* with a missing registrar file is NOT skipped — that's a packaging bug, and it surfaces as a load failure.
 
-Example setup:
-
-```json
-{
-  "name": "@my/library",
-  "corpus": {
-    "testing": "./src/testing/register.ts"
-  }
-}
-```
-
-When someone installs from a local checkout, the registrar loads from `./src/testing/register.ts` directly. When published to npm, package.json is updated to point at `./dist/...`.
+2. **The corpus checkout itself is always skipped.** When the cwd package IS `@f0rbit/corpus`, loading `./dist/testing/register.js` would double-register through a parallel module graph (dist has its own registry instance). Corpus's own suite imports `testing/register.ts` from source instead.
 
 <Aside type="note">
-  Corpus handles the path resolution automatically — no special configuration needed. Just point at the source file in development, and publish with the compiled path.
+  Under bun, a `.ts` registrar path works in development. Published packages must point at compiled `.js` — consumers may not run a TypeScript-aware loader.
 </Aside>
 
 ## Troubleshooting
@@ -201,8 +193,8 @@ Fix that package's "corpus": { "testing": ... } entry, or load a corrected regis
 Check:
 
 1. **The path exists** — Does the file at `"corpus": { "testing": ... }` exist?
-2. **It exports a `register()` function** (optional — side-effects are enough) or runs side-effects on import
-3. **It doesn't throw on import** — If it does, provide an explicit `try/catch` in the registrar
+2. **It exports a `register()` function** — the walker calls it when present; a module without one is assumed to register via import side-effects (supported, but not the convention)
+3. **It doesn't throw on import** — module-level code runs before `register()` is called
 4. **No circular imports** — The registrar shouldn't import the test suite
 
 As a workaround, use `testing.__reset_registry_for_tests()` + `testing.load_from()` to load a corrected version manually.
@@ -226,7 +218,7 @@ The first `lookup()` call walks the dependency graph and imports each registrar.
 ## Best Practices
 
 1. **One registrar per package** — All arbitraries for a package go in one `register.ts` file
-2. **Keep it side-effect heavy** — The module runs on import; registration should happen at the top level
+2. **Keep imports side-effect-free** — Do all registration inside the exported `register()`; the module itself should be safe to import for its brand symbols alone
 3. **Export the brands** — Let downstream packages import your `AUTH_TOKEN_BRAND` and use it with `lookup()`
 4. **Avoid transitive dependencies** — If your registrar imports your domain code, don't import test utilities that aren't in the published package
 5. **Test the registrar** — Add a smoke test that calls `testing.load_from()` and verifies a known brand is registered
@@ -237,49 +229,43 @@ Here's a full example from a hypothetical `@my/auth` package:
 
 ```typescript
 // src/testing/register.ts
-import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
 import type { ArbBrand } from "@f0rbit/corpus/testing";
-import type { AuthToken, Session, InvalidCredential } from "../types.js";
-import { fc } from "@f0rbit/corpus";
+import type { AuthToken, Session, AuthError } from "../types.js";
 
 export const AUTH_TOKEN_BRAND = Symbol("AuthToken") as ArbBrand<AuthToken>;
 export const SESSION_BRAND = Symbol("Session") as ArbBrand<Session>;
+export const AUTH_ERROR_BRAND = Symbol("AuthError") as ArbBrand<AuthError>;
 
-// AuthToken arbitrary
-testing.arbitrary(
-  AUTH_TOKEN_BRAND,
-  testing.compose((draw) => ({
-    id: draw(fc.uuid()),
-    secret: draw(fc.hexaString({ minLength: 32, maxLength: 32 })),
-    expires_at: draw(testing.fc.date()),
-  }))
-);
+// Arbitraries defined at module level are fine — REGISTRATION is what
+// must wait for register(). Reuse token_arb inside session_arb directly
+// (lookup() is async and can't be drawn inside compose).
+const token_arb = compose((draw): AuthToken => ({
+  id: draw(fc.uuid()),
+  secret: draw(fc.stringMatching(/^[a-f0-9]{32}$/)),
+  expires_at: draw(fc.date({ min: new Date("2020-01-01"), max: new Date("2030-01-01") })),
+}));
 
-// Session arbitrary
-testing.arbitrary(
-  SESSION_BRAND,
-  testing.compose((draw) => ({
-    token: draw(testing.lookup(AUTH_TOKEN_BRAND) || fc.constant(null)),
-    user_id: draw(fc.uuid()),
-    created_at: draw(fc.date()),
-  }))
-);
+const session_arb = compose((draw): Session => ({
+  token: draw(token_arb),
+  user_id: draw(fc.uuid()),
+  created_at: draw(fc.date({ min: new Date("2020-01-01"), max: new Date("2030-01-01") })),
+}));
 
-// Invalid credential error variant
-testing.failure(
-  CORPUS_ERROR_BRAND,
-  "invalid_credential",
-  testing.compose((draw) => ({
-    kind: "invalid_credential" as const,
-    field: draw(fc.constantFrom("email", "password")),
-    reason: draw(fc.string()),
-  }))
-);
+export function register(): void {
+  arbitrary(AUTH_TOKEN_BRAND, token_arb);
+  arbitrary(SESSION_BRAND, session_arb);
 
-// Optional export for explicit control
-export async function register() {
-  // Side-effects above already ran, but this function exists
-  // in case the loader wants to verify or trigger re-registration
+  // One failure generator per error variant your package's error union carries
+  failure(
+    AUTH_ERROR_BRAND,
+    "invalid_credential",
+    compose((draw) => ({
+      kind: "invalid_credential" as const,
+      field: draw(fc.constantFrom("email", "password")),
+      reason: draw(fc.string()),
+    }))
+  );
 }
 ```
 

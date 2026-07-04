@@ -162,22 +162,27 @@ The registry uses two key spaces:
 When testing error paths (see the `error_path_exhaustive` law), you need generators that produce specific error variants. Register failure generators the same way:
 
 ```typescript
-const CORPUS_ERROR_BRAND = Symbol("CorpusError") as ArbBrand<CorpusError>;
+// Import the canonical brand — never mint your own Symbol for CorpusError
+import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing";
 
 // Register a generator for the "not_found" variant
 testing.failure(
   CORPUS_ERROR_BRAND,
   "not_found",
   testing.compose((draw) => ({
-    kind: "not_found",
-    store_id: draw(testing.arb(StoreIdSchema)),
-    version: draw(testing.fc.integer()),
+    kind: "not_found" as const,
+    store_id: draw(testing.fc.string({ minLength: 1 })),
+    version: draw(testing.fc.string({ minLength: 1 })),
   }))
 );
 
 // Look it up
 const gen = await testing.lookup_failure(CORPUS_ERROR_BRAND, "not_found");
 ```
+
+<Aside type="caution">
+  `CORPUS_ERROR_BRAND` is the canonical brand for `CorpusError` — corpus registers generators for all its variants, and downstream packages add failure cases against the same imported symbol. Minting your own `Symbol("CorpusError")` creates a parallel registry entry nothing else can see. Your own package's error union gets its own brand.
+</Aside>
 
 ## Handling Unsupported Schemas
 

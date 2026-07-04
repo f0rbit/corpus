@@ -21,11 +21,11 @@ test("round-trip encodes and decodes", () => {
 });
 
 // Property-based: fast-check generates cases for you
-import { testing } from "@f0rbit/corpus";
+import { testing, text_codec } from "@f0rbit/corpus";
 
 test("round-trip works for all strings", async () => {
   await testing.law.round_trip(
-    fc.string(),
+    testing.fc.string(),
     text_codec.encode,
     text_codec.decode
   );

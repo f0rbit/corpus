@@ -175,7 +175,7 @@
     <main>
       <header>
         <h1>Plan: corpus testing substrate</h1>
-        <span class="badge todo">todo</span>
+        <span class="badge done">done</span>
         <p>Ship a property-based testing substrate inside <code>@f0rbit/corpus</code> exposed as a single <code>testing</code> namespace. Hybrid deriver (hand-rolled walker over <code>@traversable/zod-test</code> as leaf), Hedgehog-style <code>cover</code> assertions, error-path-exhaustive runtime laws, model-based <code>provider_equivalence</code>, and a <code>package.json</code> entry-point vending protocol so downstream packages (vault, pulse, devpad-pipelines) contribute arbitraries that compose automatically. Phase 1 pilots the substrate against corpus's own backend-contract suite — the densest cross-backend equivalence target in the ecosystem.</p>
       </header>
 
@@ -1949,7 +1949,7 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
           <article class="task" id="task-5-1">
             <header>
               <h3>Task 5.1: Docs site MDX pages</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1993,14 +1993,19 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>353d07b</code> (merged via <code>de388ee</code>). Four MDX pages under <code>docs/src/content/docs/testing/</code>; Testing sidebar group in <code>docs/astro.config.mjs</code>; <code>docs:build</code> green — 32 pages; <code>llms.txt</code> lists all four testing pages.</li>
+                <li>Scoped-name grep clean: no unscoped <code>from "corpus...</code> imports in the new MDX.</li>
+                <li>Close-out fixes (task 5.4, release commit): snippets imported <code>CORPUS_ERROR_BRAND</code>/<code>fc</code> from the main barrel — they only exist in <code>@f0rbit/corpus/testing</code>; overview used bare <code>fc.string()</code> without an import; <code>arbitraries.mdx</code> minted its own <code>Symbol("CorpusError")</code> brand (the exact antipattern AGENTS.md forbids); <code>vending.mdx</code> taught side-effect-primary registration, used removed <code>fc.hexaString</code>, drew async <code>testing.lookup</code> inside <code>compose</code>, and its Dev Checkout section described <code>src/</code>-switching behaviour the walker doesn't have. All rewritten to match the walker's actual contract.</li>
+                <li>tsc-checked snippet: <code>vending.mdx</code> "Example: Complete Registrar", extracted to a scratch project with the repo's strict compiler flags (<code>strict</code>, <code>noUncheckedIndexedAccess</code>, <code>verbatimModuleSyntax</code>) and published-path imports path-mapped to source — <code>tsc --noEmit</code> exit 0.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-5-2">
             <header>
               <h3>Task 5.2: Scaffolder template stub</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -2042,14 +2047,19 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>4b71841</code> (merged via <code>dc8ce48</code>). Template at <code>docs/templates/testing/register.ts</code>; README pointer under "For package authors".</li>
+                <li>Not in dist: <code>tsconfig.build</code> excludes <code>docs/</code>; <code>find dist</code> shows no template output (only the unrelated <code>pipeline-template.*</code> store files match the word).</li>
+                <li>Close-out fixes (task 5.4, release commit): template imported <code>fc</code> from <code>"fast-check"</code> directly — violating the "downstream goes through <code>testing.*</code>" rule it exists to teach — now <code>import { arbitrary, compose, failure, fc } from "@f0rbit/corpus/testing"</code> with a why-comment; the unused <code>z</code> import was made real with a schema-keyed registration (WeakMap rationale), so AGENTS.md's claim that the template "demonstrates Zod schema usage" is now true.</li>
+                <li>Template tsc-checked clean (exit 0) via the same scratch harness as the 5.1 snippet; all three moves carry one-line whys (brand identity, shrinking via compose, provoking error variants reliably).</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-5-3">
             <header>
               <h3>Task 5.3: AGENTS.md coverage check</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -2090,14 +2100,17 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>e5b2c07</code> (merged via <code>969221a</code>). Grep gate: <code>grep -cE "testing\.|provider_equivalence|error_path_exhaustive|corpus\.testing" AGENTS.md</code> → 13 (≥ 8).</li>
+                <li>Registrar contract audited against <code>testing/vending/walker.ts</code> source: <code>load_registrars</code> calls an exported <code>register()</code> when present and otherwise assumes import side-effects (explicit export preferred/conventional). AGENTS.md's vending bullet amended in the release commit to state the fallback explicitly; <code>vending.mdx</code> was the outlier (taught side-effect-primary) and was rewritten; the 5.2 template and corpus's own registrar were already conformant.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-5-4">
             <header>
               <h3>Task 5.4: Verification — Phase 5 close-out + release prep</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -2144,7 +2157,13 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Gates on the merged branch (<code>feature/testing-substrate-phase-5</code>): <code>bun test</code> → 764 pass / 0 fail (4759 expects, 36 files, ~1.8s, no hangs); <code>bun run typecheck</code> clean; <code>bun run build</code> clean; <code>bun run docs:build</code> → 32 pages.</li>
+                <li><code>dist/testing/{index,register}.{js,d.ts}</code> and <code>dist/testing/vending/{walker,auto-load}.*</code> present; all 18 <code>package.json</code> <code>exports</code> targets resolve on disk; no <code>docs/templates</code> output in <code>dist/</code>.</li>
+                <li>Version bump <code>0.6.0</code> → <code>0.7.0</code> — minor per <code>#breaking</code>: purely additive; the lookup sync→async change never shipped in a published release. No CHANGELOG file exists in the repo — skipped per task instructions.</li>
+                <li><code>llms.txt</code>/<code>llms-full.txt</code> regenerated against the fully-merged state (5.1 had regenerated them before 5.2/5.3 and the close-out doc fixes landed).</li>
+                <li><code>npm publish</code> deliberately NOT run — user's call.</li>
+              </ul>
             </section>
           </article>
         </section>

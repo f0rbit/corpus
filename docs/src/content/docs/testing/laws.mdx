@@ -108,7 +108,8 @@ The law generates random values, applies two different function compositions, an
 The headline law: compile-time exhaustiveness (TypeScript enforces you handle every variant) + runtime verification (every variant has a generator and actually fails correctly).
 
 ```typescript
-import { testing, CORPUS_ERROR_BRAND } from "@f0rbit/corpus";
+import { testing } from "@f0rbit/corpus";
+import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing";
 import type { Result } from "@f0rbit/corpus";
 
 // Example: a function that returns multiple error kinds
