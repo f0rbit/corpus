@@ -1,0 +1,8 @@
+node_modules/
+# fixture trees are byte-exact test data for the vending walker — one package.json
+# is deliberately malformed and must never be formatted or "fixed"
+tests/fixtures/
+dist/
+coverage/
+docs/
+.plans/

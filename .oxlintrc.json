@@ -1,0 +1,4 @@
+{
+	"extends": ["./node_modules/@f0rbit/oxlint-config/oxlintrc.json"],
+	"ignorePatterns": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "docs/**", ".plans/**"]
+}
