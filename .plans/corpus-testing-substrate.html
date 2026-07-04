@@ -1078,7 +1078,7 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
           <article class="task" id="task-2-1">
             <header>
               <h3>Task 2.1: <code>testing.cover</code> — Hedgehog-style coverage assertion</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1131,14 +1131,19 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: phase-2 single feature commit on <code>feature/testing-substrate-phase-2</code> (SHA in PR).</li>
+                <li><code>testing/cover.ts</code> ships <code>cover_property</code> + <code>CoverageError</code> (carries structured <code>stats: readonly CoverageStat[]</code>); re-exported as <code>cover</code> from <code>testing/index.ts</code>.</li>
+                <li><code>bun test tests/unit/testing-cover.test.ts</code> → 7 pass, 0 fail.</li>
+                <li>Adversary: hit counting lives in the wrapped predicate (<code>cover.ts</code> lines 117–123); coverage check only runs after <code>fc.assert</code> resolves; <code>format_message</code> lists ALL labels with <code>[OK  ]</code>/<code>[FAIL]</code> flags; no <code>any</code> in the signature; <code>DEFAULT_NUM_RUNS = 200</code> exported + documented.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-2-2">
             <header>
               <h3>Task 2.2: <code>testing.failure</code> integration + CorpusError registrations</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1186,14 +1191,20 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: phase-2 single feature commit on <code>feature/testing-substrate-phase-2</code> (SHA in PR).</li>
+                <li>All 12 <code>CorpusError</code> variants registered in <code>testing/register.ts</code> via <code>failure(CORPUS_ERROR_BRAND, ..., compose(...))</code> — counted against the union in <code>types.ts:46-57</code>.</li>
+                <li><code>testing/failure.ts</code> adds <code>list_registered_variants</code> typed <code>readonly E["kind"][]</code> (backed by <code>list_failure_variants</code> in the registry).</li>
+                <li><code>bun test tests/unit/testing-failure.test.ts</code> → 25 pass, 0 fail (includes per-variant kind-match sampling and duplicate-registration overwrite + warn).</li>
+                <li>Adversary: all generators go through <code>compose</code>, no raw <code>fc.record</code>; <code>cause</code> fields generated as <code>new Error(msg)</code> instances via <code>error_arb</code>.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-2-3">
             <header>
               <h3>Task 2.3: <code>testing.law.error_path_exhaustive</code></h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1252,14 +1263,20 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: phase-2 single feature commit on <code>feature/testing-substrate-phase-2</code> (SHA in PR).</li>
+                <li><code>testing/laws/error-path-exhaustive.ts</code> implements the documented signature; <code>provoke</code> is <code>NoInfer&lt;{ [K in E["kind"]]: (failure: Extract&lt;E, { kind: K }&gt;) =&gt; Args }&gt;</code> — the NoInfer is load-bearing (documented inline) so missing variants are hard compile errors instead of narrowing <code>E</code>.</li>
+                <li>Deviation from spec (deliberate): <code>fc.assert</code> runs with <code>endOnFailure: true</code> — <code>fc.gen()</code>'s shrinker (which <code>compose</code> wraps) does not reliably terminate on fast-check 4.8, so shrinking is disabled for failure generators. Documented in the module JSDoc + AGENTS.md.</li>
+                <li><code>bun test tests/unit/testing-law-error-path.test.ts</code> → 7 pass, 0 fail; includes the <code>@ts-expect-error</code> missing-provoke-key test; <code>bun run typecheck</code> clean.</li>
+                <li>Adversary: missing-generator error names brand, variant, and the exact <code>testing.failure(brand, 'X', () =&gt; ...)</code> call (asserted in the unit test); per-variant runs each get their own <code>fc.assert</code>; single documented cast inside the body, none in the public signature; <code>Result</code> imported from <code>../../types.js</code>.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-2-4">
             <header>
               <h3>Task 2.4: Pilot — corpus error-path exhaustive test</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1312,14 +1329,20 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: phase-2 single feature commit on <code>feature/testing-substrate-phase-2</code> (SHA in PR).</li>
+                <li><code>tests/property/corpus-error-paths.test.ts</code>: real <code>create_corpus</code> + <code>create_memory_backend</code> + <code>json_codec</code> store; <code>get_store_version(spec: SetupSpec)</code> drives the real <code>store.get_handle</code> read path per the task spec. Note: no production code path emits <code>hash_mismatch</code> today (grep: only <code>types.ts</code>), so the wrapper adds content-hash verification (<code>compute_hash(bytes)</code> vs <code>meta.content_hash</code>, checked before decode) — the pilot is the runnable spec of the verified get path.</li>
+                <li><code>provoke</code> table covers all 12 <code>CorpusError</code> variants (9 as documented <code>cannot_surface</code> stubs), <code>only: ["not_found", "decode_error", "hash_mismatch"]</code>, <code>numRuns: 200</code> per variant. <code>bun test tests/property/corpus-error-paths.test.ts</code> → 1 pass, 0 fail, ~85ms.</li>
+                <li><strong>Deliberate provoke-break experiment</strong>: temporarily rewired the <code>decode_error</code> provoke to return a <code>not_found</code> setup spec. The law failed on the first run with <code>error_path_exhaustive: provoked variant 'decode_error' but fn returned error kind 'not_found'</code>, full counterexample printed (<code>Counterexample: [{"kind":"decode_error","cause":new Error(...)}]</code>, seed 2006503936), <code>Shrunk 0 time(s)</code> confirming <code>endOnFailure: true</code> prevented the fc.gen shrink hang. Reverted; test green again.</li>
+                <li><code>hash_mismatch</code> seeding uses real <code>backend.data.put</code> bytes + real <code>backend.metadata.put</code> <code>SnapshotMeta</code> whose <code>content_hash</code> is the generated failure's random 64-hex (with a deterministic flip guard against the astronomically-unlikely collision); <code>decode_error</code> seeds invalid-JSON bytes under their REAL hash so decode is the first failure.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-2-5">
             <header>
               <h3>Task 2.5: Verification — Phase 2 close-out</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1364,7 +1387,13 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Branch synced fast-forward onto <code>origin/main</code> (post PRs #33/#34/#35) before close-out; <code>AGENTS.md</code> stash-pop merged clean.</li>
+                <li><code>bun run typecheck</code> clean; <code>bun test</code> → 729 pass, 0 fail across 29 files (~1.1s, no hangs); <code>bun run build</code> clean — <code>dist/testing/laws/{error-path-exhaustive,index}.{js,d.ts}</code> emitted (tsconfig.build.json include widened to <code>testing/laws/*.ts</code>).</li>
+                <li>All 12 <code>CorpusError</code> variants have failure generators (task 2.2 proof); pilot caught the deliberate provoke break (task 2.4 proof); Phase 1 pilot + full suite unregressed.</li>
+                <li>AGENTS.md Testing-substrate section updated per <code>#agents-md-updates</code> Phase 2: CORPUS_ERROR_BRAND canonical-brand rule, error_path_exhaustive recipe, cover post-success gotcha, registrar-contract clarification (explicit <code>register()</code>, no import side-effect), SnapshotMeta coverage-gap note corrected to "Phase 3 widens".</li>
+                <li>Hygiene folded into the phase commit: <code>.claude/</code> gitignored; AGENTS.md Style bullet corrected (indentation is mixed — match the file); merge-commits-only note added.</li>
+              </ul>
             </section>
           </article>
         </section>

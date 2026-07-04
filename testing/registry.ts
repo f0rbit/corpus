@@ -130,6 +130,23 @@ export function lookup_failure<E extends { kind: string }>(
 }
 
 /**
+ * Enumerate every variant `kind` currently registered against `brand`.
+ *
+ * Returns the variants in insertion order. The result is a fresh array — safe
+ * for the consumer to mutate. The narrow return type `readonly E["kind"][]`
+ * is preserved so callers don't get back a plain `string[]`.
+ *
+ * @returns an array of variant discriminants; empty if no failures registered.
+ */
+export function list_failure_variants<E extends { kind: string }>(
+	brand: ArbBrand<E>
+): readonly E["kind"][] {
+	const by_variant = failures.get(brand);
+	if (!by_variant) return [];
+	return Array.from(by_variant.keys()) as E["kind"][];
+}
+
+/**
  * Reset all three registries to fresh empty maps. Test-only helper — the
  * leading `__` is the convention for "do not call from production code".
  */

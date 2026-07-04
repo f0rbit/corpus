@@ -30,6 +30,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # IntelliJ based IDEs
 .idea
 
+# Claude Code local state (agent worktrees, session files)
+.claude/
+
 # Finder (MacOS) folder config
 .DS_Store
 
