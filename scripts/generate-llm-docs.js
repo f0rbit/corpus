@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -10,54 +10,140 @@ const pkg = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf-8"));
 
 const readFile = (path) => readFileSync(join(rootDir, path), "utf-8");
 
-const extractExports = (content) => {
-	const exports = { functions: [], types: [], constants: [], classes: [] };
-	
-	const exportFunctionMatch = content.match(/export\s+(?:async\s+)?function\s+(\w+)/g) || [];
-	exports.functions.push(...exportFunctionMatch.map(e => e.match(/function\s+(\w+)/)?.[1]).filter(Boolean));
-	
-	const exportConstMatch = content.match(/export\s+const\s+(\w+)/g) || [];
-	exports.constants.push(...exportConstMatch.map(e => e.match(/const\s+(\w+)/)?.[1]).filter(Boolean));
-	
-	const exportTypeMatch = content.match(/export\s+type\s+(\w+)/g) || [];
-	exports.types.push(...exportTypeMatch.map(e => e.match(/type\s+(\w+)/)?.[1]).filter(Boolean));
-	
-	const exportClassMatch = content.match(/export\s+class\s+(\w+)/g) || [];
-	exports.classes.push(...exportClassMatch.map(e => e.match(/class\s+(\w+)/)?.[1]).filter(Boolean));
-	
-	const exportBraceMatch = content.match(/export\s*\{([^}]+)\}/g) || [];
-	for (const match of exportBraceMatch) {
-		const inner = match.match(/\{([^}]+)\}/)?.[1] || "";
-		const items = inner.split(",").map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
-		for (const item of items) {
-			if (item.startsWith("type ")) {
-				exports.types.push(item.slice(5).trim());
-			} else {
-				exports.constants.push(item);
-			}
-		}
-	}
-	
-	return exports;
+// ---------------------------------------------------------------------------
+// Docs site URL (derived from astro config)
+// ---------------------------------------------------------------------------
+
+const astroConfig = readFile("docs/astro.config.mjs");
+const site = astroConfig.match(/\bsite:\s*['"]([^'"]+)['"]/)?.[1] ?? "https://f0rbit.github.io";
+const base = astroConfig.match(/\bbase:\s*['"]([^'"]+)['"]/)?.[1] ?? "/corpus";
+const docsSite = `${site}${base}`;
+
+// ---------------------------------------------------------------------------
+// Entry points (derived from package.json "exports")
+// ---------------------------------------------------------------------------
+
+const distToSource = (distPath) => {
+	const candidate = distPath.replace(/^\.\/dist\//, "").replace(/\.js$/, ".ts");
+	return existsSync(join(rootDir, candidate)) ? candidate : null;
 };
 
-const extractCodeExamples = (mdxContent) => {
-	const examples = [];
-	const codeBlockRegex = /```(?:typescript|ts|tsx)\n([\s\S]*?)```/g;
-	let match;
-	while ((match = codeBlockRegex.exec(mdxContent)) !== null) {
-		const code = match[1].trim();
-		if (code.length > 0 && code.length < 1500) {
-			examples.push(code);
+const extractModuleDoc = (content) => {
+	const match = content.match(/^\/\*\*([\s\S]*?)\*\//);
+	if (!match) return "";
+	const lines = match[1].split("\n").map((l) => l.replace(/^\s*\*\s?/, ""));
+	const prose = [];
+	for (const line of lines) {
+		const cleaned = line.replace(/^@description\s+/, "").trim();
+		if (cleaned.startsWith("@")) continue;
+		if (cleaned === "") {
+			if (prose.length > 0) break;
+			continue;
+		}
+		prose.push(cleaned);
+	}
+	return prose.join(" ");
+};
+
+const getEntryPoints = () => {
+	const entries = [];
+	for (const [spec, target] of Object.entries(pkg.exports)) {
+		const dist = typeof target === "string" ? target : target.import;
+		const source = distToSource(dist);
+		if (!source) continue;
+		const specifier = spec === "." ? pkg.name : `${pkg.name}${spec.slice(1)}`;
+		const doc = extractModuleDoc(readFile(source));
+		entries.push({ specifier, source, description: doc || (spec === "." ? pkg.description : "") });
+	}
+	return entries;
+};
+
+// ---------------------------------------------------------------------------
+// Public API surface (derived by walking re-exports from the entry points)
+// ---------------------------------------------------------------------------
+
+const resolveModule = (fromFile, spec) => {
+	if (!spec.startsWith(".")) return null;
+	const resolved = posix.join(posix.dirname(fromFile), spec).replace(/\.js$/, ".ts");
+	return existsSync(join(rootDir, resolved)) ? resolved : null;
+};
+
+const parseNamed = (inner) =>
+	inner
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.map((item) => {
+			const isType = item.startsWith("type ");
+			const parts = item.replace(/^type\s+/, "").split(/\s+as\s+/);
+			return { name: parts[parts.length - 1].trim(), isType };
+		});
+
+const NAMED_REEXPORT = /export\s+(type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/gs;
+const STAR_REEXPORT = /export\s*\*\s*(?:as\s+(\w+)\s+)?from\s*['"]([^'"]+)['"]/g;
+
+const bucketFor = (surface, module) => {
+	if (!surface.has(module)) surface.set(module, { values: new Set(), types: new Set(), namespaces: new Set() });
+	return surface.get(module);
+};
+
+const collectDirectExports = (content, bucket) => {
+	const stripped = content
+		.replace(NAMED_REEXPORT, "")
+		.replace(STAR_REEXPORT, "");
+
+	for (const m of stripped.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)) bucket.values.add(m[1]);
+	for (const m of stripped.matchAll(/export\s+const\s+(\w+)/g)) bucket.values.add(m[1]);
+	for (const m of stripped.matchAll(/export\s+class\s+(\w+)/g)) bucket.values.add(m[1]);
+	for (const m of stripped.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)) bucket.types.add(m[1]);
+	for (const m of stripped.matchAll(/export\s+(type\s+)?\{([^}]*)\}/gs)) {
+		for (const item of parseNamed(m[2])) {
+			(m[1] || item.isType ? bucket.types : bucket.values).add(item.name);
 		}
 	}
-	return examples;
 };
+
+const collectSurface = (file, surface, seen) => {
+	if (seen.has(file)) return surface;
+	seen.add(file);
+	const content = readFile(file);
+
+	for (const m of content.matchAll(NAMED_REEXPORT)) {
+		const module = resolveModule(file, m[3]) ?? m[3];
+		const bucket = bucketFor(surface, module);
+		for (const item of parseNamed(m[2])) {
+			(m[1] || item.isType ? bucket.types : bucket.values).add(item.name);
+		}
+	}
+
+	for (const m of content.matchAll(STAR_REEXPORT)) {
+		const module = resolveModule(file, m[2]);
+		if (m[1]) {
+			bucketFor(surface, module ?? m[2]).namespaces.add(m[1]);
+			continue;
+		}
+		if (module) collectSurface(module, surface, seen);
+	}
+
+	collectDirectExports(content, bucketFor(surface, file));
+	return surface;
+};
+
+const getSurface = (entryPoints) => {
+	const surface = new Map();
+	const seen = new Set();
+	for (const entry of entryPoints) collectSurface(entry.source, surface, seen);
+	return surface;
+};
+
+// ---------------------------------------------------------------------------
+// Docs pages (derived from MDX frontmatter)
+// ---------------------------------------------------------------------------
 
 const extractFrontmatter = (mdxContent) => {
 	const frontmatterMatch = mdxContent.match(/^---\n([\s\S]*?)\n---/);
 	if (!frontmatterMatch) return {};
-	
+
 	const fm = {};
 	const lines = frontmatterMatch[1].split("\n");
 	for (const line of lines) {
@@ -71,11 +157,13 @@ const extractFrontmatter = (mdxContent) => {
 	return fm;
 };
 
+const stripFrontmatter = (mdxContent) => mdxContent.replace(/^---\n[\s\S]*?\n---\n?/, "");
+
 const getMdxDocs = () => {
 	const docs = [];
 	const walkDir = (dir, basePath = "") => {
 		if (!existsSync(dir)) return;
-		const entries = readdirSync(dir, { withFileTypes: true });
+		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 		for (const entry of entries) {
 			const fullPath = join(dir, entry.name);
 			const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
@@ -84,12 +172,14 @@ const getMdxDocs = () => {
 			} else if (entry.name.endsWith(".mdx")) {
 				const content = readFileSync(fullPath, "utf-8");
 				const frontmatter = extractFrontmatter(content);
-				const examples = extractCodeExamples(content);
+				const slug = relativePath.replace(/\.mdx$/, "").replace(/(^|\/)index$/, "");
 				docs.push({
 					path: relativePath,
-					title: frontmatter.title || entry.name.replace(".mdx", ""),
+					slug,
+					url: `${docsSite}/${slug ? `${slug}/` : ""}`,
+					title: frontmatter.title || (slug === "" ? pkg.name : entry.name.replace(".mdx", "")),
 					description: frontmatter.description || "",
-					examples: examples.slice(0, 3),
+					body: stripFrontmatter(content).trim(),
 				});
 			}
 		}
@@ -98,559 +188,174 @@ const getMdxDocs = () => {
 	return docs;
 };
 
-const categorizeExports = () => {
-	const categories = {
-		core: ["create_corpus", "create_store", "define_store"],
-		backends: ["create_memory_backend", "create_file_backend", "create_cloudflare_backend", "create_layered_backend"],
-		codecs: ["json_codec", "text_codec", "binary_codec", "gzip_codec", "encrypt_codec", "compose"],
-		result: ["ok", "err", "match", "unwrap", "unwrap_or", "unwrap_err", "try_catch", "try_catch_async", "fetch_result", "pipe", "to_nullable", "to_fallback", "null_on", "fallback_on", "format_error", "at", "first", "last", "merge_deep"],
-		observations: ["define_observation_type", "create_pointer", "pointer_to_key", "key_to_pointer", "resolve_path", "apply_span", "pointers_equal", "pointer_to_snapshot", "generate_observation_id", "create_observations_client", "create_observations_storage"],
-		concurrency: ["Semaphore", "parallel_map"],
-		utilities: ["compute_hash", "generate_version", "concat_bytes", "stream_to_bytes", "to_bytes", "create_filter_pipeline", "filter_snapshots", "parse_snapshot_meta"],
-		schema: ["corpus_snapshots", "corpus_observations"],
-		sst: ["createCorpusInfra"],
-	};
-	return categories;
+const groupDocs = (docs) => {
+	const groups = new Map();
+	for (const doc of docs) {
+		const segment = doc.path.includes("/") ? doc.path.slice(0, doc.path.indexOf("/")) : "";
+		if (!groups.has(segment)) groups.set(segment, []);
+		groups.get(segment).push(doc);
+	}
+	const ordered = [...groups.entries()].sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+	return ordered;
+};
+
+// ---------------------------------------------------------------------------
+// Quickstart examples (derived from the getting-started page)
+// ---------------------------------------------------------------------------
+
+const dedent = (code) => {
+	const lines = code.split("\n");
+	const indents = lines.filter((l) => l.trim()).map((l) => l.match(/^\s*/)[0].length);
+	const min = indents.length ? Math.min(...indents) : 0;
+	return lines.map((l) => l.slice(min)).join("\n");
+};
+
+const extractCodeExamples = (mdxContent) => {
+	const examples = [];
+	const codeBlockRegex = /```(?:typescript|ts|tsx)\n([\s\S]*?)```/g;
+	let match;
+	while ((match = codeBlockRegex.exec(mdxContent)) !== null) {
+		const code = dedent(match[1]).trim();
+		if (code.length > 0 && code.length < 1500) {
+			examples.push(code);
+		}
+	}
+	return examples;
+};
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+const renderCodes = (names) => [...names].map((n) => `\`${n}\``).join(", ");
+
+const renderSurface = (surface) => {
+	const sections = [];
+	for (const [module, bucket] of surface) {
+		if (bucket.values.size === 0 && bucket.types.size === 0 && bucket.namespaces.size === 0) continue;
+		const lines = [`### ${module}`];
+		if (bucket.namespaces.size > 0) lines.push(`Namespace re-export: ${renderCodes(bucket.namespaces)} (e.g. \`import { ${[...bucket.namespaces][0]} } from '${pkg.name}'\`)`);
+		if (bucket.values.size > 0) lines.push(`- Values: ${renderCodes(bucket.values)}`);
+		if (bucket.types.size > 0) lines.push(`- Types: ${renderCodes(bucket.types)}`);
+		sections.push(lines.join("\n"));
+	}
+	return sections.join("\n\n");
+};
+
+const renderDocsIndex = (docs) => {
+	const sections = [];
+	for (const [segment, pages] of groupDocs(docs)) {
+		const heading = segment === "" ? "Overview" : segment.charAt(0).toUpperCase() + segment.slice(1);
+		const lines = pages.map((p) => `- [${p.title}](${p.url})${p.description ? `: ${p.description}` : ""}`);
+		sections.push(`### ${heading}\n${lines.join("\n")}`);
+	}
+	return sections.join("\n\n");
 };
 
 const generateLlmsTxt = () => {
-	const categories = categorizeExports();
-	const mdxDocs = getMdxDocs();
-	
-	let output = `# ${pkg.name} v${pkg.version}
+	const entryPoints = getEntryPoints();
+	const surface = getSurface(entryPoints);
+	const docs = getMdxDocs();
+	const gettingStarted = docs.find((d) => d.path === "getting-started.mdx");
+	const quickstart = gettingStarted ? extractCodeExamples(gettingStarted.body).slice(0, 3) : [];
+
+	return `# ${pkg.name} v${pkg.version}
 
 > ${pkg.description}
 
-## Installation
+Install: \`bun add ${pkg.name} zod\` (or npm/pnpm/yarn). Peer dependencies: ${Object.entries(pkg.peerDependencies ?? {})
+		.map(([name, range]) => `\`${name} ${range}\``)
+		.join(", ")}.
 
-\`\`\`bash
-bun add ${pkg.name} zod
-# or
-npm install ${pkg.name} zod
-\`\`\`
+Full docs for LLM consumption: ${docsSite}/llms-full.txt
 
-## Import Paths
+## Entry Points
 
-\`\`\`typescript
-// Main entry - core, memory backend, result utilities
-import { create_corpus, define_store, json_codec, ok, err, pipe } from '@f0rbit/corpus'
+${entryPoints.map((e) => `- \`${e.specifier}\` (\`${e.source}\`)${e.description ? ` — ${e.description}` : ""}`).join("\n")}
 
-// File backend (Node.js/Bun)
-import { create_file_backend } from '@f0rbit/corpus/file'
+## Documentation
 
-// Cloudflare backend (Workers)
-import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
+${renderDocsIndex(docs)}
 
-// Types only (no runtime)
-import type { Result, Snapshot, CorpusError, Store } from '@f0rbit/corpus/types'
+## Quickstart
 
-// Drizzle schema
-import { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
-\`\`\`
+${quickstart.map((code) => `\`\`\`typescript\n${code}\n\`\`\``).join("\n\n")}
 
-## Core Concepts
+## API Surface
 
-- **Snapshot**: Immutable versioned data with metadata (version, content_hash, parents, tags)
-- **Store**: Typed container managing snapshots with automatic deduplication
-- **Corpus**: Collection of stores bound to a backend
-- **Observation**: Structured fact pointing to content location (store_id + version + path + span)
-- **Lineage**: Parent refs link snapshots to sources for provenance tracking
+Every public export, grouped by the source module that defines it.
 
-## Builder Pattern
-
-\`\`\`typescript
-import { z } from 'zod'
-import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
-
-const UserSchema = z.object({ name: z.string(), email: z.string() })
-const users = define_store('users', json_codec(UserSchema))
-
-const corpus = create_corpus()
-  .with_backend(create_memory_backend())
-  .with_store(users)
-  .build()
-
-// Type-safe store access via corpus.stores.<id>
-await corpus.stores.users.put({ name: 'Alice', email: 'alice@example.com' })
-\`\`\`
-
-## Result<T, E> Pattern
-
-All operations return \`Result<T, CorpusError>\` - never throw exceptions.
-
-\`\`\`typescript
-import { ok, err, unwrap, unwrap_or, match, pipe, to_nullable } from '@f0rbit/corpus'
-
-// Check .ok property
-const result = await store.put(data)
-if (!result.ok) return console.error('Failed:', result.error.kind)
-console.log('Version:', result.value.version)
-
-// Pattern matching
-const message = match(result, meta => \`Stored \${meta.version}\`, error => \`Failed: \${error.kind}\`)
-
-// Pipeline composition
-const user = await pipe(store.get(version))
-  .map(snapshot => snapshot.data)
-  .flat_map(data => validateUser(data))
-  .unwrap_or(defaultUser)
-
-// Convert to nullable for not-found patterns
-const snapshot = to_nullable(await store.get(version))
-\`\`\`
-
-## CorpusError Types
-
-Discriminated union with \`kind\` field:
-- \`not_found\` - Snapshot doesn't exist (store_id, version)
-- \`storage_error\` - Backend failure (cause, operation)
-- \`decode_error\` / \`encode_error\` - Codec failed (cause)
-- \`hash_mismatch\` - Content corruption (expected, actual)
-- \`validation_error\` - Schema validation failed (cause, message)
-- \`observation_not_found\` - Observation doesn't exist (id)
-- \`transaction_aborted\` - Transaction body returned err(), threw, or apply_batch failed (reason: 'returned_err' | 'threw' | 'apply_batch_failed', cause?)
-- \`partial_commit\` - Sequential fallback couldn't fully roll back (ops_completed, ops_failed, cause)
-- \`concurrent_modification\` - Reserved for forward-compat; no built-in backend produces this currently (store_id, version)
-
-\`\`\`typescript
-if (!result.ok && result.error.kind === 'not_found') {
-  return \`Version \${result.error.version} not found in \${result.error.store_id}\`
-}
-\`\`\`
-
-## Store Operations
-
-\`\`\`typescript
-// Put - returns SnapshotMeta with generated version
-const result = await store.put(data, {
-  parents: [{ store_id: 'source', version: 'abc123' }],
-  tags: ['draft'],
-  invoked_at: new Date()
-})
-
-// Get specific version - returns Snapshot<T> = { meta, data }
-const snapshot = await store.get('AZJx4vM')
-
-// Get latest version
-const latest = await store.get_latest()
-
-// Get metadata only (no data fetch)
-const meta = await store.get_meta('AZJx4vM')
-
-// List with filtering - returns AsyncIterable<SnapshotMeta>
-for await (const meta of store.list({ limit: 10, tags: ['published'] })) {
-  console.log(meta.version)
-}
-
-// Streaming reads/writes (only for codecs that support it; Store<User> errors at type level)
-const handle_result = await store.get_latest_handle()  // SnapshotHandle<T> with value() / bytes() / stream()
-const meta2 = await store.put_stream(readableStream)
-\`\`\`
-
-## Codecs
-
-\`\`\`typescript
-const jsonCodec = json_codec(z.object({ name: z.string() }))  // JSON with Zod validation
-const textCodec = text_codec()    // Plain UTF-8 text + streaming
-const binaryCodec = binary_codec() // Raw binary pass-through + streaming
-const gzipLayer = gzip_codec()    // Bytes->bytes layer; streaming both ways
-const aesLayer = encrypt_codec(key)  // AES-GCM bytes->bytes layer; encode_stream only
-
-// Compose a head codec with N byte-transformer layers
-const codec = compose(json_codec(EventSchema), gzip_codec())  // JSON over gzip
-
-// Custom codec — encode/decode are async since 0.4.0
-type Codec<T> = {
-  content_type: ContentType
-  encode: (v: T) => Promise<Uint8Array>
-  decode: (b: Uint8Array) => Promise<T>
-  encode_stream?: (v: T) => ReadableStream<Uint8Array>
-  decode_stream?: (b: ReadableStream<Uint8Array>) => ReadableStream<T>
-}
-\`\`\`
-
-## Streaming
-
-\`\`\`typescript
-// SnapshotHandle - lazy access to a snapshot; stream() is 'never' for non-streamable codecs
-type SnapshotHandle<T> = {
-  value: () => Promise<Result<T, CorpusError>>
-  bytes: () => Promise<Result<Uint8Array, CorpusError>>
-  stream: T extends string | Uint8Array
-    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
-    : never
-}
-
-// Read: get_handle / get_latest_handle return { meta, handle }
-const r = await corpus.stores.logs.get_latest_handle()
-if (!r.ok) throw r.error
-const stream = await r.value.handle.stream()
-
-// Write: put_stream accepts a ReadableStream<T>; corpus buffers internally for content-hashing
-await corpus.stores.uploads.put_stream(response.body)
-
-// Streamability: gzip yes; encrypt encode-only (auth tag); json never (Zod needs full doc)
-\`\`\`
-
-## Observations
-
-\`\`\`typescript
-import { define_observation_type } from '@f0rbit/corpus'
-
-const entity_mention = define_observation_type('entity_mention', z.object({
-  entity: z.string(),
-  entity_type: z.enum(['person', 'organization', 'topic'])
-}))
-
-const corpus = create_corpus()
-  .with_backend(backend)
-  .with_store(documents)
-  .with_observations([entity_mention])
-  .build()
-
-await corpus.observations.put(entity_mention, {
-  source: { store_id: 'documents', version: 'AZJx4vM', path: '$.text', span: { start: 100, end: 150 } },
-  content: { entity: 'Climate Policy', entity_type: 'topic' },
-  confidence: 0.95
-})
-
-for await (const obs of corpus.observations.query({ type: 'entity_mention' })) {
-  console.log(obs.content)
-}
-\`\`\`
-
-## Transactions
-
-Cross-store atomic puts via \`corpus.transaction(async tx => ...)\`. Body must return a Result; returning err() or throwing aborts. Mutations buffer and commit atomically when the backend supports \`apply_batch\`, otherwise sequentially with compensating deletes (best-effort).
-
-\`\`\`typescript
-const result = await corpus.transaction(async (tx) => {
-  const event = await tx.put(corpus.stores.timeline, payload)
-  if (!event.ok) return event
-  const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
-    parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
-  })
-  if (!idx.ok) return idx
-  return ok({ event_version: event.value.version })
-})
-// result: Result<{ value: R, commits: SnapshotMeta[], observations: Observation[] }, CorpusError>
-
-// Handle surface
-type TransactionHandle = {
-  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
-  get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>  // read-your-writes
-  delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>      // tombstones in-tx
-  observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
-  observation_delete: (id: string) => Promise<Result<void, CorpusError>>
-}
-
-// Backend opt-in
-type BatchOp =
-  | { type: 'meta_put'; meta: SnapshotMeta }
-  | { type: 'meta_delete'; store_id: string; version: string }
-  | { type: 'data_put'; data_key: string; bytes: Uint8Array }
-  | { type: 'observation_put'; row: ObservationRow }
-  | { type: 'observation_delete'; id: string }
-
-type Backend = {
-  // ...
-  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
-}
-\`\`\`
-
-Per-backend guarantees:
-- **memory**: full atomic (snapshot + rollback on throw, sync ops)
-- **file**: per-store metadata atomic via rename; cross-file batch NOT atomic — mid-flight crash → \`partial_commit\`. Recoverable via \`recover(root_dir)\` from \`@f0rbit/corpus/file\` at startup.
-- **cloudflare**: D1 metadata atomic via \`db.batch\`; R2 has no multi-object atomicity — failures after R2 puts but before D1 commit leave content-addressed orphan blobs.
-- **layered**: forwards to bottom write layer only; cache layers fill lazily on subsequent reads.
-
-Gotchas:
-- No isolation between concurrent transactions. Same-instance nesting → \`invalid_config\`. Cross-instance concurrent calls race — corpus is not a transactional database.
-- No timeout (use \`Promise.race\`), no optimistic concurrency check, no retry helper — all on the consumer.
-- Sequential-fallback path returns \`invalid_config\` for \`observation_put\` / \`observation_delete\` ops — backends with observations must ship \`apply_batch\`. All built-in backends do.
-- \`tx.delete\` writes a tombstone so \`tx.get\` of the same version returns \`not_found\` even if it's still committed in the live backend.
-
-## Backends
-
-\`\`\`typescript
-import { create_memory_backend, create_layered_backend } from '@f0rbit/corpus'
-import { create_file_backend } from '@f0rbit/corpus/file'
-import { create_cloudflare_backend } from '@f0rbit/corpus/cloudflare'
-
-const memory = create_memory_backend()  // In-memory (testing)
-const file = create_file_backend({ base_path: './data' })  // File system
-const cf = create_cloudflare_backend({ db: env.DB, bucket: env.BUCKET })  // Cloudflare D1+R2
-const layered = create_layered_backend({ primary: file, cache: memory })  // Cache layer
-\`\`\`
-
-## Concurrency Utilities
-
-\`\`\`typescript
-import { Semaphore, parallel_map } from '@f0rbit/corpus'
-
-const sem = new Semaphore(5)
-await sem.acquire()
-try {
-  await doWork()
-} finally {
-  sem.release()
-}
-
-// Or use parallel_map for controlled concurrency
-const results = await parallel_map(items, item => process(item), 5)
-\`\`\`
-
-## SST Infrastructure Helper
-
-\`\`\`typescript
-import { createCorpusInfra } from '@f0rbit/corpus'
-
-// In sst.config.ts
-const corpus = createCorpusInfra('myapp')
-const db = new sst.cloudflare.D1(corpus.database.name)      // 'myappDb'
-const bucket = new sst.cloudflare.R2(corpus.bucket.name)    // 'myappBucket'
-\`\`\`
-
-## Exports by Category
-
-### Core
-${categories.core.map(e => `- \`${e}\``).join("\n")}
-
-### Backends
-${categories.backends.map(e => `- \`${e}\``).join("\n")}
-
-### Codecs
-${categories.codecs.map(e => `- \`${e}\``).join("\n")}
-
-### Result Utilities
-${categories.result.map(e => `- \`${e}\``).join("\n")}
-
-### Observations
-${categories.observations.map(e => `- \`${e}\``).join("\n")}
-
-### Concurrency
-${categories.concurrency.map(e => `- \`${e}\``).join("\n")}
-
-### Utilities
-${categories.utilities.map(e => `- \`${e}\``).join("\n")}
-
-### Schema (Drizzle)
-${categories.schema.map(e => `- \`${e}\``).join("\n")}
-
-### SST
-${categories.sst.map(e => `- \`${e}\``).join("\n")}
-
-## Key Types
-
-\`\`\`typescript
-type SnapshotMeta = {
-  store_id: string; version: string; content_hash: string; content_type: ContentType
-  size_bytes: number; data_key: string; created_at: Date; invoked_at?: Date
-  parents: ParentRef[]; tags?: string[]
-}
-
-type Snapshot<T> = { meta: SnapshotMeta; data: T }
-
-type StreamableValue = string | Uint8Array
-
-type SnapshotHandle<T> = {
-  value: () => Promise<Result<T, CorpusError>>
-  bytes: () => Promise<Result<Uint8Array, CorpusError>>
-  stream: T extends StreamableValue
-    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
-    : never
-}
-
-type BytesCodec = Codec<Uint8Array>
-
-type SnapshotPointer = {
-  store_id: string; version: string
-  path?: string           // JSONPath expression
-  span?: { start: number; end: number }
-}
-
-type Observation<T> = {
-  id: string; type: string; source: SnapshotPointer; content: T
-  confidence?: number; observed_at?: Date; created_at: Date
-  derived_from?: SnapshotPointer[]
-}
-
-type Result<T, E> = { ok: true; value: T } | { ok: false; error: E }
-
-type Pipe<T, E> = {
-  map: <U>(fn: (value: T) => U) => Pipe<U, E>
-  map_async: <U>(fn: (value: T) => Promise<U>) => Pipe<U, E>
-  flat_map: <U>(fn: (value: T) => Result<U, E> | Promise<Result<U, E>>) => Pipe<U, E>
-  map_err: <F>(fn: (error: E) => F) => Pipe<T, F>
-  tap: (fn: (value: T) => void | Promise<void>) => Pipe<T, E>
-  tap_err: (fn: (error: E) => void | Promise<void>) => Pipe<T, E>
-  unwrap_or: (default_value: T) => Promise<T>
-  result: () => Promise<Result<T, E>>
-}
-
-type CorpusError =
-  | { kind: 'not_found'; store_id: string; version: string }
-  | { kind: 'already_exists'; store_id: string; version: string }
-  | { kind: 'storage_error'; cause: Error; operation: string }
-  | { kind: 'decode_error'; cause: Error }
-  | { kind: 'encode_error'; cause: Error }
-  | { kind: 'hash_mismatch'; expected: string; actual: string }
-  | { kind: 'invalid_config'; message: string }
-  | { kind: 'validation_error'; cause: Error; message: string }
-  | { kind: 'observation_not_found'; id: string }
-  | { kind: 'transaction_aborted'; reason: 'returned_err' | 'threw' | 'apply_batch_failed'; cause?: Error }
-  | { kind: 'partial_commit'; ops_completed: number; ops_failed: number; cause: Error }
-  | { kind: 'concurrent_modification'; store_id: string; version: string }
-\`\`\`
-
-## Common Patterns
-
-\`\`\`typescript
-// Deduplication is automatic - same content shares storage
-const r1 = await store.put({ name: 'Alice' })
-const r2 = await store.put({ name: 'Alice' })
-// r1.value.data_key === r2.value.data_key (same hash)
-
-// Lineage tracking
-await derived.put(processedData, { parents: [{ store_id: 'raw', version: src }] })
-
-// Async iteration
-for await (const meta of store.list({ limit: 100 })) versions.push(meta.version)
-
-// Error handling with pattern matching
-const message = match(
-  await store.get(version),
-  snapshot => \`Found: \${snapshot.data.title}\`,
-  error => error.kind === 'not_found' ? 'Not found' : \`Error: \${error.kind}\`
-)
-
-// Pipeline with early exit on error
-const processed = await pipe(store.get(version))
-  .map(s => s.data)
-  .flat_map(data => transform(data))
-  .tap(result => console.log('Transformed:', result))
-  .result()
-\`\`\`
+${renderSurface(surface)}
 
 ## Links
 
-- Documentation: https://f0rbit.github.io/corpus
+- Documentation: ${docsSite}
 - Repository: ${pkg.repository?.url || "https://github.com/f0rbit/corpus"}
 `;
-
-	return output;
 };
 
-const generateLlmsFullTxt = () => {
-	const conciseTxt = generateLlmsTxt();
-	
-	const indexTs = readFile("index.ts");
-	const typesTs = readFile("types.ts");
-	const corpusTs = readFile("corpus.ts");
-	const resultTs = readFile("result.ts");
-	const utilsTs = readFile("utils.ts");
-	const observationsTypesTs = readFile("observations/types.ts");
-	const observationsUtilsTs = readFile("observations/utils.ts");
-	const concurrencyTs = readFile("concurrency.ts");
-	const schemaTs = readFile("schema.ts");
-	const sstTs = readFile("sst.ts");
+// ---------------------------------------------------------------------------
+// Full docs (compact index + every docs page + all reachable source files)
+// ---------------------------------------------------------------------------
 
-	let output = `# ${pkg.name} v${pkg.version} - Full Documentation
+const collectSourceFiles = (roots) => {
+	const seen = new Set();
+	const queue = [...roots];
+	while (queue.length > 0) {
+		const file = queue.shift();
+		if (seen.has(file)) continue;
+		seen.add(file);
+		const content = readFile(file);
+		for (const m of content.matchAll(/from\s*['"](\.[^'"]+)['"]/g)) {
+			const resolved = resolveModule(file, m[1]);
+			if (resolved && !seen.has(resolved)) queue.push(resolved);
+		}
+	}
+	return [...seen].sort();
+};
+
+const generateLlmsFullTxt = (conciseTxt) => {
+	const entryPoints = getEntryPoints();
+	const roots = entryPoints.map((e) => e.source);
+	const registerHook = pkg.corpus?.testing ? distToSource(pkg.corpus.testing) : null;
+	if (registerHook) roots.push(registerHook);
+	const sourceFiles = collectSourceFiles(roots);
+	const docs = getMdxDocs();
+
+	const docsSection = docs
+		.map((d) => `### ${d.title} (${d.path})\n\n${d.description ? `> ${d.description}\n\n` : ""}${d.body}`)
+		.join("\n\n---\n\n");
+
+	const sourceSection = sourceFiles
+		.map((f) => `### ${f}\n\n\`\`\`typescript\n${readFile(f)}\n\`\`\``)
+		.join("\n\n---\n\n");
+
+	return `# ${pkg.name} v${pkg.version} - Full Documentation
 
 > ${pkg.description}
 
-This document contains the complete source code and documentation for LLM consumption.
+This document contains the compact reference, every documentation page, and the full public source code for LLM consumption.
 
 ${conciseTxt}
 
 ---
 
+## Documentation Pages
+
+${docsSection}
+
+---
+
 ## Full Source Code
 
-### index.ts (Main Entry Point)
+All source files reachable from the public entry points.
 
-\`\`\`typescript
-${indexTs}
-\`\`\`
-
----
-
-### types.ts (Type Definitions)
-
-\`\`\`typescript
-${typesTs}
-\`\`\`
-
----
-
-### corpus.ts (Core Implementation)
-
-\`\`\`typescript
-${corpusTs}
-\`\`\`
-
----
-
-### result.ts (Result Utilities)
-
-\`\`\`typescript
-${resultTs}
-\`\`\`
-
----
-
-### utils.ts (Utilities)
-
-\`\`\`typescript
-${utilsTs}
-\`\`\`
-
----
-
-### observations/types.ts (Observation Types)
-
-\`\`\`typescript
-${observationsTypesTs}
-\`\`\`
-
----
-
-### observations/utils.ts (Observation Utilities)
-
-\`\`\`typescript
-${observationsUtilsTs}
-\`\`\`
-
----
-
-### concurrency.ts (Concurrency Utilities)
-
-\`\`\`typescript
-${concurrencyTs}
-\`\`\`
-
----
-
-### schema.ts (Drizzle Schema)
-
-\`\`\`typescript
-${schemaTs}
-\`\`\`
-
----
-
-### sst.ts (SST Infrastructure)
-
-\`\`\`typescript
-${sstTs}
-\`\`\`
+${sourceSection}
 `;
-
-	return output;
 };
 
 const llmsTxt = generateLlmsTxt();
-const llmsFullTxt = generateLlmsFullTxt();
+const llmsFullTxt = generateLlmsFullTxt(llmsTxt);
 
 writeFileSync(join(rootDir, "docs/public/llms.txt"), llmsTxt);
 console.log("Generated docs/public/llms.txt");
