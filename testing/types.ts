@@ -22,7 +22,7 @@
  * ```ts
  * const USER_ID_BRAND = Symbol("UserId") as ArbBrand<UserId>
  * testing.arbitrary(USER_ID_BRAND, fc.uuid())
- * const arb = testing.lookup(USER_ID_BRAND) // fc.Arbitrary<UserId> | undefined
+ * const arb = await testing.lookup(USER_ID_BRAND) // fc.Arbitrary<UserId> | undefined
  * ```
  */
 export type ArbBrand<T> = symbol & { readonly __arb_type?: (x: T) => void };

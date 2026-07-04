@@ -1,0 +1,6 @@
+{
+	"name": "vending-self-missing",
+	"version": "0.0.0",
+	"private": true,
+	"corpus": { "testing": "./dist/register.js" }
+}

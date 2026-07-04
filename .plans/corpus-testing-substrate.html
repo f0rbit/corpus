@@ -1708,7 +1708,7 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
           <article class="task" id="task-4-1">
             <header>
               <h3>Task 4.1: Vending walker</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1754,14 +1754,21 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>98ede77</code>. <code>tests/unit/testing-walker.test.ts</code> → 9 tests pass (plan estimated 5–7; fixture matrix grew to cover throwing registrars, self-missing, and the dev-checkout guard).</li>
+                <li>Never throws: zero bare <code>throw</code> in <code>testing/vending/</code> (grep-verified); malformed / missing cwd manifest → <code>DiscoveryError</code>; missing dep registrar file and throwing <code>register()</code> → <code>failed</code> entries — each pinned by a test.</li>
+                <li><code>import.meta.resolve(dep + "/package.json")</code> is the primary resolution (handles Bun's sync string and Promise-shaped shims), with a documented <code>{cwd}/node_modules/{dep}/package.json</code> fallback for packages whose <code>exports</code> map omits <code>"./package.json"</code> and for fixture trees that aren't real installs.</li>
+                <li>No-transitive-walk is pinned by a test against a real <code>transitive-registrar</code> fixture nested under <code>dep-with-registrar</code>, and the rationale (trust + hoisting-dependent registration order) is documented in the module header.</li>
+                <li>Deviation from plan sketch: <code>RegistrarSpec</code> carries an <code>origin: "self" | "dependency"</code> field — needed so self carve-outs (dev-checkout guard, silently-skipped missing self registrar) apply only to the cwd package while dependency packaging bugs still surface as <code>failed</code> entries.</li>
+                <li>Dev-checkout guard: cwd package named <code>@f0rbit/corpus</code> is skipped (its self-registrar points at <code>./dist/testing/register.js</code>, a parallel module graph — see task 4.4 proof). Both carve-outs tested.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-4-2">
             <header>
               <h3>Task 4.2: Auto-load on first registry access</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1808,14 +1815,22 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>ae751f5</code>. <code>tests/unit/testing-autoload.test.ts</code> → 9 tests pass (plan estimated 4–5; grew to cover concurrent sharing, both warn paths, and the <code>arb()</code> non-trigger).</li>
+                <li>At-most-once per registry state: module-local promise, <code>??=</code> assignment; pinned by three tests — second lookup doesn't re-walk, three concurrent first lookups share one walk, <code>__reset_registry_for_tests()</code> clears the promise so the next lookup re-walks.</li>
+                <li>Sync→async refactor: <code>lookup</code>/<code>lookup_failure</code> awaited at 43 call sites across <code>testing/</code> + <code>tests/</code> (grep-counted; plan brief estimated 32 — extra sites come from the walker/autoload/pilot suites themselves). Typecheck clean.</li>
+                <li><code>arb()</code> consults <code>lookup_sync</code>/<code>lookup_failure_sync</code> (internal, never auto-loads); <code>compose</code> doesn't touch the registry at all. Pinned by the "arb(schema) does not trigger auto-load" test.</li>
+                <li>Discovery failure and per-registrar load failure each degrade to one <code>console.warn</code> naming the failing package/manifest and pointing at <code>testing.load_from(...)</code> — no throw, lookups return <code>undefined</code>. Both warn paths spy-tested.</li>
+                <li>Walker is dynamic-imported inside <code>ensure_loaded</code>/<code>load_from</code> so the registry's static import path (and the main barrel) never pulls <code>node:fs</code>/<code>node:path</code> into workerd graphs.</li>
+                <li>Deviation from plan sketch: <code>load_from</code> takes a package name OR directory path (fixture trees / monorepo siblings aren't resolvable by name), plus a test-only <code>__set_auto_load_cwd_for_tests</code> seam instead of spying on <code>process.cwd()</code>.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-4-3">
             <header>
               <h3>Task 4.3: Pilot — fixture package contributes arbitraries</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1857,14 +1872,19 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit <code>2057ade</code>. <code>tests/property/vending-pilot.test.ts</code> → 3 tests pass: <code>lookup(AUTH_TOKEN_BRAND)</code> resolves the vended arbitrary; 200-run property — every generated token satisfies the fixture's <code>/^vlt_[a-f0-9]{32}$/</code> Zod schema; <code>lookup_failure(VAULT_ERROR_BRAND, "rate_limited")</code> resolves with in-range <code>retry_after_ms</code>.</li>
+                <li>Fixture registration lives ONLY inside its exported <code>register()</code> — importing the module is side-effect-free, so the test's symbol-only import carries brand identity (same <code>Symbol</code> instance both sides) without registering anything. Only <code>load_from(fixture_dir)</code> → walker <code>load_one</code> → <code>load_registrars</code> invokes <code>register()</code>. Both facts documented in-file.</li>
+                <li><code>load_from</code>-instead-of-auto-walk rationale documented in the test header: the fixture isn't a real npm install, so cwd discovery can't see it — same escape hatch a monorepo sibling uses.</li>
+                <li>Fixture <code>node_modules</code> trees (walker fixtures from 4.1) are intentionally git-tracked via <code>.gitignore</code> negation (<code>!tests/fixtures/**/node_modules/</code>); <code>git ls-files | grep node_modules</code> shows exactly the 8 intended fixture files, nothing else.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-4-4">
             <header>
               <h3>Task 4.4: Verification — Phase 4 close-out</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1880,13 +1900,13 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </dl>
             <section data-kind="context">
               <h4>Context (self-contained)</h4>
-              <p>Standard close-out + auto-load smoke: remove manual <code>await import("./register.js")</code> from Phase 1 pilot's <code>beforeAll</code> and confirm tests still pass via auto-load.</p>
+              <p>Standard close-out + auto-load smoke. <strong>Amended at verification (resolution of a plan-vs-implementation conflict):</strong> the original smoke — "remove the manual <code>register</code> import from the Phase 1 pilot and confirm auto-load covers it" — is superseded by the walker's dev-checkout guard. <code>package.json</code>'s self-registrar key points at <code>./dist/testing/register.js</code>; in the corpus dev checkout that's a <em>parallel module graph</em> whose registry instance is distinct from the source registry the suite imports, so the walker deliberately skips the cwd package when it is <code>@f0rbit/corpus</code>. Removing the manual imports would therefore break the pilot (guard skips self) — or, without the guard, silently register into the wrong registry and make <code>bun test</code> depend on <code>bun run build</code> and a non-stale <code>dist/</code>. The auto-load contract is: <em>consumers get corpus + their declared deps automatically; the corpus dev checkout itself registers from source</em>. Zero-manual-wiring is proven for real consumers by the 4.1/4.2 happy-fixture walk (self + dep discovered and loaded) and the 4.3 pilot via <code>load_from</code>. The manual source-registrar imports stay in corpus's OWN suite (<code>backend-roundtrip</code>, <code>corpus-error-paths</code>, <code>testing-failure</code>).</p>
             </section>
             <section data-kind="what">
               <h4>What to do</h4>
               <ol>
-                <li>Suite + typecheck + build.</li>
-                <li>Remove manual registrar imports where auto-load now covers them.</li>
+                <li>Suite + typecheck + build; plus one full suite run with <code>dist/</code> deleted (proves no build dependency — the property the original smoke was really after).</li>
+                <li>Keep manual source-registrar imports in corpus's own suite (see amended context for why); document the dev-checkout guard instead of removing them.</li>
                 <li>Adversary checks.</li>
                 <li>Fill proof.</li>
                 <li>AGENTS.md append (vending docs).</li>
@@ -1909,7 +1929,15 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Gate: <code>bun run typecheck</code> clean; <code>timeout 300 bun test</code> → 764 pass, 0 fail across 36 files (1.96 s, no hangs); <code>bun run build</code> clean with <code>dist/testing/vending/{walker,auto-load}.{js,d.ts}</code> emitted.</li>
+                <li>No-build-dependency re-verified: <code>rm -rf dist && bun test</code> → 764 pass, 0 fail (1.74 s). The suite runs entirely from source; <code>dist/</code> rebuilt afterwards.</li>
+                <li>Auto-load end-to-end smoke: covered by the 4.2 happy-fixture suite (first <code>lookup</code> walks self + dependency registrars and both register into the live registry) rather than by de-wiring corpus's own suite — see amended context for the dev-checkout-guard rationale. Manual source-registrar imports retained in <code>tests/property/backend-roundtrip.test.ts</code>, <code>tests/property/corpus-error-paths.test.ts</code>, <code>tests/unit/testing-failure.test.ts</code>.</li>
+                <li>Fixture pilot: 3/3 pass — external registrar's contributions visible via <code>lookup</code>/<code>lookup_failure</code> with zero manual registrar coupling (200-run shape property green).</li>
+                <li>Sync→async audit note (<code>#breaking</code>, within-0.7.0): confirmed no published release ever shipped the sync <code>lookup</code>/<code>lookup_failure</code> signature. Latest npm version of <code>@f0rbit/corpus</code> is 0.6.0 (<code>npm view</code>), latest tag <code>v0.6.0</code>, and <code>git ls-tree v0.6.0</code> contains zero <code>testing/</code> files — the registry first appears in <code>97b7dc0</code> (unreleased 0.7.0 phase 1). The sync signature never existed outside this repo's main branch.</li>
+                <li>Adversary sweeps: no bare <code>throw</code> in <code>testing/vending/</code>; <code>import.meta.resolve</code> primary + documented fallback; transitive-walk absence pinned by test; at-most-once + concurrent-sharing pinned; <code>arb</code>/<code>compose</code> verified on the sync path (<code>lookup_sync</code>); fixture loaded via walker machinery with brand identity across the boundary; <code>git ls-files | grep node_modules</code> → only the 8 intended fixture files; <code>git status</code> clean before close-out.</li>
+                <li>Commits: <code>98ede77</code> (walker), <code>ae751f5</code> (auto-load), <code>2057ade</code> (pilot), close-out commit on <code>feature/testing-substrate-phase-4</code> (SHA in PR).</li>
+              </ul>
             </section>
           </article>
         </section>

@@ -38,16 +38,16 @@ describe("testing/failure module", () => {
 	});
 
 	describe("re-exported failure / lookup_failure", () => {
-		test("register-then-lookup round-trips per variant", () => {
+		test("register-then-lookup round-trips per variant", async () => {
 			const boom_gen = compose<Extract<DemoError, { kind: "boom" }>>((draw) => ({
 				kind: "boom" as const,
 				reason: draw(fc.string()),
 			}));
 			failure(DEMO_ERROR_BRAND, "boom", boom_gen);
-			expect(lookup_failure(DEMO_ERROR_BRAND, "boom")).toBe(boom_gen);
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "boom")).toBe(boom_gen);
 		});
 
-		test("duplicate registration overwrites and warns", () => {
+		test("duplicate registration overwrites and warns", async () => {
 			const warn = spyOn(console, "warn").mockImplementation(() => {});
 			try {
 				const first = compose<Extract<DemoError, { kind: "boom" }>>((draw) => ({
@@ -60,7 +60,7 @@ describe("testing/failure module", () => {
 				}));
 				failure(DEMO_ERROR_BRAND, "boom", first);
 				failure(DEMO_ERROR_BRAND, "boom", second);
-				expect(lookup_failure(DEMO_ERROR_BRAND, "boom")).toBe(second);
+				expect(await lookup_failure(DEMO_ERROR_BRAND, "boom")).toBe(second);
 				expect(warn).toHaveBeenCalledTimes(1);
 			} finally {
 				warn.mockRestore();
@@ -122,8 +122,8 @@ describe("testing/failure module", () => {
 		});
 
 		for (const kind of ALL_CORPUS_ERROR_VARIANTS) {
-			test(`${kind} generator is registered and produces values with matching kind`, () => {
-				const gen = lookup_failure(CORPUS_ERROR_BRAND, kind);
+			test(`${kind} generator is registered and produces values with matching kind`, async () => {
+				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
 				expect(gen).toBeDefined();
 				if (!gen) return;
 				const samples = fc.sample(gen, 10);
@@ -133,8 +133,8 @@ describe("testing/failure module", () => {
 			});
 		}
 
-		test("storage_error cause is a real Error instance", () => {
-			const gen = lookup_failure(CORPUS_ERROR_BRAND, "storage_error");
+		test("storage_error cause is a real Error instance", async () => {
+			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "storage_error");
 			expect(gen).toBeDefined();
 			if (!gen) return;
 			const samples = fc.sample(gen, 10);
@@ -145,10 +145,10 @@ describe("testing/failure module", () => {
 			}
 		});
 
-		test("decode_error / encode_error / validation_error / partial_commit causes are Error instances", () => {
+		test("decode_error / encode_error / validation_error / partial_commit causes are Error instances", async () => {
 			const kinds = ["decode_error", "encode_error", "validation_error", "partial_commit"] as const;
 			for (const kind of kinds) {
-				const gen = lookup_failure(CORPUS_ERROR_BRAND, kind);
+				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
 				expect(gen).toBeDefined();
 				if (!gen) continue;
 				const samples = fc.sample(gen, 5);
@@ -159,8 +159,8 @@ describe("testing/failure module", () => {
 			}
 		});
 
-		test("transaction_aborted reason is one of the allowed literals", () => {
-			const gen = lookup_failure(CORPUS_ERROR_BRAND, "transaction_aborted");
+		test("transaction_aborted reason is one of the allowed literals", async () => {
+			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "transaction_aborted");
 			expect(gen).toBeDefined();
 			if (!gen) return;
 			const allowed = new Set(["returned_err", "threw", "apply_batch_failed"]);
@@ -174,8 +174,8 @@ describe("testing/failure module", () => {
 			}
 		});
 
-		test("hash_mismatch expected/actual are 64-char hex strings", () => {
-			const gen = lookup_failure(CORPUS_ERROR_BRAND, "hash_mismatch");
+		test("hash_mismatch expected/actual are 64-char hex strings", async () => {
+			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "hash_mismatch");
 			expect(gen).toBeDefined();
 			if (!gen) return;
 			const samples = fc.sample(gen, 10);
@@ -186,10 +186,10 @@ describe("testing/failure module", () => {
 			}
 		});
 
-		test("not_found / already_exists / concurrent_modification carry non-empty store_id + version", () => {
+		test("not_found / already_exists / concurrent_modification carry non-empty store_id + version", async () => {
 			const kinds = ["not_found", "already_exists", "concurrent_modification"] as const;
 			for (const kind of kinds) {
-				const gen = lookup_failure(CORPUS_ERROR_BRAND, kind);
+				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
 				expect(gen).toBeDefined();
 				if (!gen) continue;
 				const samples = fc.sample(gen, 5);
@@ -201,8 +201,8 @@ describe("testing/failure module", () => {
 			}
 		});
 
-		test("partial_commit ops_failed is at least 1 (otherwise it wouldn't be 'partial')", () => {
-			const gen = lookup_failure(CORPUS_ERROR_BRAND, "partial_commit");
+		test("partial_commit ops_failed is at least 1 (otherwise it wouldn't be 'partial')", async () => {
+			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "partial_commit");
 			expect(gen).toBeDefined();
 			if (!gen) return;
 			const samples = fc.sample(gen, 10);

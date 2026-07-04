@@ -1,0 +1,12 @@
+{
+	"name": "vending-happy",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"corpus": { "testing": "./self-register.ts" },
+	"dependencies": {
+		"dep-with-registrar": "1.0.0",
+		"dep-without-key": "1.0.0",
+		"fast-check": "*"
+	}
+}

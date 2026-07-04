@@ -1,0 +1,6 @@
+{
+	"name": "vending-missing-registrar",
+	"version": "0.0.0",
+	"private": true,
+	"dependencies": { "broken-registrar": "1.0.0" }
+}

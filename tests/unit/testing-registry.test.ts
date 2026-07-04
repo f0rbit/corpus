@@ -27,33 +27,33 @@ describe("testing/registry", () => {
 	});
 
 	describe("brand registration", () => {
-		test("register-then-lookup round-trips", () => {
+		test("register-then-lookup round-trips", async () => {
 			const gen = fc.constant("u123" as UserId);
 			arbitrary(USER_ID_BRAND, gen);
-			expect(lookup(USER_ID_BRAND)).toBe(gen);
+			expect(await lookup(USER_ID_BRAND)).toBe(gen);
 		});
 
-		test("lookup returns undefined for unregistered brand", () => {
-			expect(lookup(USER_ID_BRAND)).toBeUndefined();
+		test("lookup returns undefined for unregistered brand", async () => {
+			expect(await lookup(USER_ID_BRAND)).toBeUndefined();
 		});
 
-		test("distinct brands do not collide", () => {
+		test("distinct brands do not collide", async () => {
 			const user_gen = fc.constant("u" as UserId);
 			const order_gen = fc.constant(1 as unknown as OrderId);
 			arbitrary(USER_ID_BRAND, user_gen);
 			arbitrary(ORDER_ID_BRAND, order_gen);
-			expect(lookup(USER_ID_BRAND)).toBe(user_gen);
-			expect(lookup(ORDER_ID_BRAND)).toBe(order_gen);
+			expect(await lookup(USER_ID_BRAND)).toBe(user_gen);
+			expect(await lookup(ORDER_ID_BRAND)).toBe(order_gen);
 		});
 
-		test("duplicate registration overwrites and warns", () => {
+		test("duplicate registration overwrites and warns", async () => {
 			const warn = spyOn(console, "warn").mockImplementation(() => {});
 			try {
 				const first = fc.constant("a" as UserId);
 				const second = fc.constant("b" as UserId);
 				arbitrary(USER_ID_BRAND, first);
 				arbitrary(USER_ID_BRAND, second);
-				expect(lookup(USER_ID_BRAND)).toBe(second);
+				expect(await lookup(USER_ID_BRAND)).toBe(second);
 				expect(warn).toHaveBeenCalledTimes(1);
 			} finally {
 				warn.mockRestore();
@@ -62,28 +62,28 @@ describe("testing/registry", () => {
 	});
 
 	describe("schema registration", () => {
-		test("register-then-lookup round-trips on schema identity", () => {
+		test("register-then-lookup round-trips on schema identity", async () => {
 			const schema = z.object({ id: z.string() });
 			const gen = fc.record({ id: fc.string() });
 			arbitrary(schema, gen);
-			expect(lookup(schema)).toBe(gen);
+			expect(await lookup(schema)).toBe(gen);
 		});
 
-		test("lookup returns undefined for unregistered schema", () => {
+		test("lookup returns undefined for unregistered schema", async () => {
 			const schema = z.object({ id: z.string() });
-			expect(lookup(schema)).toBeUndefined();
+			expect(await lookup(schema)).toBeUndefined();
 		});
 
-		test("structurally equal but distinct schema instances do not share registration", () => {
+		test("structurally equal but distinct schema instances do not share registration", async () => {
 			const a = z.object({ id: z.string() });
 			const b = z.object({ id: z.string() });
 			const gen = fc.record({ id: fc.string() });
 			arbitrary(a, gen);
-			expect(lookup(a)).toBe(gen);
-			expect(lookup(b)).toBeUndefined();
+			expect(await lookup(a)).toBe(gen);
+			expect(await lookup(b)).toBeUndefined();
 		});
 
-		test("duplicate schema registration overwrites and warns", () => {
+		test("duplicate schema registration overwrites and warns", async () => {
 			const warn = spyOn(console, "warn").mockImplementation(() => {});
 			try {
 				const schema = z.string();
@@ -91,7 +91,7 @@ describe("testing/registry", () => {
 				const second = fc.constant("b");
 				arbitrary(schema, first);
 				arbitrary(schema, second);
-				expect(lookup(schema)).toBe(second);
+				expect(await lookup(schema)).toBe(second);
 				expect(warn).toHaveBeenCalledTimes(1);
 			} finally {
 				warn.mockRestore();
@@ -100,7 +100,7 @@ describe("testing/registry", () => {
 	});
 
 	describe("failure registration", () => {
-		test("failure + lookup_failure round-trips per variant", () => {
+		test("failure + lookup_failure round-trips per variant", async () => {
 			const not_found_gen = fc.record({
 				kind: fc.constant("not_found" as const),
 				id: fc.string(),
@@ -111,24 +111,24 @@ describe("testing/registry", () => {
 			});
 			failure(DEMO_ERROR_BRAND, "not_found", not_found_gen);
 			failure(DEMO_ERROR_BRAND, "denied", denied_gen);
-			expect(lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBe(not_found_gen);
-			expect(lookup_failure(DEMO_ERROR_BRAND, "denied")).toBe(denied_gen);
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBe(not_found_gen);
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "denied")).toBe(denied_gen);
 		});
 
-		test("lookup_failure returns undefined for unregistered brand", () => {
-			expect(lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBeUndefined();
+		test("lookup_failure returns undefined for unregistered brand", async () => {
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBeUndefined();
 		});
 
-		test("lookup_failure returns undefined for unregistered variant under known brand", () => {
+		test("lookup_failure returns undefined for unregistered variant under known brand", async () => {
 			const not_found_gen = fc.record({
 				kind: fc.constant("not_found" as const),
 				id: fc.string(),
 			});
 			failure(DEMO_ERROR_BRAND, "not_found", not_found_gen);
-			expect(lookup_failure(DEMO_ERROR_BRAND, "denied")).toBeUndefined();
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "denied")).toBeUndefined();
 		});
 
-		test("duplicate failure registration overwrites and warns", () => {
+		test("duplicate failure registration overwrites and warns", async () => {
 			const warn = spyOn(console, "warn").mockImplementation(() => {});
 			try {
 				const first = fc.record({
@@ -141,7 +141,7 @@ describe("testing/registry", () => {
 				});
 				failure(DEMO_ERROR_BRAND, "not_found", first);
 				failure(DEMO_ERROR_BRAND, "not_found", second);
-				expect(lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBe(second);
+				expect(await lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBe(second);
 				expect(warn).toHaveBeenCalledTimes(1);
 			} finally {
 				warn.mockRestore();
@@ -150,7 +150,7 @@ describe("testing/registry", () => {
 	});
 
 	describe("__reset_registry_for_tests", () => {
-		test("clears brand, schema, and failure registries", () => {
+		test("clears brand, schema, and failure registries", async () => {
 			const schema = z.string();
 			arbitrary(USER_ID_BRAND, fc.constant("u" as UserId));
 			arbitrary(schema, fc.constant("x"));
@@ -162,9 +162,9 @@ describe("testing/registry", () => {
 
 			__reset_registry_for_tests();
 
-			expect(lookup(USER_ID_BRAND)).toBeUndefined();
-			expect(lookup(schema)).toBeUndefined();
-			expect(lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBeUndefined();
+			expect(await lookup(USER_ID_BRAND)).toBeUndefined();
+			expect(await lookup(schema)).toBeUndefined();
+			expect(await lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBeUndefined();
 		});
 	});
 });
