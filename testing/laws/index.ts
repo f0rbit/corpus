@@ -13,3 +13,4 @@ export { error_path_exhaustive, DEFAULT_NUM_RUNS } from "./error-path-exhaustive
 export { round_trip, DEFAULT_NUM_RUNS as ROUND_TRIP_DEFAULT_NUM_RUNS } from "./round-trip.js";
 export { idempotent, DEFAULT_NUM_RUNS as IDEMPOTENT_DEFAULT_NUM_RUNS } from "./idempotent.js";
 export { provider_equivalence, equivalence_command } from "./provider-equivalence.js";
+export { functor, type FunctorLawOpts } from "./functor.js";
