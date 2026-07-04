@@ -1405,7 +1405,7 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
           <article class="task" id="task-3-1">
             <header>
               <h3>Task 3.1: <code>law.round_trip</code> + <code>law.idempotent</code></h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1448,14 +1448,18 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: <code>32984ad</code> (phase-3/task-3-1, merged via <code>60d6928</code>).</li>
+                <li><code>bun test tests/unit/testing-laws-basic.test.ts</code> → 6 pass, 0 fail. Default equality is <code>Bun.deepEquals</code> (lazy lookup, throws actionably outside Bun — no top-level Bun reference; Node smoke-import of <code>dist/index.js</code> passes). Sync + async accepted via <code>fc.asyncProperty</code> + unconditional await. No <code>any</code>.</li>
+                <li>Verification-phase adjustments: <code>round_trip</code> generalised to <code>&lt;T, U&gt;</code> over the encoded form (was pinned to <code>Uint8Array</code> — the law is generic); duplicated <code>get_default_equals</code> extracted to <code>testing/laws/equality.ts</code>; per-law <code>DEFAULT_NUM_RUNS</code> constants demoted to module-locals and the laws barrel no longer exports three aliased run-count constants (<code>law.DEFAULT_NUM_RUNS</code> / <code>ROUND_TRIP_</code> / <code>IDEMPOTENT_DEFAULT_NUM_RUNS</code> removed — zero consumers, misleading names).</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-3-2">
             <header>
               <h3>Task 3.2: <code>law.functor</code> for Result types</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1498,14 +1502,18 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: <code>211472b</code> (merged via <code>c3992fa</code>).</li>
+                <li><code>bun test tests/property/result-functor.test.ts</code> → 2 pass (identity + composition 200/200; coverage test asserts ok/err branches ≥20% each via <code>testing.cover</code>). Uses corpus's real <code>pipe(...).map(...).result()</code> and <code>ok</code>/<code>err</code> constructors — no stub. No new public Result combinator introduced.</li>
+                <li>Verification-phase fix: <code>FunctorLawOpts</code> made generic <code>&lt;T, A&gt;</code> (the <code>fn</code> parameter was <code>(x: unknown) =&gt; unknown</code>, forcing casts at every call site) — eliminated the pilot's <code>fn(n) as number</code> cast and two <code>as unknown as fc.Arbitrary&lt;...&gt;</code> double casts. Pilot is now cast-free; generics flow through inference.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-3-3">
             <header>
               <h3>Task 3.3: <code>testing.commands</code> + <code>law.provider_equivalence</code></h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1561,14 +1569,20 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: <code>b93976b</code> (merged via <code>586312b</code>).</li>
+                <li><code>bun test tests/unit/testing-commands.test.ts</code> → 5 pass. Correct pair 200/200 with fresh model + fresh SUT per run (runtime-enforced; test asserts 200 builds each). OffByOne shrunk counterexample: <code>[add(1), increment()]</code> — 2 commands, asserted ≤2 and ending in <code>increment()</code>.</li>
+                <li>fast-check 4.8 has no separate <code>asyncCommands</code> entry point — <code>fc.commands</code> is overloaded; <code>async_commands</code> pins the async overload with an explicit signature so an upstream rename/reshape is a compile error in corpus. Types (<code>Command</code>, <code>AsyncCommand</code>, <code>CommandsConstraints</code>, ...) pinned by name.</li>
+                <li>Per-command equivalence via a module-private <code>WeakMap</code> mailbox keyed by model instance (the only value fast-check's command wrapper passes through untouched). Commands built by <code>equivalence_command</code> carry no run-scoped state — safe across positions, runs, and shrink retries; mailbox reset before every <code>run</code>. Divergence surfaces as fc's shrunk counterexample with the property error attached as <code>error.cause</code> (asserted in test).</li>
+                <li>Type-level generics constraint verified via <code>@ts-expect-error</code> mixed-Model command test.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-3-4">
             <header>
               <h3>Task 3.4: Pilot — cross-backend equivalence test</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1618,14 +1632,21 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Commit: <code>e29615f</code>.</li>
+                <li><code>bun test tests/property/backend-equivalence.test.ts</code> → 1 pass in 647 ms (&lt;30 s gate asserted in-test). 200 runs × maxCommands 30 (<code>size: "max"</code>) × 3 providers (memory, file, layered), 8 command types; coverage self-asserted in-test: ≥5% share per type + volume floor &gt;4800 total commands.</li>
+                <li><code>list</code> equivalence order-independent via canonical sort by version (stronger than a set — catches extra/missing/duplicates). Dates compared at epoch-ms; absent-vs-<code>undefined</code> optional keys unified (the file backend's JSON round-trip drops <code>undefined</code> keys — only difference normalised away).</li>
+                <li>Cloudflare exclusion + layered non-tx scoping documented in the test header. <code>tests/.tmp/</code> flushed between runs (memory provider's build is the per-run cleanup point) + <code>beforeAll</code>/<code>afterAll</code> root wipe.</li>
+                <li>FINDING (no backend change made): <code>backend/file.ts</code> <code>data_path</code> sanitises <code>/</code> → <code>_</code>, so data keys <code>a/b</code> and <code>a_b</code> alias to the same file. Pilot constrains its key domain to avoid it; recorded in <code>#out-of-scope</code> as a follow-up.</li>
+                <li>Sensitivity check: an intentionally broken model (delete_data as no-op) diverges and shrinks to <code>put_data → delete_data → get_data</code> — the law catches model/SUT drift in both directions.</li>
+              </ul>
             </section>
           </article>
 
           <article class="task" id="task-3-5">
             <header>
               <h3>Task 3.5: Verification — Phase 3 close-out</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1670,7 +1691,12 @@ export function compose&lt;T&gt;(fn: (draw: Draw) =&gt; T): fc.Arbitrary&lt;T&gt
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <ul>
+                <li>Gate: <code>bun run typecheck</code> clean; <code>bun test</code> → 743 pass, 0 fail (1.66 s, no hangs); <code>bun run build</code> clean. <code>dist/testing/laws/</code> contains round-trip, idempotent, functor, provider-equivalence, error-path-exhaustive, equality; <code>dist/testing/commands.js</code> present.</li>
+                <li>Barrel wiring: <code>testing/index.ts</code> now surfaces <code>commands</code>, <code>async_commands</code>, <code>model_run</code>, <code>async_model_run</code> + command types (<code>Command</code>, <code>AsyncCommand</code>, <code>ICommand</code>, <code>ModelRunSetup</code>, <code>ModelRunAsyncSetup</code>, <code>CommandsConstraints</code>); <code>law</code> namespace carries all five laws + <code>equivalence_command</code>. Node smoke-import of <code>dist/index.js</code> verified the full surface as functions — barrel stays Node-safe.</li>
+                <li>backend-equivalence pilot: 647 ms (&lt;30 s). Key-aliasing finding recorded in <code>#out-of-scope</code>; AGENTS.md appended per phase-3 <code>#agents-md-updates</code>.</li>
+                <li>Close-out commit on <code>feature/testing-substrate-phase-3</code> (SHA in PR).</li>
+              </ul>
             </section>
           </article>
         </section>
@@ -2114,6 +2140,7 @@ export async function load_registrars(specs: readonly RegistrarSpec[]): Promise&
           <li><strong>Vault / pulse / devpad registrars</strong> — the substrate enables them; this plan does not write them. Each downstream package gets its own small follow-up plan.</li>
           <li><strong>Custom shrink composition layer</strong> (Option 3's central proposal) — revisit only if fast-check's native rose-tree proves inadequate in practice.</li>
           <li><strong>Replacing <code>@traversable/zod-test</code></strong> with a pure in-corpus walker for esoteric leaves — only if @traversable lags Zod major versions or stalls.</li>
+          <li><strong>File-backend data-key aliasing</strong> — <code>backend/file.ts</code> <code>data_path</code> sanitises <code>/</code> → <code>_</code>, so data keys <code>a/b</code> and <code>a_b</code> collide on the same file. Latent hazard surfaced by the phase-3 equivalence pilot (which constrains its key domain to avoid fuzzing it). Follow-up: collision-free escaping (e.g. percent-encode <code>_</code> before mapping <code>/</code>) + a regression property test. Note the default <code>${store_id}/${content_hash}</code> key layout produces exactly one <code>/</code> and hex hashes (no <code>_</code>), so it never collides; custom <code>data_key_fn</code> layouts can.</li>
         </ul>
       </section>
 

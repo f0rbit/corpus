@@ -45,17 +45,16 @@ export type {
  *
  * @example
  * ```ts
- * import { testing } from "@f0rbit/corpus"
- * import { async_commands, async_model_run } from "@f0rbit/corpus/testing/commands"
+ * import * as testing from "@f0rbit/corpus/testing"
  *
- * const sequences = async_commands<CounterModel, Counter>([
+ * const sequences = testing.async_commands<CounterModel, Counter>([
  *   testing.fc.constant(increment_command),
  *   testing.fc.integer({ min: 1, max: 5 }).map((n) => add_command(n)),
  * ], { maxCommands: 20 })
  *
  * await testing.fc.assert(
  *   testing.fc.asyncProperty(sequences, (cmds) =>
- *     async_model_run(() => ({ model: { count: 0 }, real: make_counter() }), cmds),
+ *     testing.async_model_run(() => ({ model: { count: 0 }, real: make_counter() }), cmds),
  *   ),
  * )
  * ```

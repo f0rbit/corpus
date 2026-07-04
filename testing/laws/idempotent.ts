@@ -27,11 +27,9 @@
  */
 
 import fc from "fast-check";
+import { default_equals } from "./equality.js";
 
-/**
- * Default number of property runs. Reasonable for most operations.
- */
-export const DEFAULT_NUM_RUNS = 100;
+const DEFAULT_NUM_RUNS = 100;
 
 /**
  * Assert that `op(op(x))` equals `op(x)` for all generated values.
@@ -40,7 +38,7 @@ export const DEFAULT_NUM_RUNS = 100;
  * @param op — Function to test for idempotence; may be sync or async
  * @param opts — Optional `{ equals, numRuns }`
  *   - `equals(a, b)`: Custom equality check; defaults to `Bun.deepEquals` under Bun
- *   - `numRuns`: Property run count; defaults to `DEFAULT_NUM_RUNS`
+ *   - `numRuns`: Property run count; defaults to 100
  *
  * @throws If `op(op(x)) !== op(x)` for any generated `x`, or if no
  * equality function is available and running outside Bun.
@@ -54,7 +52,7 @@ export async function idempotent<T>(
 	},
 ): Promise<void> {
 	const num_runs = opts?.numRuns ?? DEFAULT_NUM_RUNS;
-	const equals = opts?.equals ?? get_default_equals<T>();
+	const equals = opts?.equals ?? default_equals<T>("idempotent");
 
 	await fc.assert(
 		fc.asyncProperty(arb, async (x: T) => {
@@ -67,14 +65,5 @@ export async function idempotent<T>(
 			}
 		}),
 		{ numRuns: num_runs, endOnFailure: true },
-	);
-}
-
-function get_default_equals<T>(): (a: T, b: T) => boolean {
-	if (typeof Bun !== "undefined") {
-		return (a: T, b: T) => Bun.deepEquals(a, b);
-	}
-	throw new Error(
-		"idempotent: no equality function provided and Bun is unavailable — pass opts.equals when running outside Bun",
 	);
 }

@@ -5,12 +5,15 @@
  * structured failure when the law is violated.
  *
  * Re-exported from `testing/index.ts` under the `law` namespace —
- * `testing.law.error_path_exhaustive(...)` / `testing.law.provider_equivalence(...)`
- * are the canonical call paths.
+ * `testing.law.round_trip(...)` / `testing.law.provider_equivalence(...)` are
+ * the canonical call paths.
+ *
+ * Each law carries its own default run count tuned to its cost profile
+ * (documented per module); pass `numRuns` to override.
  */
 
-export { error_path_exhaustive, DEFAULT_NUM_RUNS } from "./error-path-exhaustive.js";
-export { round_trip, DEFAULT_NUM_RUNS as ROUND_TRIP_DEFAULT_NUM_RUNS } from "./round-trip.js";
-export { idempotent, DEFAULT_NUM_RUNS as IDEMPOTENT_DEFAULT_NUM_RUNS } from "./idempotent.js";
+export { error_path_exhaustive } from "./error-path-exhaustive.js";
+export { round_trip } from "./round-trip.js";
+export { idempotent } from "./idempotent.js";
 export { provider_equivalence, equivalence_command } from "./provider-equivalence.js";
 export { functor, type FunctorLawOpts } from "./functor.js";

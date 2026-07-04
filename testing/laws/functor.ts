@@ -7,11 +7,14 @@
  * 2. **Composition**: `map(map(x, f), g) === map(x, g ∘ f)`
  *
  * This checker is generic over the functor instance — it does not import Result
- * or any specific type. Callers provide:
+ * or any specific type. `T` is the functor value (e.g. `Result<number, string>`),
+ * `A` is the wrapped element type the mapped functions operate on (e.g. `number`).
+ * Both flow through inference from `arb` and `fn_arb`, so call sites need no
+ * casts. Callers provide:
  * - An arbitrary to generate test values
  * - A `map(value, fn): mapped_value` operation
  * - An `equals(a, b): boolean` equality predicate
- * - Functions to generate and compose transformations
+ * - An arbitrary of endomorphisms `(x: A) => A`
  *
  * Each law runs separately; shrinking is disabled (`endOnFailure: true`) due to
  * potential issues with composed arbitraries (same rationale as
@@ -23,10 +26,10 @@
  * import { pipe } from "./result.js";
  *
  * await testing.law.functor({
- *   arb: testing.arb(mySchema),
+ *   arb: result_arb,
  *   map: (value, fn) => pipe(value).map(fn).result(),
  *   equals: (a, b) => deepEqual(a, b),
- *   fn_arb: () => testing.compose(draw => draw(fc.integer())),
+ *   fn_arb: testing.fc.func<[number], number>(testing.fc.integer()),
  *   numRuns: 200,
  * });
  * ```
@@ -38,21 +41,23 @@ import type { Arbitrary } from "fast-check";
 /**
  * Options for the functor law checker.
  *
- * - `arb`      — Arbitrary for generating test values of the functor's wrapped type.
+ * - `arb`      — Arbitrary for generating functor values (`T`).
  * - `map`      — The functor's map operation: `(value, fn) => mapped_value`.
  *                Can be sync or async (must return Promise for async).
  * - `equals`   — Equality predicate for comparing mapped results.
  *                Can be sync or async.
- * - `fn_arb`   — Arbitrary for generating endomorphic functions (from T to T).
+ * - `fn_arb`   — Arbitrary of endomorphisms on the wrapped element type (`A → A`).
  * - `numRuns`  — Number of property runs (default: 200).
  */
-export type FunctorLawOpts<T> = {
+export type FunctorLawOpts<T, A> = {
 	arb: Arbitrary<T>;
-	map: (value: T, fn: (x: unknown) => unknown) => T | Promise<T>;
+	map: (value: T, fn: (x: A) => A) => T | Promise<T>;
 	equals: (a: T, b: T) => boolean | Promise<boolean>;
-	fn_arb: Arbitrary<(x: unknown) => unknown>;
+	fn_arb: Arbitrary<(x: A) => A>;
 	numRuns?: number;
 };
+
+const DEFAULT_NUM_RUNS = 200;
 
 /**
  * Check the identity and composition laws for a functor.
@@ -67,8 +72,8 @@ export type FunctorLawOpts<T> = {
  *
  * @param opts - Configuration object (see {@link FunctorLawOpts})
  */
-export async function functor<T>(opts: FunctorLawOpts<T>): Promise<void> {
-	const num_runs = opts.numRuns ?? 200;
+export async function functor<T, A>(opts: FunctorLawOpts<T, A>): Promise<void> {
+	const num_runs = opts.numRuns ?? DEFAULT_NUM_RUNS;
 
 	// Identity law: map(x, id) === x
 	await fc.assert(
@@ -94,7 +99,7 @@ export async function functor<T>(opts: FunctorLawOpts<T>): Promise<void> {
 			const left = await Promise.resolve(opts.map(map_f, g));
 
 			// Right side: map(x, g ∘ f)
-			const composed = (a: unknown) => g(f(a));
+			const composed = (a: A): A => g(f(a));
 			const right = await Promise.resolve(opts.map(x, composed));
 
 			// Check equality
