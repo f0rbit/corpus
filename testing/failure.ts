@@ -55,8 +55,6 @@ export { failure, lookup_failure };
  * // readonly ('not_found' | 'already_exists' | ... )[]
  * ```
  */
-export function list_registered_variants<E extends { kind: string }>(
-	brand: ArbBrand<E>
-): readonly E["kind"][] {
+export function list_registered_variants<E extends { kind: string }>(brand: ArbBrand<E>): readonly E["kind"][] {
 	return list_failure_variants(brand);
 }

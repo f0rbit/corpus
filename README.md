@@ -11,25 +11,25 @@ bun add @f0rbit/corpus
 ## usage
 
 ```typescript
-import { z } from 'zod'
-import { create_corpus, create_memory_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { z } from "zod";
+import { create_corpus, create_memory_backend, define_store, json_codec } from "@f0rbit/corpus";
 
 const TimelineSchema = z.object({
-  items: z.array(z.object({ id: z.string(), text: z.string() })),
-})
+	items: z.array(z.object({ id: z.string(), text: z.string() })),
+});
 
 const corpus = create_corpus()
-  .with_backend(create_memory_backend())
-  .with_store(define_store('timelines', json_codec(TimelineSchema)))
-  .build()
+	.with_backend(create_memory_backend())
+	.with_store(define_store("timelines", json_codec(TimelineSchema)))
+	.build();
 
 // typed store access - version is auto-generated
-const result = await corpus.stores.timelines.put({ 
-  items: [{ id: '1', text: 'hello' }] 
-})
+const result = await corpus.stores.timelines.put({
+	items: [{ id: "1", text: "hello" }],
+});
 
 if (result.ok) {
-  console.log('saved:', result.value.content_hash)
+	console.log("saved:", result.value.content_hash);
 }
 ```
 

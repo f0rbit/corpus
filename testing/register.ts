@@ -13,31 +13,31 @@
  * Phase 2 lights up the CORPUS_ERROR_BRAND failure registrations (12 variants).
  */
 
-import fc from 'fast-check';
-import type { ArbBrand } from './types.js';
-import { arbitrary } from './registry.js';
-import { compose } from './compose.js';
-import { failure } from './failure.js';
+import fc from "fast-check";
+import type { ArbBrand } from "./types.js";
+import { arbitrary } from "./registry.js";
+import { compose } from "./compose.js";
+import { failure } from "./failure.js";
 
-import type { CorpusError, SnapshotMeta, BatchOp } from '../types.js';
+import type { CorpusError, SnapshotMeta, BatchOp } from "../types.js";
 
 /**
  * Branded symbol for CorpusError. Used to register per-variant failure generators
  * via `testing.failure(CORPUS_ERROR_BRAND, "not_found", ...)`.
  */
-export const CORPUS_ERROR_BRAND = Symbol('CorpusError') as ArbBrand<CorpusError>;
+export const CORPUS_ERROR_BRAND = Symbol("CorpusError") as ArbBrand<CorpusError>;
 
 /**
  * Branded symbol for SnapshotMeta. Used to register/lookup the canonical
  * SnapshotMeta arbitrary via `testing.arbitrary(SNAPSHOT_META_BRAND, ...)`.
  */
-export const SNAPSHOT_META_BRAND = Symbol('SnapshotMeta') as ArbBrand<SnapshotMeta>;
+export const SNAPSHOT_META_BRAND = Symbol("SnapshotMeta") as ArbBrand<SnapshotMeta>;
 
 /**
  * Branded symbol for BatchOp. Used to register/lookup the canonical BatchOp
  * arbitrary via `testing.arbitrary(BATCH_OP_BRAND, ...)`.
  */
-export const BATCH_OP_BRAND = Symbol('BatchOp') as ArbBrand<BatchOp>;
+export const BATCH_OP_BRAND = Symbol("BatchOp") as ArbBrand<BatchOp>;
 
 const non_empty_string = fc.string({ minLength: 1, maxLength: 50 });
 const hex_hash = fc.stringMatching(/^[a-f0-9]{64}$/);
@@ -69,7 +69,7 @@ function register_snapshot_meta(): void {
 			parents: [],
 			created_at,
 			content_hash,
-			content_type: 'application/octet-stream' as const,
+			content_type: "application/octet-stream" as const,
 			size_bytes,
 			data_key,
 			tags: tags ?? undefined,
@@ -82,9 +82,9 @@ function register_snapshot_meta(): void {
 function register_corpus_error_variants(): void {
 	failure(
 		CORPUS_ERROR_BRAND,
-		'not_found',
+		"not_found",
 		compose((draw) => ({
-			kind: 'not_found' as const,
+			kind: "not_found" as const,
 			store_id: draw(non_empty_string),
 			version: draw(non_empty_string),
 		})),
@@ -92,9 +92,9 @@ function register_corpus_error_variants(): void {
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'already_exists',
+		"already_exists",
 		compose((draw) => ({
-			kind: 'already_exists' as const,
+			kind: "already_exists" as const,
 			store_id: draw(non_empty_string),
 			version: draw(non_empty_string),
 		})),
@@ -102,37 +102,37 @@ function register_corpus_error_variants(): void {
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'storage_error',
+		"storage_error",
 		compose((draw) => ({
-			kind: 'storage_error' as const,
+			kind: "storage_error" as const,
 			cause: draw(error_arb),
-			operation: draw(fc.constantFrom('meta_get', 'meta_put', 'meta_delete', 'data_get', 'data_put', 'data_delete')),
+			operation: draw(fc.constantFrom("meta_get", "meta_put", "meta_delete", "data_get", "data_put", "data_delete")),
 		})),
 	);
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'decode_error',
+		"decode_error",
 		compose((draw) => ({
-			kind: 'decode_error' as const,
-			cause: draw(error_arb),
-		})),
-	);
-
-	failure(
-		CORPUS_ERROR_BRAND,
-		'encode_error',
-		compose((draw) => ({
-			kind: 'encode_error' as const,
+			kind: "decode_error" as const,
 			cause: draw(error_arb),
 		})),
 	);
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'hash_mismatch',
+		"encode_error",
 		compose((draw) => ({
-			kind: 'hash_mismatch' as const,
+			kind: "encode_error" as const,
+			cause: draw(error_arb),
+		})),
+	);
+
+	failure(
+		CORPUS_ERROR_BRAND,
+		"hash_mismatch",
+		compose((draw) => ({
+			kind: "hash_mismatch" as const,
 			expected: draw(hex_hash),
 			actual: draw(hex_hash),
 		})),
@@ -140,18 +140,18 @@ function register_corpus_error_variants(): void {
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'invalid_config',
+		"invalid_config",
 		compose((draw) => ({
-			kind: 'invalid_config' as const,
+			kind: "invalid_config" as const,
 			message: draw(fc.string({ minLength: 1, maxLength: 200 })),
 		})),
 	);
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'validation_error',
+		"validation_error",
 		compose((draw) => ({
-			kind: 'validation_error' as const,
+			kind: "validation_error" as const,
 			cause: draw(error_arb),
 			message: draw(fc.string({ minLength: 1, maxLength: 200 })),
 		})),
@@ -159,29 +159,33 @@ function register_corpus_error_variants(): void {
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'observation_not_found',
+		"observation_not_found",
 		compose((draw) => ({
-			kind: 'observation_not_found' as const,
+			kind: "observation_not_found" as const,
 			id: draw(non_empty_string),
 		})),
 	);
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'transaction_aborted',
+		"transaction_aborted",
 		compose((draw) => {
-			const reason = draw(fc.constantFrom('returned_err', 'threw', 'apply_batch_failed') as fc.Arbitrary<'returned_err' | 'threw' | 'apply_batch_failed'>);
+			const reason = draw(
+				fc.constantFrom("returned_err", "threw", "apply_batch_failed") as fc.Arbitrary<
+					"returned_err" | "threw" | "apply_batch_failed"
+				>,
+			);
 			const has_cause = draw(fc.boolean());
-			const base = { kind: 'transaction_aborted' as const, reason };
+			const base = { kind: "transaction_aborted" as const, reason };
 			return has_cause ? { ...base, cause: draw(error_arb) } : base;
 		}),
 	);
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'partial_commit',
+		"partial_commit",
 		compose((draw) => ({
-			kind: 'partial_commit' as const,
+			kind: "partial_commit" as const,
 			ops_completed: draw(fc.integer({ min: 0, max: 100 })),
 			ops_failed: draw(fc.integer({ min: 1, max: 100 })),
 			cause: draw(error_arb),
@@ -190,9 +194,9 @@ function register_corpus_error_variants(): void {
 
 	failure(
 		CORPUS_ERROR_BRAND,
-		'concurrent_modification',
+		"concurrent_modification",
 		compose((draw) => ({
-			kind: 'concurrent_modification' as const,
+			kind: "concurrent_modification" as const,
 			store_id: draw(non_empty_string),
 			version: draw(non_empty_string),
 		})),

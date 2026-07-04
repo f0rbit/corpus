@@ -14,7 +14,7 @@ const SentimentType = define_observation_type(
 		subject: z.string(),
 		score: z.number().min(-1).max(1),
 		keywords: z.array(z.string()),
-	})
+	}),
 );
 
 const EntityType = define_observation_type(
@@ -23,14 +23,14 @@ const EntityType = define_observation_type(
 		name: z.string(),
 		type: z.enum(["person", "org", "location"]),
 		mentions: z.number(),
-	})
+	}),
 );
 
 const SimpleType = define_observation_type(
 	"simple",
 	z.object({
 		value: z.string(),
-	})
+	}),
 );
 
 describe("observations integration - file backend", () => {
@@ -544,11 +544,11 @@ describe("observations integration - file backend", () => {
 							z.object({
 								key: z.string(),
 								values: z.array(z.number()),
-							})
+							}),
 						),
 						optional: z.string().optional(),
 					}),
-				})
+				}),
 			);
 
 			const content = {

@@ -1,19 +1,13 @@
 import { describe, test, expect, beforeEach, spyOn } from "bun:test";
 import fc from "fast-check";
-import {
-	failure,
-	lookup_failure,
-	list_registered_variants,
-} from "../../testing/failure";
+import { failure, lookup_failure, list_registered_variants } from "../../testing/failure";
 import { __reset_registry_for_tests } from "../../testing/registry";
 import { compose } from "../../testing/compose";
 import type { ArbBrand } from "../../testing/types";
 import type { CorpusError } from "../../types";
 import { CORPUS_ERROR_BRAND, register } from "../../testing/register";
 
-type DemoError =
-	| { kind: "boom"; reason: string }
-	| { kind: "splat"; level: number };
+type DemoError = { kind: "boom"; reason: string } | { kind: "splat"; level: number };
 
 const DEMO_ERROR_BRAND = Symbol("DemoError") as ArbBrand<DemoError>;
 

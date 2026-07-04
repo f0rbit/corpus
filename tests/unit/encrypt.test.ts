@@ -2,11 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { encrypt_codec } from "../../codecs/encrypt";
 import { compose, text_codec } from "../../utils";
 
-const make_key = () => crypto.subtle.generateKey(
-	{ name: "AES-GCM", length: 256 },
-	true,
-	["encrypt", "decrypt"],
-);
+const make_key = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 
 describe("encrypt_codec", () => {
 	let key: CryptoKey;
@@ -50,7 +46,7 @@ describe("encrypt_codec", () => {
 		// Flip a byte well inside the ciphertext (past the 12-byte IV).
 		const tampered = new Uint8Array(ciphertext);
 		const flip_at = 16;
-		tampered[flip_at] = (tampered[flip_at]! ^ 0x01);
+		tampered[flip_at] = tampered[flip_at]! ^ 0x01;
 
 		expect(codec.decode(tampered)).rejects.toThrow();
 	});

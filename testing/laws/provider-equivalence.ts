@@ -131,17 +131,13 @@ const divergence = (
 		return `ok flags disagree (model ok=${model_shape.ok}, sut ok=${sut_shape.ok})`;
 	}
 	if (model_shape.ok === true && sut_shape.ok === true) {
-		return results_agree(model_shape.value, sut_shape.value)
-			? undefined
-			: "ok values disagree under results_agree";
+		return results_agree(model_shape.value, sut_shape.value) ? undefined : "ok values disagree under results_agree";
 	}
 	if (model_shape.ok === false && sut_shape.ok === false) {
 		const model_kind = error_kind(model_shape.error);
 		const sut_kind = error_kind(sut_shape.error);
 		if (model_kind !== undefined && sut_kind !== undefined) {
-			return model_kind === sut_kind
-				? undefined
-				: `error kinds disagree (model='${model_kind}', sut='${sut_kind}')`;
+			return model_kind === sut_kind ? undefined : `error kinds disagree (model='${model_kind}', sut='${sut_kind}')`;
 		}
 		return results_agree(model_r, sut_r)
 			? undefined

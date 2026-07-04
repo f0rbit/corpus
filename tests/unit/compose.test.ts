@@ -6,12 +6,13 @@ const passthrough_codec = (): BytesCodec => ({
 	content_type: "application/octet-stream",
 	encode: async (bytes) => bytes,
 	decode: async (bytes) => bytes,
-	encode_stream: (value) => new ReadableStream<Uint8Array>({
-		start(controller) {
-			controller.enqueue(value)
-			controller.close()
-		}
-	}),
+	encode_stream: (value) =>
+		new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(value);
+				controller.close();
+			},
+		}),
 	decode_stream: (stream) => stream,
 });
 
@@ -31,7 +32,9 @@ const xor_layer = (mask = 0xff): BytesCodec => {
 const failing_decode_layer = (message = "boom"): BytesCodec => ({
 	content_type: "application/octet-stream",
 	encode: async (bytes) => bytes,
-	decode: async () => { throw new Error(message); },
+	decode: async () => {
+		throw new Error(message);
+	},
 });
 
 describe("compose", () => {
@@ -97,7 +100,7 @@ describe("compose", () => {
 			start(controller) {
 				controller.enqueue(bytes);
 				controller.close();
-			}
+			},
 		});
 
 		const out_stream = composed.decode_stream!(input);

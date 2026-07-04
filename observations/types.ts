@@ -151,7 +151,10 @@ export type ObservationPutOpts<T> = {
  * };
  * ```
  */
-export type VersionFilter = Set<string> | string[] | ((store_id: string, version: string) => boolean | Promise<boolean>);
+export type VersionFilter =
+	| Set<string>
+	| string[]
+	| ((store_id: string, version: string) => boolean | Promise<boolean>);
 
 /**
  * Query options for filtering observations.

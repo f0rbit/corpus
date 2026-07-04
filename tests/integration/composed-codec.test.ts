@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { z } from "zod";
-import {
-	create_corpus,
-	create_memory_backend,
-	define_store,
-	json_codec,
-	compose,
-} from "../../index";
+import { create_corpus, create_memory_backend, define_store, json_codec, compose } from "../../index";
 import { gzip_codec } from "../../codecs/gzip";
 import { encrypt_codec } from "../../codecs/encrypt";
 
@@ -16,11 +10,7 @@ const EventSchema = z.object({
 	payload: z.string(),
 });
 
-const make_key = () => crypto.subtle.generateKey(
-	{ name: "AES-GCM", length: 256 },
-	true,
-	["encrypt", "decrypt"],
-);
+const make_key = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 
 describe("composed codec integration", () => {
 	describe("compose(json_codec, gzip_codec)", () => {

@@ -26,10 +26,8 @@ const result_arb = testing.fc.oneof(
 
 const fn_arb = testing.fc.func<[number], number>(testing.fc.integer());
 
-const map_result = (
-	result: Result<number, string>,
-	fn: (x: number) => number,
-): Promise<Result<number, string>> => pipe(result).map(fn).result();
+const map_result = (result: Result<number, string>, fn: (x: number) => number): Promise<Result<number, string>> =>
+	pipe(result).map(fn).result();
 
 const equals_result = (a: Result<number, string>, b: Result<number, string>): boolean => {
 	if (a.ok !== b.ok) return false;

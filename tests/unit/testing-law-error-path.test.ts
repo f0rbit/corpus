@@ -8,9 +8,7 @@ import { ok, err } from "../../types.js";
 import type { Result } from "../../types.js";
 import type { ArbBrand } from "../../testing/types.js";
 
-type DemoError =
-	| { kind: "ka" }
-	| { kind: "kb"; reason: string };
+type DemoError = { kind: "ka" } | { kind: "kb"; reason: string };
 
 const DEMO_BRAND = Symbol("DemoError") as ArbBrand<DemoError>;
 

@@ -15,7 +15,7 @@ describe("testing/arb", () => {
 			const a = arb(z.string().min(3).max(7));
 			fc.assert(
 				fc.property(a, (v) => v.length >= 3 && v.length <= 7),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -23,7 +23,7 @@ describe("testing/arb", () => {
 			const a = arb(z.string().length(10));
 			fc.assert(
 				fc.property(a, (v) => v.length === 10),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -32,7 +32,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -41,7 +41,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -50,7 +50,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -59,7 +59,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -67,7 +67,7 @@ describe("testing/arb", () => {
 			const a = arb(z.number().int().min(0).max(100));
 			fc.assert(
 				fc.property(a, (v) => Number.isInteger(v) && v >= 0 && v <= 100),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -76,7 +76,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => typeof v === "number" && !Number.isNaN(v)),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -84,7 +84,7 @@ describe("testing/arb", () => {
 			const a = arb(z.boolean());
 			fc.assert(
 				fc.property(a, (v) => typeof v === "boolean"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -92,7 +92,7 @@ describe("testing/arb", () => {
 			const a = arb(z.date());
 			fc.assert(
 				fc.property(a, (v) => v instanceof Date),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -100,7 +100,7 @@ describe("testing/arb", () => {
 			const a = arb(z.bigint());
 			fc.assert(
 				fc.property(a, (v) => typeof v === "bigint"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -108,7 +108,7 @@ describe("testing/arb", () => {
 			const a = arb(z.literal("yes"));
 			fc.assert(
 				fc.property(a, (v) => v === "yes"),
-				{ numRuns: 20 }
+				{ numRuns: 20 },
 			);
 		});
 
@@ -116,7 +116,7 @@ describe("testing/arb", () => {
 			const a = arb(z.enum(["red", "green", "blue"]));
 			fc.assert(
 				fc.property(a, (v) => v === "red" || v === "green" || v === "blue"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -128,7 +128,7 @@ describe("testing/arb", () => {
 			const a = arb(z.nativeEnum(Color));
 			fc.assert(
 				fc.property(a, (v) => v === Color.Red || v === Color.Green),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 	});
@@ -143,7 +143,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -158,7 +158,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => typeof v.outer.inner.leaf === "string"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -166,7 +166,7 @@ describe("testing/arb", () => {
 			const a = arb(z.array(z.number()).min(2).max(5));
 			fc.assert(
 				fc.property(a, (v) => v.length >= 2 && v.length <= 5),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -174,7 +174,7 @@ describe("testing/arb", () => {
 			const a = arb(z.tuple([z.string(), z.number(), z.boolean()]));
 			fc.assert(
 				fc.property(a, ([s, n, b]) => typeof s === "string" && typeof n === "number" && typeof b === "boolean"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -187,7 +187,7 @@ describe("testing/arb", () => {
 					seen.add(v);
 					return v === "a" || v === "b" || v === "c";
 				}),
-				{ numRuns: 200 }
+				{ numRuns: 200 },
 			);
 			expect(seen.size).toBe(3);
 		});
@@ -200,7 +200,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 
@@ -213,7 +213,7 @@ describe("testing/arb", () => {
 					else seen.defined = true;
 					return v === undefined || typeof v === "string";
 				}),
-				{ numRuns: 200 }
+				{ numRuns: 200 },
 			);
 			expect(seen.defined).toBe(true);
 			expect(seen.undef).toBe(true);
@@ -228,7 +228,7 @@ describe("testing/arb", () => {
 					else seen.defined = true;
 					return v === null || typeof v === "string";
 				}),
-				{ numRuns: 200 }
+				{ numRuns: 200 },
 			);
 			expect(seen.defined).toBe(true);
 			expect(seen.nul).toBe(true);
@@ -239,7 +239,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => typeof v === "string" && schema.safeParse(v).success),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -248,7 +248,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => typeof v === "string"),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -262,7 +262,7 @@ describe("testing/arb", () => {
 					}
 					return true;
 				}),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 
@@ -271,7 +271,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => schema.safeParse(v).success),
-				{ numRuns: 50 }
+				{ numRuns: 50 },
 			);
 		});
 	});
@@ -283,7 +283,7 @@ describe("testing/arb", () => {
 			const a = arb(schema);
 			fc.assert(
 				fc.property(a, (v) => v.ignored === "registered"),
-				{ numRuns: 20 }
+				{ numRuns: 20 },
 			);
 		});
 
@@ -293,7 +293,7 @@ describe("testing/arb", () => {
 			const outer = z.object({ value: inner });
 			fc.assert(
 				fc.property(arb(outer), (v) => v.value === "PINNED"),
-				{ numRuns: 20 }
+				{ numRuns: 20 },
 			);
 		});
 	});
@@ -309,7 +309,7 @@ describe("testing/arb", () => {
 				z.object({
 					value: z.number().int().min(0).max(100),
 					children: z.array(TreeSchema).max(2),
-				})
+				}),
 			);
 			// fc.sample asserts only that we can produce a small batch without
 			// stack-overflowing. The schema validates structure.
@@ -323,7 +323,7 @@ describe("testing/arb", () => {
 
 	describe("unsupported schema kinds", () => {
 		test("ZodEffects throws with a message naming the kind and pointing at the escape hatch", () => {
-			const schema = z.string().refine(s => s.length > 0);
+			const schema = z.string().refine((s) => s.length > 0);
 			expect(() => arb(schema)).toThrow(/ZodEffects/);
 			expect(() => arb(schema)).toThrow(/testing\.arbitrary/);
 		});
@@ -334,7 +334,7 @@ describe("testing/arb", () => {
 			const a = arb(VersionSetManifestSchema);
 			fc.assert(
 				fc.property(a, (m) => VersionSetManifestSchema.safeParse(m).success),
-				{ numRuns: 100 }
+				{ numRuns: 100 },
 			);
 		});
 	});

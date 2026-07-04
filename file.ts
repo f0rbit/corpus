@@ -5,4 +5,4 @@
  * Import from '@f0rbit/corpus/file' to use this backend.
  */
 
-export { create_file_backend, recover, type FileBackendConfig } from './backend/file.js';
+export { create_file_backend, recover, type FileBackendConfig } from "./backend/file.js";

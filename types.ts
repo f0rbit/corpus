@@ -4,20 +4,20 @@
  */
 
 import type {
-  SnapshotPointer,
-  Observation,
-  ObservationMeta,
-  ObservationTypeDef,
-  ObservationPutOpts,
-  ObservationQueryOpts
-} from './observations/types.js';
-import type { ObservationRow } from './observations/schema.js';
+	SnapshotPointer,
+	Observation,
+	ObservationMeta,
+	ObservationTypeDef,
+	ObservationPutOpts,
+	ObservationQueryOpts,
+} from "./observations/types.js";
+import type { ObservationRow } from "./observations/schema.js";
 
 /**
  * Error types that can occur during Corpus operations.
  * @category Types
  * @group Error Types
- * 
+ *
  * Uses discriminated unions for type-safe error handling via the `kind` field:
  * - `not_found` - Requested snapshot or data does not exist
  * - `already_exists` - Attempted to create a snapshot that already exists
@@ -26,7 +26,7 @@ import type { ObservationRow } from './observations/schema.js';
  * - `encode_error` - Failed to encode data using the store's codec
  * - `hash_mismatch` - Content hash verification failed (data corruption)
  * - `invalid_config` - Configuration error during setup
- * 
+ *
  * @example
  * ```ts
  * const result = await store.get('nonexistent')
@@ -43,59 +43,57 @@ import type { ObservationRow } from './observations/schema.js';
  * ```
  */
 export type CorpusError =
-  | { kind: 'not_found'; store_id: string; version: string }
-  | { kind: 'already_exists'; store_id: string; version: string }
-  | { kind: 'storage_error'; cause: Error; operation: string }
-  | { kind: 'decode_error'; cause: Error }
-  | { kind: 'encode_error'; cause: Error }
-  | { kind: 'hash_mismatch'; expected: string; actual: string }
-  | { kind: 'invalid_config'; message: string }
-  | { kind: 'validation_error'; cause: Error; message: string }
-  | { kind: 'observation_not_found'; id: string }
-  | { kind: 'transaction_aborted'; reason: 'returned_err' | 'threw' | 'apply_batch_failed'; cause?: Error }
-  | { kind: 'partial_commit'; ops_completed: number; ops_failed: number; cause: Error }
-  | { kind: 'concurrent_modification'; store_id: string; version: string }
+	| { kind: "not_found"; store_id: string; version: string }
+	| { kind: "already_exists"; store_id: string; version: string }
+	| { kind: "storage_error"; cause: Error; operation: string }
+	| { kind: "decode_error"; cause: Error }
+	| { kind: "encode_error"; cause: Error }
+	| { kind: "hash_mismatch"; expected: string; actual: string }
+	| { kind: "invalid_config"; message: string }
+	| { kind: "validation_error"; cause: Error; message: string }
+	| { kind: "observation_not_found"; id: string }
+	| { kind: "transaction_aborted"; reason: "returned_err" | "threw" | "apply_batch_failed"; cause?: Error }
+	| { kind: "partial_commit"; ops_completed: number; ops_failed: number; cause: Error }
+	| { kind: "concurrent_modification"; store_id: string; version: string };
 
 /**
  * A discriminated union representing either success or failure.
  * @category Types
  * @group Result Types
  */
-export type Result<T, E = CorpusError> =
-  | { ok: true; value: T }
-  | { ok: false; error: E }
+export type Result<T, E = CorpusError> = { ok: true; value: T } | { ok: false; error: E };
 
 /**
  * Creates a successful Result containing a value.
- * 
+ *
  * @category Core
  * @group Result Helpers
  * @param value - The success value to wrap
  * @returns A Result with `ok: true` and the value
- * 
+ *
  * @example
  * ```ts
  * function divide(a: number, b: number): Result<number, string> {
  *   if (b === 0) return err('Division by zero')
  *   return ok(a / b)
  * }
- * 
+ *
  * const result = divide(10, 2)
  * if (result.ok) {
  *   console.log(result.value) // 5
  * }
  * ```
  */
-export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
+export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
 
 /**
  * Creates a failed Result containing an error.
- * 
+ *
  * @category Core
  * @group Result Helpers
  * @param error - The error to wrap
  * @returns A Result with `ok: false` and the error
- * 
+ *
  * @example
  * ```ts
  * function parsePositive(s: string): Result<number, string> {
@@ -106,40 +104,40 @@ export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
  * }
  * ```
  */
-export const err = <E>(error: E): Result<never, E> => ({ ok: false, error })
+export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
 
 export type CorpusEvent =
-  | { type: 'meta_get'; store_id: string; version: string; found: boolean }
-  | { type: 'meta_put'; store_id: string; version: string }
-  | { type: 'meta_delete'; store_id: string; version: string }
-  | { type: 'meta_list'; store_id: string; count: number }
-  | { type: 'data_get'; store_id: string; version: string; found: boolean }
-  | { type: 'data_put'; store_id: string; version: string; size_bytes: number; deduplicated: boolean }
-  | { type: 'data_delete'; store_id: string; version: string }
-  | { type: 'snapshot_put'; store_id: string; version: string; content_hash: string; deduplicated: boolean }
-  | { type: 'snapshot_get'; store_id: string; version: string; found: boolean }
-  | { type: 'error'; error: CorpusError }
+	| { type: "meta_get"; store_id: string; version: string; found: boolean }
+	| { type: "meta_put"; store_id: string; version: string }
+	| { type: "meta_delete"; store_id: string; version: string }
+	| { type: "meta_list"; store_id: string; count: number }
+	| { type: "data_get"; store_id: string; version: string; found: boolean }
+	| { type: "data_put"; store_id: string; version: string; size_bytes: number; deduplicated: boolean }
+	| { type: "data_delete"; store_id: string; version: string }
+	| { type: "snapshot_put"; store_id: string; version: string; content_hash: string; deduplicated: boolean }
+	| { type: "snapshot_get"; store_id: string; version: string; found: boolean }
+	| { type: "error"; error: CorpusError };
 
-export type EventHandler = (event: CorpusEvent) => void
+export type EventHandler = (event: CorpusEvent) => void;
 
 export type ContentType =
-  | "application/json"
-  | "text/plain"
-  | "text/xml"
-  | "image/png"
-  | "image/jpeg"
-  | "application/octet-stream"
-  | (string & {})
+	| "application/json"
+	| "text/plain"
+	| "text/xml"
+	| "image/png"
+	| "image/jpeg"
+	| "application/octet-stream"
+	| (string & {});
 
 export type ParentRef = {
-  store_id: string
-  version: string
-  role?: string
-}
+	store_id: string;
+	version: string;
+	role?: string;
+};
 
 /**
  * Metadata about a stored snapshot (without the actual data).
- * 
+ *
  * Key fields:
  * - `store_id` - Which store this snapshot belongs to
  * - `version` - Unique, time-sortable identifier for this snapshot
@@ -147,7 +145,7 @@ export type ParentRef = {
  * - `data_key` - Key to retrieve the actual data from the backend
  * - `parents` - Links to parent snapshots for building data lineage graphs
  * - `tags` - Optional labels for filtering and organization
- * 
+ *
  * @category Types
  * @group Snapshot Types
  * @example
@@ -156,7 +154,7 @@ export type ParentRef = {
  *   parents: [{ store_id: 'source', version: 'abc123' }],
  *   tags: ['draft', 'reviewed']
  * })
- * 
+ *
  * if (result.ok) {
  *   const meta = result.value
  *   console.log(`Stored ${meta.size_bytes} bytes as version ${meta.version}`)
@@ -164,22 +162,22 @@ export type ParentRef = {
  * ```
  */
 export type SnapshotMeta = {
-  store_id: string
-  version: string
-  parents: ParentRef[]
-  created_at: Date
-  invoked_at?: Date
-  content_hash: string
-  content_type: ContentType
-  size_bytes: number
-  data_key: string
-  tags?: string[]
-}
+	store_id: string;
+	version: string;
+	parents: ParentRef[];
+	created_at: Date;
+	invoked_at?: Date;
+	content_hash: string;
+	content_type: ContentType;
+	size_bytes: number;
+	data_key: string;
+	tags?: string[];
+};
 
 export type Snapshot<T = unknown> = {
-  meta: SnapshotMeta
-  data: T
-}
+	meta: SnapshotMeta;
+	data: T;
+};
 
 /**
  * Value types that can be chunked across a `ReadableStream`.
@@ -191,7 +189,7 @@ export type Snapshot<T = unknown> = {
  * @category Types
  * @group Codec Types
  */
-export type StreamableValue = string | Uint8Array
+export type StreamableValue = string | Uint8Array;
 
 /**
  * Lazy handle returned by `Store.get_handle` / `Store.get_latest_handle`.
@@ -207,45 +205,43 @@ export type StreamableValue = string | Uint8Array
  * @group Snapshot Types
  */
 export type SnapshotHandle<T> = {
-  value: () => Promise<Result<T, CorpusError>>
-  bytes: () => Promise<Result<Uint8Array, CorpusError>>
-  stream: T extends StreamableValue
-    ? () => Promise<Result<ReadableStream<T>, CorpusError>>
-    : never
-}
+	value: () => Promise<Result<T, CorpusError>>;
+	bytes: () => Promise<Result<Uint8Array, CorpusError>>;
+	stream: T extends StreamableValue ? () => Promise<Result<ReadableStream<T>, CorpusError>> : never;
+};
 
 /** @internal */
 export type DataHandle = {
-  stream: () => ReadableStream<Uint8Array>
-  bytes: () => Promise<Uint8Array>
-}
+	stream: () => ReadableStream<Uint8Array>;
+	bytes: () => Promise<Uint8Array>;
+};
 
 /** @internal */
 export type MetadataClient = {
-  get: (store_id: string, version: string) => Promise<Result<SnapshotMeta, CorpusError>>
-  put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>
-  delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>
-  list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>
-  get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>
-  get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>
-  find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>
-}
+	get: (store_id: string, version: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>;
+	delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>;
+	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
+	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
+	find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>;
+};
 
 /** @internal */
 export type DataClient = {
-  get: (data_key: string) => Promise<Result<DataHandle, CorpusError>>
-  put: (data_key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<Result<void, CorpusError>>
-  delete: (data_key: string) => Promise<Result<void, CorpusError>>
-  exists: (data_key: string) => Promise<boolean>
-}
+	get: (data_key: string) => Promise<Result<DataHandle, CorpusError>>;
+	put: (data_key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<Result<void, CorpusError>>;
+	delete: (data_key: string) => Promise<Result<void, CorpusError>>;
+	exists: (data_key: string) => Promise<boolean>;
+};
 
 export type ListOpts = {
-  limit?: number
-  cursor?: string
-  before?: Date
-  after?: Date
-  tags?: string[]
-}
+	limit?: number;
+	cursor?: string;
+	before?: Date;
+	after?: Date;
+	tags?: string[];
+};
 
 /**
  * Wire format for atomic batches submitted to `Backend.apply_batch`.
@@ -260,11 +256,11 @@ export type ListOpts = {
  * @group Transaction Types
  */
 export type BatchOp =
-  | { type: 'meta_put'; meta: SnapshotMeta }
-  | { type: 'meta_delete'; store_id: string; version: string }
-  | { type: 'data_put'; data_key: string; bytes: Uint8Array }
-  | { type: 'observation_put'; row: ObservationRow }
-  | { type: 'observation_delete'; id: string }
+	| { type: "meta_put"; meta: SnapshotMeta }
+	| { type: "meta_delete"; store_id: string; version: string }
+	| { type: "data_put"; data_key: string; bytes: Uint8Array }
+	| { type: "observation_put"; row: ObservationRow }
+	| { type: "observation_delete"; id: string };
 
 /**
  * Interface that storage backends implement.
@@ -283,32 +279,32 @@ export type BatchOp =
  * @group Backend Types
  */
 export type Backend = {
-  metadata: MetadataClient
-  data: DataClient
-  observations?: ObservationsClient
-  on_event?: EventHandler
-  /**
-   * Apply ops atomically. If absent, `corpus.transaction()` falls back to
-   * sequential best-effort with compensating deletes. Backends with native
-   * batch support (D1's `db.batch`, in-memory snapshot+rollback, file
-   * staged-rename) implement this for real atomicity.
-   */
-  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
-}
+	metadata: MetadataClient;
+	data: DataClient;
+	observations?: ObservationsClient;
+	on_event?: EventHandler;
+	/**
+	 * Apply ops atomically. If absent, `corpus.transaction()` falls back to
+	 * sequential best-effort with compensating deletes. Backends with native
+	 * batch support (D1's `db.batch`, in-memory snapshot+rollback, file
+	 * staged-rename) implement this for real atomicity.
+	 */
+	apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>;
+};
 
 /**
  * Serialization interface for encoding/decoding store data.
- * 
+ *
  * A Codec converts between typed values and binary data:
  * - `encode` - Converts a value to bytes for storage
  * - `decode` - Converts bytes back to a typed value
  * - `content_type` - MIME type stored in metadata
- * 
+ *
  * Built-in codecs:
  * - `json_codec(schema)` - JSON with Zod validation on decode
  * - `text_codec()` - Plain UTF-8 text
  * - `binary_codec()` - Raw binary pass-through
- * 
+ *
  * @category Types
  * @group Codec Types
  * @example
@@ -322,14 +318,14 @@ export type Backend = {
  * ```
  */
 export type Codec<T> = {
-  content_type: ContentType
-  encode: (value: T) => Promise<Uint8Array>
-  decode: (bytes: Uint8Array) => Promise<T>
-  /** Optional: chunked encode. If absent, callers can fall back to `encode` + a one-chunk stream. */
-  encode_stream?: (value: T) => ReadableStream<Uint8Array>
-  /** Optional: chunked decode. Absence means the codec is non-streaming on read. */
-  decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>
-}
+	content_type: ContentType;
+	encode: (value: T) => Promise<Uint8Array>;
+	decode: (bytes: Uint8Array) => Promise<T>;
+	/** Optional: chunked encode. If absent, callers can fall back to `encode` + a one-chunk stream. */
+	encode_stream?: (value: T) => ReadableStream<Uint8Array>;
+	/** Optional: chunked decode. Absence means the codec is non-streaming on read. */
+	decode_stream?: (bytes: ReadableStream<Uint8Array>) => ReadableStream<T>;
+};
 
 /**
  * A codec layer that transforms bytes → bytes (gzip, encrypt, base64, …).
@@ -339,24 +335,24 @@ export type Codec<T> = {
  * @category Types
  * @group Codec Types
  */
-export type BytesCodec = Codec<Uint8Array>
+export type BytesCodec = Codec<Uint8Array>;
 
 /**
  * Structural type for schema validators (Zod, Valibot, or custom).
- * 
+ *
  * Any object with a `parse(data: unknown) => T` method satisfies this interface.
  * Used by `json_codec()` to validate data on decode without importing a specific library.
- * 
+ *
  * @category Types
  * @group Codec Types
  * @example
  * ```ts
  * import { z } from 'zod'
- * 
+ *
  * // Zod schemas satisfy Parser<T>
  * const UserSchema = z.object({ name: z.string() })
  * const codec = json_codec(UserSchema) // works!
- * 
+ *
  * // Custom parsers work too
  * const myParser: Parser<number> = {
  *   parse: (data) => {
@@ -366,11 +362,11 @@ export type BytesCodec = Codec<Uint8Array>
  * }
  * ```
  */
-export type Parser<T> = { parse: (data: unknown) => T }
+export type Parser<T> = { parse: (data: unknown) => T };
 
 /**
  * A typed store for managing versioned data snapshots.
- * 
+ *
  * Stores provide the main API for reading and writing data:
  * - `put(data, opts?)` - Store a new snapshot, returns metadata with version
  * - `get(version)` - Retrieve a specific snapshot by version
@@ -378,85 +374,85 @@ export type Parser<T> = { parse: (data: unknown) => T }
  * - `get_meta(version)` - Get just the metadata (without data)
  * - `list(opts?)` - Iterate over snapshot metadata with filtering
  * - `delete(version)` - Remove a snapshot's metadata
- * 
+ *
  * Stores automatically deduplicate: storing the same content twice creates
  * two metadata entries pointing to the same underlying data.
- * 
+ *
  * @category Types
  * @group Store Types
  */
 export type Store<T> = {
-  readonly id: string
-  readonly codec: Codec<T>
-  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
-  get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
-  get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
-  get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
-  get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
-  get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>
-  list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>
-  delete: (version: string) => Promise<Result<void, CorpusError>>
-  put_stream: T extends StreamableValue
-    ? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
-    : never
-}
+	readonly id: string;
+	readonly codec: Codec<T>;
+	put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
+	get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
+	get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
+	delete: (version: string) => Promise<Result<void, CorpusError>>;
+	put_stream: T extends StreamableValue
+		? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+		: never;
+};
 
 export type PutOpts = {
-  parents?: ParentRef[]
-  invoked_at?: Date
-  tags?: string[]
-}
+	parents?: ParentRef[];
+	invoked_at?: Date;
+	tags?: string[];
+};
 
 /**
  * Context passed to data_key_fn for generating custom storage paths.
  * @internal
  */
 export type DataKeyContext = {
-  store_id: string
-  version: string
-  content_hash: string
-  tags?: string[]
-}
+	store_id: string;
+	version: string;
+	content_hash: string;
+	tags?: string[];
+};
 
 export type StoreDefinition<Id extends string, T> = {
-  id: Id
-  codec: Codec<T>
-  description?: string
-  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
-  data_key_fn?: (ctx: DataKeyContext) => string
-}
+	id: Id;
+	codec: Codec<T>;
+	description?: string;
+	/** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+	data_key_fn?: (ctx: DataKeyContext) => string;
+};
 
 export type DefineStoreOpts = {
-  description?: string
-  /** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
-  data_key_fn?: (ctx: DataKeyContext) => string
-}
+	description?: string;
+	/** Custom function to generate data_key (storage path). If not provided, uses `store_id/content_hash`. */
+	data_key_fn?: (ctx: DataKeyContext) => string;
+};
 
 /**
  * Helper to define a type-safe store definition.
- * 
+ *
  * The `id` becomes the key in `corpus.stores`, providing type-safe access
  * to the store after building the corpus.
- * 
+ *
  * @category Core
  * @group Helpers
  * @param id - Unique identifier for the store (becomes the key in corpus.stores)
  * @param codec - Serialization codec for the store's data type
  * @param opts - Optional configuration (description, custom data_key_fn)
  * @returns A StoreDefinition to pass to `create_corpus().with_store()`
- * 
+ *
  * @example
  * ```ts
  * import { z } from 'zod'
- * 
+ *
  * const PostSchema = z.object({
  *   title: z.string(),
  *   body: z.string(),
  *   published: z.boolean()
  * })
- * 
+ *
  * const posts = define_store('posts', json_codec(PostSchema), { description: 'Blog posts' })
- * 
+ *
  * // With custom path generation based on tags
  * const hansard = define_store('hansard', text_codec(), {
  *   data_key_fn: (ctx) => {
@@ -464,37 +460,37 @@ export type DefineStoreOpts = {
  *     return `australia-house/raw/${date}/${ctx.version}`
  *   }
  * })
- * 
+ *
  * const corpus = create_corpus()
  *   .with_backend(backend)
  *   .with_store(posts)
  *   .build()
- * 
+ *
  * // Type-safe: corpus.stores.posts expects Post type
  * await corpus.stores.posts.put({ title: 'Hello', body: '...', published: true })
  * ```
  */
 export function define_store<Id extends string, T>(
-  id: Id,
-  codec: Codec<T>,
-  opts?: DefineStoreOpts | string
+	id: Id,
+	codec: Codec<T>,
+	opts?: DefineStoreOpts | string,
 ): StoreDefinition<Id, T> {
-  // Support old signature: define_store(id, codec, description)
-  if (typeof opts === 'string') {
-    return { id, codec, description: opts }
-  }
-  return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn }
+	// Support old signature: define_store(id, codec, description)
+	if (typeof opts === "string") {
+		return { id, codec, description: opts };
+	}
+	return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn };
 }
 
 /** @internal */
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
-  with_backend: (backend: Backend) => CorpusBuilder<Stores>
-  with_store: <Id extends string, T>(
-    definition: StoreDefinition<Id, T>
-  ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
-  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>
-  build: () => Corpus<Stores>
-}
+	with_backend: (backend: Backend) => CorpusBuilder<Stores>;
+	with_store: <Id extends string, T>(
+		definition: StoreDefinition<Id, T>,
+	) => CorpusBuilder<Stores & Record<Id, Store<T>>>;
+	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>;
+	build: () => Corpus<Stores>;
+};
 
 /**
  * Result of a successful `corpus.transaction()`.
@@ -507,10 +503,10 @@ export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
  * @group Transaction Types
  */
 export type TransactionResult<R> = {
-  value: R
-  commits: SnapshotMeta[]
-  observations: Observation[]
-}
+	value: R;
+	commits: SnapshotMeta[];
+	observations: Observation[];
+};
 
 /**
  * Buffered handle passed to a `corpus.transaction()` callback.
@@ -528,64 +524,72 @@ export type TransactionResult<R> = {
  * @group Transaction Types
  */
 export type TransactionHandle = {
-  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
-  get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
-  delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>
-  observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
-  observation_delete: (id: string) => Promise<Result<void, CorpusError>>
-}
+	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
+	observe: <T>(
+		type: ObservationTypeDef<T>,
+		opts: ObservationPutOpts<T>,
+	) => Promise<Result<Observation<T>, CorpusError>>;
+	observation_delete: (id: string) => Promise<Result<void, CorpusError>>;
+};
 
 export type Corpus<Stores extends Record<string, Store<any>> = Record<string, Store<any>>> = {
-  stores: Stores
-  metadata: MetadataClient
-  data: DataClient
-  observations?: ObservationsClient
-  create_pointer: (store_id: string, version: string, path?: string, span?: { start: number; end: number }) => SnapshotPointer
-  resolve_pointer: <T>(pointer: SnapshotPointer) => Promise<Result<T, CorpusError>>
-  is_superseded: (pointer: SnapshotPointer) => Promise<boolean>
-  /**
-   * Run `body` as a single transaction. Mutations against `tx` are buffered
-   * and committed atomically (when the backend supports `apply_batch`) or
-   * sequentially with best-effort rollback.
-   *
-   * The body must return a `Result` — returning `err()` aborts the
-   * transaction. Throws are caught and wrapped as `transaction_aborted`.
-   * Nested calls to `corpus.transaction()` return `invalid_config`.
-   */
-  transaction: <R>(
-    body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
-  ) => Promise<Result<TransactionResult<R>, CorpusError>>
-}
+	stores: Stores;
+	metadata: MetadataClient;
+	data: DataClient;
+	observations?: ObservationsClient;
+	create_pointer: (
+		store_id: string,
+		version: string,
+		path?: string,
+		span?: { start: number; end: number },
+	) => SnapshotPointer;
+	resolve_pointer: <T>(pointer: SnapshotPointer) => Promise<Result<T, CorpusError>>;
+	is_superseded: (pointer: SnapshotPointer) => Promise<boolean>;
+	/**
+	 * Run `body` as a single transaction. Mutations against `tx` are buffered
+	 * and committed atomically (when the backend supports `apply_batch`) or
+	 * sequentially with best-effort rollback.
+	 *
+	 * The body must return a `Result` — returning `err()` aborts the
+	 * transaction. Throws are caught and wrapped as `transaction_aborted`.
+	 * Nested calls to `corpus.transaction()` return `invalid_config`.
+	 */
+	transaction: <R>(
+		body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>,
+	) => Promise<Result<TransactionResult<R>, CorpusError>>;
+};
 
 /**
  * Client interface for managing observations.
- * 
+ *
  * Observations are structured facts that point back to specific locations
  * in versioned content. The ObservationsClient provides CRUD operations
  * with type-safe validation via ObservationTypeDef schemas.
- * 
+ *
  * Key operations:
  * - `put` - Create a new observation with validated content
  * - `get` - Retrieve a single observation by ID
  * - `query` / `query_meta` - Filter observations with various criteria
  * - `delete` / `delete_by_source` - Remove observations
  * - `is_stale` - Check if source content has been superseded
- * 
+ *
  * @category Types
  * @group Observation Types
- * 
+ *
  * @example
  * ```ts
  * // Define observation type
  * const entity_mention = define_observation_type('entity_mention', EntitySchema)
- * 
+ *
  * // Create observation
  * const result = await observations.put(entity_mention, {
  *   source: { store_id: 'hansard', version: 'abc123', path: '$.speeches[0]' },
  *   content: { entity: 'Climate Change', entity_type: 'topic' },
  *   confidence: 0.95
  * })
- * 
+ *
  * // Query observations
  * for await (const obs of observations.query({ type: 'entity_mention' })) {
  *   console.log(obs.content)
@@ -593,14 +597,14 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
  * ```
  */
 export type ObservationsClient = {
-  put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
-  get: (id: string) => Promise<Result<Observation, CorpusError>>
-  query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>
-  query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>
-  delete: (id: string) => Promise<Result<void, CorpusError>>
-  delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>
-  is_stale: (pointer: SnapshotPointer) => Promise<boolean>
-}
+	put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>;
+	get: (id: string) => Promise<Result<Observation, CorpusError>>;
+	query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>;
+	query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>;
+	delete: (id: string) => Promise<Result<void, CorpusError>>;
+	delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>;
+	is_stale: (pointer: SnapshotPointer) => Promise<boolean>;
+};
 
 /**
  * Immutable manifest describing a deployable version of a package.
@@ -623,43 +627,43 @@ export type ObservationsClient = {
  * @group Version Set Types
  */
 export type VersionSetManifest = {
-  package: string
-  git_sha: string
-  created_at: string
-  builds: {
-    worker: {
-      artifact_ref: string
-      size_bytes: number
-      compatibility_date: string
-    }
-    assets?: {
-      artifact_ref?: string
-      version_affinity: 'pinned' | 'none'
-    }
-  }
-  migrations: {
-    d1_plan_ref?: string
-    do_migrations: Array<{
-      class_name: string
-      tag: string
-      kind: 'new_sqlite_classes' | 'new_classes' | 'renamed_classes' | 'deleted_classes' | 'transferred_classes'
-    }>
-  }
-  env_manifest_ref: string
-  infra_plan_ref: string
-  grants_ref?: string
-  /**
-   * Optional content-addressed reference to a compiled pipeline template
-   * blob — `pipeline-templates/<content_hash>`. Consumers (devpad's
-   * pipeline orchestrator) resolve this through `pipeline_template_store`
-   * to rehydrate the typed template snapshot.
-   *
-   * Optional for forward/backward compatibility — manifests written
-   * before this field existed continue to resolve via the consumer's
-   * built-in default template.
-   */
-  template_ref?: string
-}
+	package: string;
+	git_sha: string;
+	created_at: string;
+	builds: {
+		worker: {
+			artifact_ref: string;
+			size_bytes: number;
+			compatibility_date: string;
+		};
+		assets?: {
+			artifact_ref?: string;
+			version_affinity: "pinned" | "none";
+		};
+	};
+	migrations: {
+		d1_plan_ref?: string;
+		do_migrations: Array<{
+			class_name: string;
+			tag: string;
+			kind: "new_sqlite_classes" | "new_classes" | "renamed_classes" | "deleted_classes" | "transferred_classes";
+		}>;
+	};
+	env_manifest_ref: string;
+	infra_plan_ref: string;
+	grants_ref?: string;
+	/**
+	 * Optional content-addressed reference to a compiled pipeline template
+	 * blob — `pipeline-templates/<content_hash>`. Consumers (devpad's
+	 * pipeline orchestrator) resolve this through `pipeline_template_store`
+	 * to rehydrate the typed template snapshot.
+	 *
+	 * Optional for forward/backward compatibility — manifests written
+	 * before this field existed continue to resolve via the consumer's
+	 * built-in default template.
+	 */
+	template_ref?: string;
+};
 
 /**
  * Pointer to a stored `VersionSetManifest` snapshot.
@@ -673,7 +677,7 @@ export type VersionSetManifest = {
  * @group Version Set Types
  */
 export type VersionSetRef = {
-  package: string
-  version: string
-  content_hash: string
-}
+	package: string;
+	version: string;
+	content_hash: string;
+};

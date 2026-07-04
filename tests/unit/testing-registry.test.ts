@@ -1,21 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import * as fc from "fast-check";
 import { z } from "zod";
-import {
-	arbitrary,
-	lookup,
-	failure,
-	lookup_failure,
-	__reset_registry_for_tests,
-} from "../../testing/registry";
+import { arbitrary, lookup, failure, lookup_failure, __reset_registry_for_tests } from "../../testing/registry";
 import type { ArbBrand } from "../../testing/types";
 
 type UserId = string & { readonly __brand: unique symbol };
 type OrderId = number & { readonly __brand: unique symbol };
 
-type DemoError =
-	| { kind: "not_found"; id: string }
-	| { kind: "denied"; reason: string };
+type DemoError = { kind: "not_found"; id: string } | { kind: "denied"; reason: string };
 
 const USER_ID_BRAND = Symbol("UserId") as ArbBrand<UserId>;
 const ORDER_ID_BRAND = Symbol("OrderId") as ArbBrand<OrderId>;
@@ -154,11 +146,7 @@ describe("testing/registry", () => {
 			const schema = z.string();
 			arbitrary(USER_ID_BRAND, fc.constant("u" as UserId));
 			arbitrary(schema, fc.constant("x"));
-			failure(
-				DEMO_ERROR_BRAND,
-				"not_found",
-				fc.record({ kind: fc.constant("not_found" as const), id: fc.string() })
-			);
+			failure(DEMO_ERROR_BRAND, "not_found", fc.record({ kind: fc.constant("not_found" as const), id: fc.string() }));
 
 			__reset_registry_for_tests();
 

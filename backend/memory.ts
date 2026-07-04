@@ -3,14 +3,14 @@
  * @description In-memory storage backend for testing and development.
  */
 
-import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta } from '../types.js';
-import type { ObservationRow } from '../observations/index.js';
-import { create_observations_client, create_observations_storage } from '../observations/index.js';
-import { create_emitter } from '../utils.js';
-import { ok, err } from '../types.js';
-import type { EventHandler } from '../types.js';
-import { create_metadata_client, create_data_client } from './base.js';
-import type { MetadataStorage, DataStorage } from './base.js';
+import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta } from "../types.js";
+import type { ObservationRow } from "../observations/index.js";
+import { create_observations_client, create_observations_storage } from "../observations/index.js";
+import { create_emitter } from "../utils.js";
+import { ok, err } from "../types.js";
+import type { EventHandler } from "../types.js";
+import { create_metadata_client, create_data_client } from "./base.js";
+import type { MetadataStorage, DataStorage } from "./base.js";
 
 export type MemoryBackendOptions = {
 	on_event?: EventHandler;
@@ -28,7 +28,7 @@ export type MemoryBackendOptions = {
  */
 const CORPUS_DEV: boolean = (() => {
 	try {
-		return typeof process !== 'undefined' && process.env?.CORPUS_DEV === '1';
+		return typeof process !== "undefined" && process.env?.CORPUS_DEV === "1";
 	} catch {
 		return false;
 	}
@@ -110,12 +110,13 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 			if (!bytes) return null;
 			return {
 				bytes: async () => bytes,
-				stream: () => new ReadableStream({
-					start(controller) {
-						controller.enqueue(bytes);
-						controller.close();
-					},
-				}),
+				stream: () =>
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(bytes);
+							controller.close();
+						},
+					}),
 				size: bytes.byteLength,
 			};
 		},
@@ -154,22 +155,22 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		try {
 			for (const op of ops) {
 				switch (op.type) {
-					case 'meta_put':
+					case "meta_put":
 						meta_store.set(
 							make_meta_key(op.meta.store_id, op.meta.version),
 							CORPUS_DEV ? Object.freeze({ ...op.meta }) : op.meta,
 						);
 						break;
-					case 'meta_delete':
+					case "meta_delete":
 						meta_store.delete(make_meta_key(op.store_id, op.version));
 						break;
-					case 'data_put':
+					case "data_put":
 						data_store.set(op.data_key, op.bytes);
 						break;
-					case 'observation_put':
+					case "observation_put":
 						observation_store.set(op.row.id, CORPUS_DEV ? Object.freeze({ ...op.row }) : op.row);
 						break;
-					case 'observation_delete':
+					case "observation_delete":
 						observation_store.delete(op.id);
 						break;
 				}
@@ -183,8 +184,8 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 			observation_store.clear();
 			for (const [k, v] of obs_snap) observation_store.set(k, v);
 			return err({
-				kind: 'transaction_aborted',
-				reason: 'apply_batch_failed',
+				kind: "transaction_aborted",
+				reason: "apply_batch_failed",
 				cause: cause instanceof Error ? cause : new Error(String(cause)),
 			});
 		}

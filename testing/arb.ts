@@ -99,7 +99,7 @@ function datetime_arb(): Arbitrary<string> {
 	// safe window 1970-01-01 .. 2999-12-31 so generated strings always parse.
 	const min = Date.UTC(1970, 0, 1);
 	const max = Date.UTC(2999, 11, 31, 23, 59, 59, 999);
-	return fc.integer({ min, max }).map(ms => new Date(ms).toISOString());
+	return fc.integer({ min, max }).map((ms) => new Date(ms).toISOString());
 }
 
 function string_arb(schema: z.ZodString): Arbitrary<string> {
@@ -110,9 +110,9 @@ function string_arb(schema: z.ZodString): Arbitrary<string> {
 		if (c.kind === "regex") return fc.stringMatching(c.regex);
 		if (c.kind === "datetime") return datetime_arb();
 	}
-	const min = checks.find(c => c.kind === "min");
-	const max = checks.find(c => c.kind === "max");
-	const length = checks.find(c => c.kind === "length");
+	const min = checks.find((c) => c.kind === "min");
+	const max = checks.find((c) => c.kind === "max");
+	const length = checks.find((c) => c.kind === "length");
 	if (length && length.kind === "length") {
 		return fc.string({ minLength: length.value, maxLength: length.value });
 	}
@@ -124,9 +124,9 @@ function string_arb(schema: z.ZodString): Arbitrary<string> {
 
 function number_arb(schema: z.ZodNumber): Arbitrary<number> {
 	const checks = schema._def.checks;
-	const is_int = checks.some(c => c.kind === "int");
-	const min_check = checks.find(c => c.kind === "min");
-	const max_check = checks.find(c => c.kind === "max");
+	const is_int = checks.some((c) => c.kind === "int");
+	const min_check = checks.find((c) => c.kind === "min");
+	const max_check = checks.find((c) => c.kind === "max");
 	const min = min_check && min_check.kind === "min" ? min_check.value : undefined;
 	const max = max_check && max_check.kind === "max" ? max_check.value : undefined;
 	if (is_int) {
@@ -166,28 +166,22 @@ function array_arb(schema: z.ZodArray<z.ZodType>, ctx: WalkContext): Arbitrary<u
 
 function tuple_arb(schema: z.ZodTuple, ctx: WalkContext): Arbitrary<unknown[]> {
 	const items = schema._def.items;
-	const arbs = items.map(item => walk(item, ctx));
+	const arbs = items.map((item) => walk(item, ctx));
 	return fc.tuple(...arbs);
 }
 
 function union_arb(options: readonly z.ZodType[], ctx: WalkContext): Arbitrary<unknown> {
-	const arbs = options.map(o => walk(o, ctx));
+	const arbs = options.map((o) => walk(o, ctx));
 	return fc.oneof(...arbs);
 }
 
-function record_arb(
-	schema: z.ZodRecord<z.ZodString, z.ZodType>,
-	ctx: WalkContext
-): Arbitrary<Record<string, unknown>> {
+function record_arb(schema: z.ZodRecord<z.ZodString, z.ZodType>, ctx: WalkContext): Arbitrary<Record<string, unknown>> {
 	const key_arb = walk(schema._def.keyType, ctx);
 	const value_arb = walk(schema._def.valueType, ctx);
 	return fc.dictionary(key_arb as Arbitrary<string>, value_arb);
 }
 
-function intersection_arb(
-	schema: z.ZodIntersection<z.ZodType, z.ZodType>,
-	ctx: WalkContext
-): Arbitrary<unknown> {
+function intersection_arb(schema: z.ZodIntersection<z.ZodType, z.ZodType>, ctx: WalkContext): Arbitrary<unknown> {
 	return fc.tuple(walk(schema._def.left, ctx), walk(schema._def.right, ctx)).map(spread_merge);
 }
 
@@ -204,15 +198,11 @@ function lazy_arb(schema: z.ZodLazy<z.ZodType>, ctx: WalkContext): Arbitrary<unk
 	// the body in fc.oneof with `depthSize: "small"` + maxDepth so fast-check
 	// caps recursion depth at a finite level — both for generation and for
 	// shrinking, which would otherwise overflow the stack on deep self-refs.
-	const { self } = fc.letrec<{ self: unknown }>(tie => {
+	const { self } = fc.letrec<{ self: unknown }>((tie) => {
 		ctx.lazy_ties.set(schema, tie("self"));
 		const body = walk(schema._def.getter(), ctx);
 		return {
-			self: fc.oneof(
-				{ depthSize: "small", maxDepth: 3 },
-				body,
-				tie("self")
-			),
+			self: fc.oneof({ depthSize: "small", maxDepth: 3 }, body, tie("self")),
 		};
 	});
 	ctx.lazy_ties.set(schema, self);

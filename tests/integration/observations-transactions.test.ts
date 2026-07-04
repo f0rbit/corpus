@@ -1,6 +1,16 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
-import { create_corpus, create_memory_backend, define_store, json_codec, ok, type Backend, type BatchOp, type Corpus, type Store } from "../../index";
+import {
+	create_corpus,
+	create_memory_backend,
+	define_store,
+	json_codec,
+	ok,
+	type Backend,
+	type BatchOp,
+	type Corpus,
+	type Store,
+} from "../../index";
 import { define_observation_type, create_pointer } from "../../observations";
 
 // Transaction-path coverage for the memory backend's apply_batch:
@@ -11,10 +21,7 @@ import { define_observation_type, create_pointer } from "../../observations";
 const DocSchema = z.object({ text: z.string() });
 type Doc = z.infer<typeof DocSchema>;
 
-const SentimentType = define_observation_type(
-	"sentiment",
-	z.object({ subject: z.string(), score: z.number() })
-);
+const SentimentType = define_observation_type("sentiment", z.object({ subject: z.string(), score: z.number() }));
 
 function make_corpus(backend?: Backend): Corpus<{ docs: Store<Doc> }> {
 	return create_corpus()

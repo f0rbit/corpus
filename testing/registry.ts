@@ -134,7 +134,7 @@ function lookup_now(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
 export function failure<E extends { kind: string }, K extends E["kind"]>(
 	brand: ArbBrand<E>,
 	variant: K,
-	gen: Arbitrary<Extract<E, { kind: K }>>
+	gen: Arbitrary<Extract<E, { kind: K }>>,
 ): void {
 	let by_variant = failures.get(brand);
 	if (!by_variant) {
@@ -159,7 +159,7 @@ export function failure<E extends { kind: string }, K extends E["kind"]>(
  */
 export async function lookup_failure<E extends { kind: string }>(
 	brand: ArbBrand<E>,
-	variant: E["kind"]
+	variant: E["kind"],
 ): Promise<Arbitrary<E> | undefined> {
 	await ensure_loaded();
 	return lookup_failure_sync(brand, variant);
@@ -171,7 +171,7 @@ export async function lookup_failure<E extends { kind: string }>(
  */
 export function lookup_failure_sync<E extends { kind: string }>(
 	brand: ArbBrand<E>,
-	variant: E["kind"]
+	variant: E["kind"],
 ): Arbitrary<E> | undefined {
 	const by_variant = failures.get(brand);
 	if (!by_variant) return undefined;
@@ -187,9 +187,7 @@ export function lookup_failure_sync<E extends { kind: string }>(
  *
  * @returns an array of variant discriminants; empty if no failures registered.
  */
-export function list_failure_variants<E extends { kind: string }>(
-	brand: ArbBrand<E>
-): readonly E["kind"][] {
+export function list_failure_variants<E extends { kind: string }>(brand: ArbBrand<E>): readonly E["kind"][] {
 	const by_variant = failures.get(brand);
 	if (!by_variant) return [];
 	return Array.from(by_variant.keys()) as E["kind"][];

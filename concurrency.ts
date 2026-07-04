@@ -44,7 +44,7 @@ export class Semaphore {
 			this.permits--;
 			return;
 		}
-		return new Promise<void>(resolve => {
+		return new Promise<void>((resolve) => {
 			this.waiting.push(resolve);
 		});
 	}
@@ -96,7 +96,11 @@ export class Semaphore {
  * )
  * ```
  */
-export const parallel_map = async <T, R>(items: T[], mapper: (item: T, index: number) => Promise<R>, concurrency: number): Promise<R[]> => {
+export const parallel_map = async <T, R>(
+	items: T[],
+	mapper: (item: T, index: number) => Promise<R>,
+	concurrency: number,
+): Promise<R[]> => {
 	const semaphore = new Semaphore(concurrency);
 	const results: R[] = new Array(items.length);
 
@@ -108,7 +112,7 @@ export const parallel_map = async <T, R>(items: T[], mapper: (item: T, index: nu
 			} finally {
 				semaphore.release();
 			}
-		})
+		}),
 	);
 
 	return results;
