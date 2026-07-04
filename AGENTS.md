@@ -145,6 +145,7 @@ The active plan is the source of truth for in-flight design; consult it before c
 
 ## Gotchas
 
+- `create_corpus().build()` **throws** when no backend is configured — the one intentional throw in the library. It's a config-time programmer-error guard on builder misuse (unreachable from runtime data); converting `build()` to return a Result would break the public API. Everything downstream of `build()` returns `Result`.
 - `CorpusError` is a **discriminated union** — switch on `error.kind`, not `error.message`. Adding a new kind is a breaking change to consumers (TypeScript will force exhaustiveness).
 - The `Corpus` type carries `create_pointer`, `resolve_pointer`, `is_superseded` as methods on the corpus instance, not just exports. Both code paths exist; the instance methods are the documented API.
 - `define_store` accepts an optional `data_key_fn(ctx)` to override the default `${store_id}/${content_hash}` data key. Custom layouts (e.g. partition by tag/date) go through this — don't reimplement key computation upstream.
