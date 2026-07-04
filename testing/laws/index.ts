@@ -9,3 +9,5 @@
  */
 
 export { error_path_exhaustive, DEFAULT_NUM_RUNS } from "./error-path-exhaustive.js";
+export { round_trip, DEFAULT_NUM_RUNS as ROUND_TRIP_DEFAULT_NUM_RUNS } from "./round-trip.js";
+export { idempotent, DEFAULT_NUM_RUNS as IDEMPOTENT_DEFAULT_NUM_RUNS } from "./idempotent.js";
