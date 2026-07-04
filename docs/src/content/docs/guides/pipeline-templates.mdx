@@ -1,0 +1,94 @@
+---
+title: Pipeline Templates
+description: Content-addressed snapshots of compiled pipeline templates via pipeline_template_store — serialised pipeline declarations stored once, deduped across packages, and rehydrated by the deployment orchestrator at run start.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A **pipeline template** is a compiled, serialised form of a package's `pipeline.ts` declaration — the JSON blob a CLI step produces at build time and a pipeline orchestrator rehydrates at run start.
+
+The `pipeline_template_store` factory wraps `define_store` + `create_store` with a `json_codec` over a consumer-supplied Zod schema and a `data_key_fn` that lays blobs out under `pipeline-templates/<content_hash>`.
+
+<Aside type="note">
+  Unlike [version sets](/corpus/guides/version-sets/), there is no per-package partition. Templates are content-addressed and naturally dedup across packages — two packages compiling to an identical template share a single data blob.
+</Aside>
+
+## Creating a store
+
+The template shape is yours: supply a Zod schema for it and corpus never inspects the contents beyond codec round-tripping.
+
+```typescript
+import { create_memory_backend, pipeline_template_store } from '@f0rbit/corpus'
+import { z } from 'zod'
+
+const PipelineTemplateSchema = z.object({
+  rollout: z.object({ type: z.literal('atomic') }),
+  gates: z.record(z.unknown()),
+  pre_deploy_checks: z.array(z.unknown()),
+  post_deploy_checks: z.array(z.unknown()),
+})
+
+type PipelineTemplate = z.infer<typeof PipelineTemplateSchema>
+
+const backend = create_memory_backend()
+const templates = pipeline_template_store<PipelineTemplate>(
+  backend,
+  PipelineTemplateSchema,
+)
+```
+
+Optional `opts.id` overrides the default `'pipeline-templates'` store id; `opts.description` is forwarded to the underlying `StoreDefinition`.
+
+## Putting a template
+
+```typescript
+const put = await templates.put({
+  rollout: { type: 'atomic' },
+  gates: {},
+  pre_deploy_checks: [],
+  post_deploy_checks: [],
+})
+
+if (put.ok) {
+  console.log('snapshot version:', put.value.version)
+  console.log('content hash:', put.value.content_hash)
+}
+```
+
+Content-hash dedup means identical templates share a single data blob, but every `put` produces a fresh `SnapshotMeta` with its own version and tags — you can track which build produced which snapshot even when the content is unchanged.
+
+## Getting a template
+
+`get(version)` fetches a template snapshot by its corpus version, returning the decoded body along with the snapshot meta.
+
+```typescript
+const fetched = await templates.get(put.value.version)
+
+if (fetched.ok) {
+  console.log(fetched.value.meta.content_hash)
+  console.log(fetched.value.data.rollout.type) // 'atomic'
+}
+```
+
+## Storage layout
+
+All templates live in a single shared partition keyed by content hash:
+
+```
+<base>/
+  pipeline-templates/
+    <content_hash_a>
+    <content_hash_b>
+```
+
+The `<content_hash>` segment is the whole key — packages producing the same compiled template converge on one blob.
+
+## Why not just `define_store` directly?
+
+You can. `pipeline_template_store` is a convenience that:
+
+- Wires the `json_codec` over your template schema
+- Locks in the `pipeline-templates/<content_hash>` data-key layout
+- Exposes exactly the operations orchestrators need: `put` and `get`
+
+If you need lower-level access, `templates.store` is the underlying `Store<T>` — `list`, `get_meta`, `delete`, transactions etc. all work as on any other store.

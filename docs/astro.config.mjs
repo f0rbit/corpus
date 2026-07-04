@@ -51,6 +51,7 @@ export default defineConfig({
             { label: 'Observations', slug: 'guides/observations' },
             { label: 'Transactions', slug: 'guides/transactions' },
             { label: 'Version Sets', slug: 'guides/version-sets' },
+            { label: 'Pipeline Templates', slug: 'guides/pipeline-templates' },
             { label: 'Testing Patterns', slug: 'guides/testing' },
           ],
         },
