@@ -4,6 +4,7 @@
  */
 
 import type { BytesCodec } from "../types.js";
+import { try_catch_async } from "../result.js";
 
 const IV_LENGTH = 12;
 
@@ -75,12 +76,16 @@ export function encrypt_codec(key: CryptoKey): BytesCodec {
 		encode_stream(value) {
 			return new ReadableStream<Uint8Array>({
 				async start(controller) {
-					try {
-						controller.enqueue(await encrypt_bytes(key, value));
-						controller.close();
-					} catch (cause) {
-						controller.error(cause);
+					const encrypted = await try_catch_async(
+						() => encrypt_bytes(key, value),
+						(cause) => cause,
+					);
+					if (!encrypted.ok) {
+						controller.error(encrypted.error);
+						return;
 					}
+					controller.enqueue(encrypted.value);
+					controller.close();
 				},
 			});
 		},

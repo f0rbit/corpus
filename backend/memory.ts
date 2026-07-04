@@ -8,6 +8,7 @@ import type { ObservationRow } from "../observations/index.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter } from "../utils.js";
 import { ok, err } from "../types.js";
+import { to_fallback, try_catch } from "../result.js";
 import type { EventHandler } from "../types.js";
 import { create_metadata_client, create_data_client } from "./base.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
@@ -26,13 +27,13 @@ export type MemoryBackendOptions = {
  * The check is read once at module load (not per-op) so toggling it after
  * the fact is a no-op.
  */
-const CORPUS_DEV: boolean = (() => {
-	try {
-		return typeof process !== "undefined" && process.env?.CORPUS_DEV === "1";
-	} catch {
-		return false;
-	}
-})();
+const CORPUS_DEV: boolean = to_fallback(
+	try_catch(
+		() => typeof process !== "undefined" && process.env?.CORPUS_DEV === "1",
+		() => false,
+	),
+	false,
+);
 
 function make_meta_key(store_id: string, version: string): string {
 	return `${store_id}:${version}`;
@@ -152,43 +153,46 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		const meta_snap = new Map(meta_store);
 		const data_snap = new Map(data_store);
 		const obs_snap = new Map(observation_store);
-		try {
-			for (const op of ops) {
-				switch (op.type) {
-					case "meta_put":
-						meta_store.set(
-							make_meta_key(op.meta.store_id, op.meta.version),
-							CORPUS_DEV ? Object.freeze({ ...op.meta }) : op.meta,
-						);
-						break;
-					case "meta_delete":
-						meta_store.delete(make_meta_key(op.store_id, op.version));
-						break;
-					case "data_put":
-						data_store.set(op.data_key, op.bytes);
-						break;
-					case "observation_put":
-						observation_store.set(op.row.id, CORPUS_DEV ? Object.freeze({ ...op.row }) : op.row);
-						break;
-					case "observation_delete":
-						observation_store.delete(op.id);
-						break;
+		const applied = try_catch(
+			() => {
+				for (const op of ops) {
+					switch (op.type) {
+						case "meta_put":
+							meta_store.set(
+								make_meta_key(op.meta.store_id, op.meta.version),
+								CORPUS_DEV ? Object.freeze({ ...op.meta }) : op.meta,
+							);
+							break;
+						case "meta_delete":
+							meta_store.delete(make_meta_key(op.store_id, op.version));
+							break;
+						case "data_put":
+							data_store.set(op.data_key, op.bytes);
+							break;
+						case "observation_put":
+							observation_store.set(op.row.id, CORPUS_DEV ? Object.freeze({ ...op.row }) : op.row);
+							break;
+						case "observation_delete":
+							observation_store.delete(op.id);
+							break;
+					}
 				}
-			}
-			return ok(undefined);
-		} catch (cause) {
-			meta_store.clear();
-			for (const [k, v] of meta_snap) meta_store.set(k, v);
-			data_store.clear();
-			for (const [k, v] of data_snap) data_store.set(k, v);
-			observation_store.clear();
-			for (const [k, v] of obs_snap) observation_store.set(k, v);
-			return err({
-				kind: "transaction_aborted",
-				reason: "apply_batch_failed",
-				cause: cause instanceof Error ? cause : new Error(String(cause)),
-			});
-		}
+			},
+			(cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+		);
+		if (applied.ok) return ok(undefined);
+
+		meta_store.clear();
+		for (const [k, v] of meta_snap) meta_store.set(k, v);
+		data_store.clear();
+		for (const [k, v] of data_snap) data_store.set(k, v);
+		observation_store.clear();
+		for (const [k, v] of obs_snap) observation_store.set(k, v);
+		return err({
+			kind: "transaction_aborted",
+			reason: "apply_batch_failed",
+			cause: applied.error,
+		});
 	}
 
 	const storage = create_observations_storage({

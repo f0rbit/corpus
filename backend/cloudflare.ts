@@ -11,7 +11,7 @@ import {
 	type ObservationsStorage,
 	type StorageQueryOpts,
 } from "../observations/index.js";
-import { first, to_fallback, to_nullable } from "../result.js";
+import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
 import type {
 	Backend,
@@ -40,32 +40,29 @@ export type CloudflareBackendConfig = {
 	on_event?: EventHandler;
 };
 
+function to_error(cause: unknown): Error {
+	return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function storage_error(operation: string): (cause: unknown) => CorpusError {
+	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
+}
+
 function create_cloudflare_storage(db: ReturnType<typeof drizzle>): ObservationsStorage {
 	return {
 		async put_row(row) {
-			try {
+			const result = await try_catch_async(async () => {
 				await db.insert(corpus_observations).values(row);
-				return ok(row);
-			} catch (cause) {
-				return err({
-					kind: "storage_error",
-					cause: cause as Error,
-					operation: "observations.put",
-				});
-			}
+			}, storage_error("observations.put"));
+			if (!result.ok) return result;
+			return ok(row);
 		},
 
 		async get_row(id) {
-			try {
+			return try_catch_async(async () => {
 				const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
-				return ok(to_nullable(first(rows)));
-			} catch (cause) {
-				return err({
-					kind: "storage_error",
-					cause: cause as Error,
-					operation: "observations.get",
-				});
-			}
+				return to_nullable(first(rows));
+			}, storage_error("observations.get"));
 		},
 
 		async *query_rows(opts: StorageQueryOpts = {}) {
@@ -117,26 +114,20 @@ function create_cloudflare_storage(db: ReturnType<typeof drizzle>): Observations
 		},
 
 		async delete_row(id) {
-			try {
+			return try_catch_async(async () => {
 				const existing = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
 
 				if (existing.length === 0) {
-					return ok(false);
+					return false;
 				}
 
 				await db.delete(corpus_observations).where(eq(corpus_observations.id, id));
-				return ok(true);
-			} catch (cause) {
-				return err({
-					kind: "storage_error",
-					cause: cause as Error,
-					operation: "observations.delete",
-				});
-			}
+				return true;
+			}, storage_error("observations.delete"));
 		},
 
 		async delete_by_source(store_id, version, path) {
-			try {
+			return try_catch_async(async () => {
 				const conditions = [
 					eq(corpus_observations.source_store_id, store_id),
 					eq(corpus_observations.source_version, version),
@@ -157,14 +148,8 @@ function create_cloudflare_storage(db: ReturnType<typeof drizzle>): Observations
 					await db.delete(corpus_observations).where(and(...conditions));
 				}
 
-				return ok(count);
-			} catch (cause) {
-				return err({
-					kind: "storage_error",
-					cause: cause as Error,
-					operation: "observations.delete_by_source",
-				});
-			}
+				return count;
+			}, storage_error("observations.delete_by_source"));
 		},
 	};
 }
@@ -218,7 +203,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 
 	const metadata: MetadataClient = {
 		async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
-			try {
+			const lookup = await try_catch_async(async () => {
 				const rows = await db
 					.select()
 					.from(corpus_snapshots)
@@ -226,41 +211,42 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 					.limit(1);
 
 				const row = to_nullable(first(rows));
-				emit({ type: "meta_get", store_id, version, found: !!row });
+				return row ? snapshot_row_to_meta(row) : null;
+			}, storage_error("metadata.get"));
 
-				if (!row) {
-					return err({ kind: "not_found", store_id, version });
-				}
-				return ok(snapshot_row_to_meta(row));
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.get" };
-				emit({ type: "error", error });
-				return err(error);
+			if (!lookup.ok) {
+				emit({ type: "error", error: lookup.error });
+				return lookup;
 			}
+			emit({ type: "meta_get", store_id, version, found: !!lookup.value });
+			if (!lookup.value) {
+				return err({ kind: "not_found", store_id, version });
+			}
+			return ok(lookup.value);
 		},
 
 		async put(meta): Promise<Result<void, CorpusError>> {
-			try {
+			const result = await try_catch_async(async () => {
 				await meta_insert_stmt(meta);
-				emit({ type: "meta_put", store_id: meta.store_id, version: meta.version });
-				return ok(undefined);
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.put" };
-				emit({ type: "error", error });
-				return err(error);
+			}, storage_error("metadata.put"));
+			if (!result.ok) {
+				emit({ type: "error", error: result.error });
+				return result;
 			}
+			emit({ type: "meta_put", store_id: meta.store_id, version: meta.version });
+			return ok(undefined);
 		},
 
 		async delete(store_id, version): Promise<Result<void, CorpusError>> {
-			try {
+			const result = await try_catch_async(async () => {
 				await meta_delete_stmt(store_id, version);
-				emit({ type: "meta_delete", store_id, version });
-				return ok(undefined);
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.delete" };
-				emit({ type: "error", error });
-				return err(error);
+			}, storage_error("metadata.delete"));
+			if (!result.ok) {
+				emit({ type: "error", error: result.error });
+				return result;
 			}
+			emit({ type: "meta_delete", store_id, version });
+			return ok(undefined);
 		},
 
 		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
@@ -283,18 +269,15 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 				query = query.limit(opts.limit) as typeof query;
 			}
 
-			let rows: (typeof corpus_snapshots.$inferSelect)[];
-			try {
-				rows = await query;
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.list" };
-				emit({ type: "error", error });
+			const rows = await try_catch_async(() => query, storage_error("metadata.list"));
+			if (!rows.ok) {
+				emit({ type: "error", error: rows.error });
 				return;
 			}
 
 			let count = 0;
 
-			for (const row of rows) {
+			for (const row of rows.value) {
 				const meta = snapshot_row_to_meta(row);
 
 				if (opts?.tags?.length && !opts.tags.every((t) => meta.tags?.includes(t))) {
@@ -309,7 +292,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 
 		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
-			try {
+			const lookup = await try_catch_async(async () => {
 				const rows = await db
 					.select()
 					.from(corpus_snapshots)
@@ -318,15 +301,17 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 					.limit(1);
 
 				const row = to_nullable(first(rows));
-				if (!row) {
-					return err({ kind: "not_found", store_id, version: "latest" });
-				}
-				return ok(snapshot_row_to_meta(row));
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "metadata.get_latest" };
-				emit({ type: "error", error });
-				return err(error);
+				return row ? snapshot_row_to_meta(row) : null;
+			}, storage_error("metadata.get_latest"));
+
+			if (!lookup.ok) {
+				emit({ type: "error", error: lookup.error });
+				return lookup;
 			}
+			if (!lookup.value) {
+				return err({ kind: "not_found", store_id, version: "latest" });
+			}
+			return ok(lookup.value);
 		},
 
 		async *get_children(parent_store_id, parent_version): AsyncIterable<SnapshotMeta> {
@@ -347,18 +332,20 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 
 		async find_by_hash(store_id, content_hash): Promise<SnapshotMeta | null> {
-			try {
-				const rows = await db
-					.select()
-					.from(corpus_snapshots)
-					.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.content_hash, content_hash)))
-					.limit(1);
+			const lookup = await try_catch_async(
+				async () => {
+					const rows = await db
+						.select()
+						.from(corpus_snapshots)
+						.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.content_hash, content_hash)))
+						.limit(1);
 
-				const row = to_nullable(first(rows));
-				return row ? snapshot_row_to_meta(row) : null;
-			} catch {
-				return null;
-			}
+					const row = to_nullable(first(rows));
+					return row ? snapshot_row_to_meta(row) : null;
+				},
+				() => null,
+			);
+			return to_fallback(lookup, null);
 		},
 	};
 
@@ -366,59 +353,54 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		async get(
 			data_key,
 		): Promise<Result<{ stream: () => ReadableStream<Uint8Array>; bytes: () => Promise<Uint8Array> }, CorpusError>> {
-			try {
-				const object = await r2.get(data_key);
-				emit({
-					type: "data_get",
-					store_id: to_fallback(first(data_key.split("/")), data_key),
-					version: data_key,
-					found: !!object,
-				});
-
-				if (!object) {
-					return err({ kind: "not_found", store_id: data_key, version: "" });
-				}
-
-				return ok({
-					stream: () => object.body,
-					bytes: async () => new Uint8Array(await object.arrayBuffer()),
-				});
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "data.get" };
-				emit({ type: "error", error });
-				return err(error);
+			const fetched = await try_catch_async(() => r2.get(data_key), storage_error("data.get"));
+			if (!fetched.ok) {
+				emit({ type: "error", error: fetched.error });
+				return fetched;
 			}
+
+			const object = fetched.value;
+			emit({
+				type: "data_get",
+				store_id: to_fallback(first(data_key.split("/")), data_key),
+				version: data_key,
+				found: !!object,
+			});
+
+			if (!object) {
+				return err({ kind: "not_found", store_id: data_key, version: "" });
+			}
+
+			return ok({
+				stream: () => object.body,
+				bytes: async () => new Uint8Array(await object.arrayBuffer()),
+			});
 		},
 
 		async put(data_key, input): Promise<Result<void, CorpusError>> {
-			try {
-				await r2.put(data_key, input);
-				return ok(undefined);
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "data.put" };
-				emit({ type: "error", error });
-				return err(error);
+			const result = await try_catch_async(() => r2.put(data_key, input), storage_error("data.put"));
+			if (!result.ok) {
+				emit({ type: "error", error: result.error });
+				return result;
 			}
+			return ok(undefined);
 		},
 
 		async delete(data_key): Promise<Result<void, CorpusError>> {
-			try {
-				await r2.delete(data_key);
-				return ok(undefined);
-			} catch (cause) {
-				const error: CorpusError = { kind: "storage_error", cause: cause as Error, operation: "data.delete" };
-				emit({ type: "error", error });
-				return err(error);
+			const result = await try_catch_async(() => r2.delete(data_key), storage_error("data.delete"));
+			if (!result.ok) {
+				emit({ type: "error", error: result.error });
+				return result;
 			}
+			return ok(undefined);
 		},
 
 		async exists(data_key): Promise<boolean> {
-			try {
-				const head = await r2.head(data_key);
-				return head !== null;
-			} catch {
-				return false;
-			}
+			const head = await try_catch_async(
+				() => r2.head(data_key),
+				() => null,
+			);
+			return head.ok ? head.value !== null : false;
 		},
 	};
 
@@ -492,15 +474,11 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		// Step 1: R2 data_put ops, sequential to short-circuit on first failure.
 		for (const op of ops) {
 			if (op.type !== "data_put") continue;
-			try {
-				await r2.put(op.data_key, op.bytes);
-			} catch (cause) {
-				return err({
-					kind: "transaction_aborted",
-					reason: "apply_batch_failed",
-					cause: cause instanceof Error ? cause : new Error(String(cause)),
-				});
-			}
+			const put_result = await try_catch_async(
+				() => r2.put(op.data_key, op.bytes),
+				(cause): CorpusError => ({ kind: "transaction_aborted", reason: "apply_batch_failed", cause: to_error(cause) }),
+			);
+			if (!put_result.ok) return put_result;
 		}
 
 		// Step 2: build prepared statements for metadata + observation ops.
@@ -534,16 +512,12 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			return ok(undefined);
 		}
 
-		try {
-			await db.batch([head, ...rest] as readonly [Stmt, ...Stmt[]]);
-			return ok(undefined);
-		} catch (cause) {
-			return err({
-				kind: "transaction_aborted",
-				reason: "apply_batch_failed",
-				cause: cause instanceof Error ? cause : new Error(String(cause)),
-			});
-		}
+		return try_catch_async(
+			async () => {
+				await db.batch([head, ...rest] as readonly [Stmt, ...Stmt[]]);
+			},
+			(cause): CorpusError => ({ kind: "transaction_aborted", reason: "apply_batch_failed", cause: to_error(cause) }),
+		);
 	}
 
 	return { metadata, data, observations, on_event, apply_batch };

@@ -11,10 +11,15 @@ import { ok, err } from "../types.js";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
+import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
 
 /** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
 const TX_DIR_PREFIX = ".tx-";
+
+function to_error(cause: unknown): Error {
+	return cause instanceof Error ? cause : new Error(String(cause));
+}
 
 export type FileBackendConfig = {
 	base_path: string;
@@ -69,13 +74,15 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		const file = Bun.file(path);
 		if (!(await file.exists())) return new Map();
 
-		try {
-			const content = await file.text();
-			const entries = JSON.parse(content) as [string, Parameters<typeof parse_snapshot_meta>[0]][];
-			return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw)]));
-		} catch {
-			return new Map();
-		}
+		const parsed = await try_catch_async(
+			async () => {
+				const content = await file.text();
+				const entries = JSON.parse(content) as [string, Parameters<typeof parse_snapshot_meta>[0]][];
+				return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw)]));
+			},
+			() => null,
+		);
+		return parsed.ok ? parsed.value : new Map();
 	}
 
 	async function write_store_meta(store_id: string, meta_map: Map<string, SnapshotMeta>): Promise<void> {
@@ -86,16 +93,18 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 	}
 
 	async function* list_all_stores(): AsyncIterable<string> {
-		try {
-			const entries = await readdir(base_path, { withFileTypes: true });
-			for (const entry of entries) {
-				// Skip `_*` (internal: `_data`, `_observations.json`) and `.*`
-				// (transaction staging dirs `.tx-<id>/`).
-				if (entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".")) {
-					yield entry.name;
-				}
+		const entries = await try_catch_async(
+			() => readdir(base_path, { withFileTypes: true }),
+			() => null,
+		);
+		if (!entries.ok) return;
+		for (const entry of entries.value) {
+			// Skip `_*` (internal: `_data`, `_observations.json`) and `.*`
+			// (transaction staging dirs `.tx-<id>/`).
+			if (entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".")) {
+				yield entry.name;
 			}
-		} catch {}
+		}
 	}
 
 	const metadata_storage: MetadataStorage = {
@@ -184,11 +193,11 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 	async function read_observations(): Promise<ObservationRow[]> {
 		const file = Bun.file(file_path);
 		if (!(await file.exists())) return [];
-		try {
-			return await file.json();
-		} catch {
-			return [];
-		}
+		const rows = await try_catch_async(
+			() => file.json() as Promise<ObservationRow[]>,
+			() => null,
+		);
+		return rows.ok ? rows.value : [];
 	}
 
 	async function write_observations(rows: ObservationRow[]): Promise<void> {
@@ -392,27 +401,22 @@ export function create_file_backend(config: FileBackendConfig): Backend {
  * ```
  */
 export async function recover(root_dir: string): Promise<Result<{ recovered: number; aborted: number }, CorpusError>> {
-	let entries: { name: string; isDirectory: () => boolean }[];
-	try {
-		entries = await readdir(root_dir, { withFileTypes: true });
-	} catch (cause) {
-		return err({
-			kind: "storage_error",
-			cause: cause instanceof Error ? cause : new Error(String(cause)),
-			operation: "recover",
-		});
-	}
+	const entries = await try_catch_async(
+		() => readdir(root_dir, { withFileTypes: true }),
+		(cause): CorpusError => ({ kind: "storage_error", cause: to_error(cause), operation: "recover" }),
+	);
+	if (!entries.ok) return entries;
 
-	const stale = entries.filter((e) => e.isDirectory() && e.name.startsWith(TX_DIR_PREFIX));
+	const stale = entries.value.filter((e) => e.isDirectory() && e.name.startsWith(TX_DIR_PREFIX));
 	let recovered = 0;
 	const failures: Error[] = [];
 	for (const entry of stale) {
-		try {
-			await rm(join(root_dir, entry.name), { recursive: true, force: true });
-			recovered++;
-		} catch (cause) {
-			failures.push(cause instanceof Error ? cause : new Error(String(cause)));
-		}
+		const removed = await try_catch_async(
+			() => rm(join(root_dir, entry.name), { recursive: true, force: true }),
+			to_error,
+		);
+		if (removed.ok) recovered++;
+		else failures.push(removed.error);
 	}
 
 	const [first_failure] = failures;

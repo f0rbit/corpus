@@ -8,12 +8,23 @@ export default define_lint_config({
 	tsconfig_root_dir: import.meta.dirname,
 	overrides: [
 		{
-			// Semaphore is the one sanctioned class — it owns mutable internal state
+			// Semaphore is the one sanctioned class — it owns mutable internal state.
+			// parallel_map's try/finally is the semaphore-release pattern; the Result
+			// combinators can't express `finally`.
 			files: ["concurrency.ts"],
 			rules: {
 				"functional/no-classes": "off",
 				"functional/no-this-expressions": "off",
+				"functional/no-try-statements": "off",
 			},
+		},
+		{
+			// apply_batch's transactional commit is structural try/catch: the staging
+			// try's catch is compensation (nuke the staging dir), and the rename loop's
+			// catch carries the ops_completed/ops_failed counters for partial_commit.
+			// Everything else in the file goes through try_catch_async.
+			files: ["backend/file.ts"],
+			rules: { "functional/no-try-statements": "off" },
 		},
 		{
 			// create_corpus().build() throws by design: config-time programmer-error guard
