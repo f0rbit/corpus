@@ -3,12 +3,29 @@
  * @description Core corpus and store creation functions.
  */
 
-import type { Backend, BatchOp, Corpus, CorpusBuilder, StoreDefinition, Store, Snapshot, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, ObservationsClient, PutOpts, TransactionHandle, TransactionResult } from './types.js';
+import type { Backend, BatchOp, Corpus, CorpusBuilder, StoreDefinition, Store, Snapshot, SnapshotMeta, SnapshotHandle, Result, CorpusError, DataKeyContext, DataHandle, PutOpts, TransactionHandle, TransactionResult } from './types.js';
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from './observations/types.js';
 import { ok, err } from './types.js';
 import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from './utils.js';
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from './observations/utils.js';
 import { create_observation_row } from './observations/storage.js';
+
+// Internal construction shapes for the public conditional types. `stream` /
+// `put_stream` are `T extends StreamableValue ? fn : never` on the public
+// side, which can never resolve inside generic `create_store<T>` — so we build
+// against these and cast once at the boundary, gated on the same runtime
+// condition (codec stream support) the conditional encodes.
+type SnapshotHandleImpl<T> = Omit<SnapshotHandle<T>, 'stream'> & {
+  stream?: () => Promise<Result<ReadableStream<T>, CorpusError>>
+}
+
+type StoreImpl<T> = Omit<Store<T>, 'put_stream'> & {
+  put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+}
+
+function to_error(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause))
+}
 
 /**
  * Creates a typed Store instance bound to a Backend.
@@ -57,7 +74,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return `${ctx.store_id}/${ctx.content_hash}`
   }
 
-  async function do_put(bytes: Uint8Array, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+  async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
     const version = generate_version()
     const content_hash = await compute_hash(bytes)
     const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags }
@@ -101,13 +118,13 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
   }
 
   function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
-    const handle: any = {
+    const handle: SnapshotHandleImpl<T> = {
       async value(): Promise<Result<T, CorpusError>> {
         const bytes = await data_handle.bytes()
         try {
           return ok(await codec.decode(bytes))
         } catch (cause) {
-          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          const error: CorpusError = { kind: 'decode_error', cause: to_error(cause) }
           emit({ type: 'error', error })
           return err(error)
         }
@@ -123,13 +140,15 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
         try {
           return ok(decode_stream(data_handle.stream()))
         } catch (cause) {
-          const error: CorpusError = { kind: 'decode_error', cause: cause as Error }
+          const error: CorpusError = { kind: 'decode_error', cause: to_error(cause) }
           emit({ type: 'error', error })
           return err(error)
         }
       }
     }
 
+    // invariant: `stream` is set iff the codec streams — the runtime mirror of
+    // SnapshotHandle's `T extends StreamableValue` conditional
     return handle as SnapshotHandle<T>
   }
 
@@ -165,7 +184,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return ok({ meta, handle: build_handle(data_result.value) })
   }
 
-  async function put_stream_impl(stream: ReadableStream<T>, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+  async function put_stream_impl(stream: ReadableStream<T>, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
     if (!codec.encode_stream) {
       const error: CorpusError = { kind: 'invalid_config', message: 'codec does not support encode_stream' }
       emit({ type: 'error', error })
@@ -188,7 +207,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       }
       encoded = concat_bytes(encoded_chunks)
     } catch (cause) {
-      const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+      const error: CorpusError = { kind: 'encode_error', cause: to_error(cause) }
       emit({ type: 'error', error })
       return err(error)
     }
@@ -196,16 +215,16 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     return do_put(encoded, opts)
   }
 
-  const store: any = {
+  const store: StoreImpl<T> = {
     id,
     codec,
 
-    async put(data: T, opts?: { parents?: SnapshotMeta['parents']; invoked_at?: Date; tags?: string[] }): Promise<Result<SnapshotMeta, CorpusError>> {
+    async put(data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
       let bytes: Uint8Array
       try {
         bytes = await codec.encode(data)
       } catch (cause) {
-        const error: CorpusError = { kind: 'encode_error', cause: cause as Error }
+        const error: CorpusError = { kind: 'encode_error', cause: to_error(cause) }
         emit({ type: 'error', error })
         return err(error)
       }
@@ -241,7 +260,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
       return backend.metadata.get(id, version)
     },
 
-    list(opts?: Parameters<Store<T>['list']>[0]) {
+    list(opts) {
       return backend.metadata.list(id, opts)
     },
 
@@ -261,6 +280,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
     },
   }
 
+  // invariant: `put_stream` returns invalid_config for non-streaming codecs —
+  // the runtime mirror of Store's `T extends StreamableValue` conditional
   return store as Store<T>
 }
 
@@ -309,274 +330,283 @@ export function create_corpus(): CorpusBuilder<{}> {
   const definitions: StoreDefinition<string, any>[] = []
   let observation_types: ObservationTypeDef<unknown>[] = []
 
-  const builder: CorpusBuilder<any> = {
-    with_backend(b) {
-      backend = b
-      return builder
-    },
+  function make_builder<Stores extends Record<string, Store<any>>>(): CorpusBuilder<Stores> {
+    return {
+      with_backend(b) {
+        backend = b
+        return make_builder<Stores>()
+      },
 
-    with_store(definition) {
-      definitions.push(definition)
-      return builder
-    },
+      with_store<Id extends string, T>(definition: StoreDefinition<Id, T>) {
+        definitions.push(definition)
+        return make_builder<Stores & Record<Id, Store<T>>>()
+      },
 
-    with_observations(types) {
-      observation_types = types
-      return builder
-    },
+      with_observations(types) {
+        observation_types = types
+        return make_builder<Stores>()
+      },
 
-    build() {
-      if (!backend) {
-        throw new Error('Backend is required. Call with_backend() first.')
-      }
-
-      const b = backend
-
-      const stores: Record<string, Store<any>> = {}
-      const definitions_by_id: Record<string, StoreDefinition<string, any>> = {}
-      for (const def of definitions) {
-        stores[def.id] = create_store(b, def)
-        definitions_by_id[def.id] = def
-      }
-
-      const observations_client = observation_types.length > 0 && 'observations' in b
-        ? (b as Backend & { observations: ObservationsClient }).observations
-        : undefined
-
-      let in_transaction = false
-
-      async function transaction_impl<R>(
-        body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
-      ): Promise<Result<TransactionResult<R>, CorpusError>> {
-        if (in_transaction) {
-          return err({ kind: 'invalid_config', message: 'nested transactions are not supported' })
+      build(): Corpus<Stores> {
+        if (!backend) {
+          throw new Error('create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()')
         }
-        in_transaction = true
-
-        // op buffer + read-your-writes caches
-        const ops: BatchOp[] = []
-        const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
-        const buffered_data = new Map<string, Uint8Array>()          // key: data_key
-        const buffered_observations = new Map<string, Observation>() // key: id
-        const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
-        const commits: SnapshotMeta[] = []
-        const observations: Observation[] = []
-
-        function meta_key(store_id: string, version: string): string {
-          return `${store_id}:${version}`
-        }
-
-        function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
-          const prefix = `${store_id}:`
-          for (const [k, m] of buffered_meta) {
-            if (k.startsWith(prefix) && m.content_hash === content_hash) return m
-          }
-          return undefined
-        }
-
-        const handle: TransactionHandle = {
-          async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
-            const def = definitions_by_id[store.id]
-            if (!def) {
-              return err({ kind: 'invalid_config', message: `store '${store.id}' is not registered on this corpus` })
-            }
-
-            let bytes: Uint8Array
-            try {
-              bytes = await store.codec.encode(data)
-            } catch (cause) {
-              return err({ kind: 'encode_error', cause: cause as Error })
-            }
-
-            const version = generate_version()
-            const content_hash = await compute_hash(bytes)
-
-            // dedup against buffer first, then live backend
-            let existing_data_key: string | undefined =
-              find_buffered_by_hash(store.id, content_hash)?.data_key
-            if (!existing_data_key) {
-              const live = await b.metadata.find_by_hash(store.id, content_hash)
-              if (live) existing_data_key = live.data_key
-            }
-
-            const data_key = existing_data_key
-              ?? (def.data_key_fn
-                ? def.data_key_fn({ store_id: store.id, version, content_hash, tags: opts?.tags })
-                : `${store.id}/${content_hash}`)
-
-            if (!existing_data_key) {
-              ops.push({ type: 'data_put', data_key, bytes })
-              buffered_data.set(data_key, bytes)
-            }
-
-            const meta: SnapshotMeta = {
-              store_id: store.id,
-              version,
-              parents: opts?.parents ?? [],
-              created_at: new Date(),
-              invoked_at: opts?.invoked_at,
-              content_hash,
-              content_type: store.codec.content_type,
-              size_bytes: bytes.length,
-              data_key,
-              tags: opts?.tags,
-            }
-
-            ops.push({ type: 'meta_put', meta })
-            buffered_meta.set(meta_key(store.id, version), meta)
-            commits.push(meta)
-            return ok(meta)
-          },
-
-          async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
-            const key = meta_key(store.id, version)
-            if (tombstoned_meta.has(key)) {
-              return err({ kind: 'not_found', store_id: store.id, version })
-            }
-            const buffered = buffered_meta.get(key)
-            if (buffered) {
-              const bytes = buffered_data.get(buffered.data_key)
-              if (bytes) {
-                try {
-                  const value = await store.codec.decode(bytes)
-                  return ok({ meta: buffered, data: value })
-                } catch (cause) {
-                  return err({ kind: 'decode_error', cause: cause as Error })
-                }
-              }
-              // dedup hit on live data — fall through to backend read by data_key
-              const live = await b.data.get(buffered.data_key)
-              if (!live.ok) return live
-              try {
-                const value = await store.codec.decode(await live.value.bytes())
-                return ok({ meta: buffered, data: value })
-              } catch (cause) {
-                return err({ kind: 'decode_error', cause: cause as Error })
-              }
-            }
-            return store.get(version)
-          },
-
-          async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
-            const key = meta_key(store.id, version)
-            ops.push({ type: 'meta_delete', store_id: store.id, version })
-            buffered_meta.delete(key)
-            tombstoned_meta.add(key)
-            return ok(undefined)
-          },
-
-          async observe<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
-            const validation = type.schema.safeParse(opts.content)
-            if (!validation.success) {
-              return err({ kind: 'validation_error', cause: validation.error, message: validation.error.message })
-            }
-            const id = generate_observation_id()
-            const row = create_observation_row(id, type.name, opts.source, validation.data, {
-              confidence: opts.confidence,
-              observed_at: opts.observed_at,
-              derived_from: opts.derived_from,
-            })
-            ops.push({ type: 'observation_put', row })
-            const observation: Observation<T> = {
-              id,
-              type: type.name,
-              source: opts.source,
-              content: validation.data,
-              ...(opts.confidence !== undefined && { confidence: opts.confidence }),
-              ...(opts.observed_at && { observed_at: opts.observed_at }),
-              created_at: new Date(row.created_at),
-              ...(opts.derived_from && { derived_from: opts.derived_from }),
-            }
-            buffered_observations.set(id, observation as Observation)
-            observations.push(observation as Observation)
-            return ok(observation)
-          },
-
-          async observation_delete(id: string): Promise<Result<void, CorpusError>> {
-            ops.push({ type: 'observation_delete', id })
-            buffered_observations.delete(id)
-            return ok(undefined)
-          },
-        }
-
-        let body_result: Result<R, CorpusError>
-        try {
-          body_result = await body(handle)
-        } catch (cause) {
-          in_transaction = false
-          return err({ kind: 'transaction_aborted', reason: 'threw', cause: cause as Error })
-        }
-
-        if (!body_result.ok) {
-          in_transaction = false
-          return err({ kind: 'transaction_aborted', reason: 'returned_err', cause: corpus_error_to_native(body_result.error) })
-        }
-
-        // commit phase
-        const commit_result = b.apply_batch
-          ? await b.apply_batch(ops)
-          : await sequential_apply_with_compensation(b, ops)
-
-        in_transaction = false
-        if (!commit_result.ok) {
-          if (commit_result.error.kind === 'partial_commit') {
-            return commit_result
-          }
-          return err({
-            kind: 'transaction_aborted',
-            reason: 'apply_batch_failed',
-            cause: corpus_error_to_native(commit_result.error),
-          })
-        }
-
-        return ok({ value: body_result.value, commits, observations })
-      }
-
-      async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
-        const store = stores[pointer.store_id]
-        if (!store) {
-          return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
-        }
-
-        const snapshot_result = await store.get(pointer.version)
-        if (!snapshot_result.ok) return snapshot_result
-
-        let value: unknown = snapshot_result.value.data
-
-        if (pointer.path) {
-          const path_result = resolve_path(value, pointer.path)
-          if (!path_result.ok) return path_result
-          value = path_result.value
-        }
-
-        if (pointer.span && typeof value === 'string') {
-          const span_result = apply_span(value, pointer.span)
-          if (!span_result.ok) return span_result
-          value = span_result.value
-        }
-
-        return ok(value as T)
-      }
-
-      async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
-        if (!observations_client?.is_stale) return false
-        return observations_client.is_stale(pointer)
-      }
-
-      return {
-        stores,
-        metadata: b.metadata,
-        data: b.data,
-        observations: observations_client,
-        create_pointer,
-        resolve_pointer: resolve_pointer_impl,
-        is_superseded: is_superseded_impl,
-        transaction: transaction_impl,
-      } as Corpus<any>
-    },
+        return build_corpus<Stores>(backend, definitions, observation_types)
+      },
+    }
   }
 
-  return builder as CorpusBuilder<{}>
+  return make_builder<{}>()
+}
+
+function build_corpus<Stores extends Record<string, Store<any>>>(
+  b: Backend,
+  definitions: readonly StoreDefinition<string, any>[],
+  observation_types: readonly ObservationTypeDef<unknown>[]
+): Corpus<Stores> {
+  const stores: Record<string, Store<any>> = {}
+  const definitions_by_id: Record<string, StoreDefinition<string, any>> = {}
+  for (const def of definitions) {
+    stores[def.id] = create_store(b, def)
+    definitions_by_id[def.id] = def
+  }
+
+  const observations_client = observation_types.length > 0 ? b.observations : undefined
+
+  let in_transaction = false
+
+  async function transaction_impl<R>(
+    body: (tx: TransactionHandle) => Promise<Result<R, CorpusError>>
+  ): Promise<Result<TransactionResult<R>, CorpusError>> {
+    if (in_transaction) {
+      return err({ kind: 'invalid_config', message: 'nested transactions are not supported' })
+    }
+    in_transaction = true
+
+    // op buffer + read-your-writes caches
+    const ops: BatchOp[] = []
+    const buffered_meta = new Map<string, SnapshotMeta>()       // key: `${store_id}:${version}`
+    const buffered_data = new Map<string, Uint8Array>()          // key: data_key
+    const buffered_observations = new Map<string, Observation>() // key: id
+    const tombstoned_meta = new Set<string>()                    // key: `${store_id}:${version}` deleted in-tx
+    const commits: SnapshotMeta[] = []
+    const observations: Observation[] = []
+
+    function meta_key(store_id: string, version: string): string {
+      return `${store_id}:${version}`
+    }
+
+    function find_buffered_by_hash(store_id: string, content_hash: string): SnapshotMeta | undefined {
+      const prefix = `${store_id}:`
+      for (const [k, m] of buffered_meta) {
+        if (k.startsWith(prefix) && m.content_hash === content_hash) return m
+      }
+      return undefined
+    }
+
+    const handle: TransactionHandle = {
+      async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+        const def = definitions_by_id[store.id]
+        if (!def) {
+          return err({ kind: 'invalid_config', message: `store '${store.id}' is not registered on this corpus` })
+        }
+
+        let bytes: Uint8Array
+        try {
+          bytes = await store.codec.encode(data)
+        } catch (cause) {
+          return err({ kind: 'encode_error', cause: to_error(cause) })
+        }
+
+        const version = generate_version()
+        const content_hash = await compute_hash(bytes)
+
+        // dedup against buffer first, then live backend
+        let existing_data_key: string | undefined =
+          find_buffered_by_hash(store.id, content_hash)?.data_key
+        if (!existing_data_key) {
+          const live = await b.metadata.find_by_hash(store.id, content_hash)
+          if (live) existing_data_key = live.data_key
+        }
+
+        const data_key = existing_data_key
+          ?? (def.data_key_fn
+            ? def.data_key_fn({ store_id: store.id, version, content_hash, tags: opts?.tags })
+            : `${store.id}/${content_hash}`)
+
+        if (!existing_data_key) {
+          ops.push({ type: 'data_put', data_key, bytes })
+          buffered_data.set(data_key, bytes)
+        }
+
+        const meta: SnapshotMeta = {
+          store_id: store.id,
+          version,
+          parents: opts?.parents ?? [],
+          created_at: new Date(),
+          invoked_at: opts?.invoked_at,
+          content_hash,
+          content_type: store.codec.content_type,
+          size_bytes: bytes.length,
+          data_key,
+          tags: opts?.tags,
+        }
+
+        ops.push({ type: 'meta_put', meta })
+        buffered_meta.set(meta_key(store.id, version), meta)
+        commits.push(meta)
+        return ok(meta)
+      },
+
+      async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
+        const key = meta_key(store.id, version)
+        if (tombstoned_meta.has(key)) {
+          return err({ kind: 'not_found', store_id: store.id, version })
+        }
+        const buffered = buffered_meta.get(key)
+        if (buffered) {
+          const bytes = buffered_data.get(buffered.data_key)
+          if (bytes) {
+            try {
+              const value = await store.codec.decode(bytes)
+              return ok({ meta: buffered, data: value })
+            } catch (cause) {
+              return err({ kind: 'decode_error', cause: to_error(cause) })
+            }
+          }
+          // dedup hit on live data — fall through to backend read by data_key
+          const live = await b.data.get(buffered.data_key)
+          if (!live.ok) return live
+          try {
+            const value = await store.codec.decode(await live.value.bytes())
+            return ok({ meta: buffered, data: value })
+          } catch (cause) {
+            return err({ kind: 'decode_error', cause: to_error(cause) })
+          }
+        }
+        return store.get(version)
+      },
+
+      async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
+        const key = meta_key(store.id, version)
+        ops.push({ type: 'meta_delete', store_id: store.id, version })
+        buffered_meta.delete(key)
+        tombstoned_meta.add(key)
+        return ok(undefined)
+      },
+
+      async observe<T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>): Promise<Result<Observation<T>, CorpusError>> {
+        const validation = type.schema.safeParse(opts.content)
+        if (!validation.success) {
+          return err({ kind: 'validation_error', cause: validation.error, message: validation.error.message })
+        }
+        const id = generate_observation_id()
+        const row = create_observation_row(id, type.name, opts.source, validation.data, {
+          confidence: opts.confidence,
+          observed_at: opts.observed_at,
+          derived_from: opts.derived_from,
+        })
+        ops.push({ type: 'observation_put', row })
+        const observation: Observation<T> = {
+          id,
+          type: type.name,
+          source: opts.source,
+          content: validation.data,
+          ...(opts.confidence !== undefined && { confidence: opts.confidence }),
+          ...(opts.observed_at && { observed_at: opts.observed_at }),
+          created_at: new Date(row.created_at),
+          ...(opts.derived_from && { derived_from: opts.derived_from }),
+        }
+        buffered_observations.set(id, observation)
+        observations.push(observation)
+        return ok(observation)
+      },
+
+      async observation_delete(id: string): Promise<Result<void, CorpusError>> {
+        ops.push({ type: 'observation_delete', id })
+        buffered_observations.delete(id)
+        return ok(undefined)
+      },
+    }
+
+    let body_result: Result<R, CorpusError>
+    try {
+      body_result = await body(handle)
+    } catch (cause) {
+      in_transaction = false
+      return err({ kind: 'transaction_aborted', reason: 'threw', cause: to_error(cause) })
+    }
+
+    if (!body_result.ok) {
+      in_transaction = false
+      return err({ kind: 'transaction_aborted', reason: 'returned_err', cause: corpus_error_to_native(body_result.error) })
+    }
+
+    // commit phase
+    const commit_result = b.apply_batch
+      ? await b.apply_batch(ops)
+      : await sequential_apply_with_compensation(b, ops)
+
+    in_transaction = false
+    if (!commit_result.ok) {
+      if (commit_result.error.kind === 'partial_commit') {
+        return commit_result
+      }
+      return err({
+        kind: 'transaction_aborted',
+        reason: 'apply_batch_failed',
+        cause: corpus_error_to_native(commit_result.error),
+      })
+    }
+
+    return ok({ value: body_result.value, commits, observations })
+  }
+
+  async function resolve_pointer_impl<T>(pointer: SnapshotPointer): Promise<Result<T, CorpusError>> {
+    const store = stores[pointer.store_id]
+    if (!store) {
+      return err({ kind: 'not_found', store_id: pointer.store_id, version: pointer.version })
+    }
+
+    const snapshot_result = await store.get(pointer.version)
+    if (!snapshot_result.ok) return snapshot_result
+
+    let value: unknown = snapshot_result.value.data
+
+    if (pointer.path) {
+      const path_result = resolve_path(value, pointer.path)
+      if (!path_result.ok) return path_result
+      value = path_result.value
+    }
+
+    if (pointer.span && typeof value === 'string') {
+      const span_result = apply_span(value, pointer.span)
+      if (!span_result.ok) return span_result
+      value = span_result.value
+    }
+
+    // pointer paths resolve dynamically — T is the caller's assertion
+    // about what lives at the pointed-to location
+    return ok(value as T)
+  }
+
+  async function is_superseded_impl(pointer: SnapshotPointer): Promise<boolean> {
+    if (!observations_client?.is_stale) return false
+    return observations_client.is_stale(pointer)
+  }
+
+  return {
+    // stores is populated from exactly the definitions that accumulated
+    // the Stores type parameter through the with_store chain
+    stores: stores as Stores,
+    metadata: b.metadata,
+    data: b.data,
+    observations: observations_client,
+    create_pointer,
+    resolve_pointer: resolve_pointer_impl,
+    is_superseded: is_superseded_impl,
+    transaction: transaction_impl,
+  }
 }
 
 /**
