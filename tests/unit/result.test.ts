@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import {
 	match,
 	unwrap_or,
@@ -353,11 +353,11 @@ describe("Result Utilities", () => {
 
 		test("passes request init options", async () => {
 			let captured_init: RequestInit | undefined;
-			const mock_fn = mock((_input: string | Request | URL, init?: RequestInit) => {
+			const fake_fetch = (_input: string | Request | URL, init?: RequestInit) => {
 				captured_init = init;
 				return Promise.resolve(new Response("{}", { status: 200 }));
-			});
-			globalThis.fetch = mock_fn as unknown as typeof fetch;
+			};
+			globalThis.fetch = fake_fetch as unknown as typeof fetch;
 
 			await fetch_result(
 				"https://api.example.com/data",

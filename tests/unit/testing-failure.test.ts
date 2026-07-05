@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
+import { fake_console_warn } from "../fakes/console.js";
 import fc from "fast-check";
 import { failure, lookup_failure, list_registered_variants } from "../../testing/failure.js";
 import { __reset_registry_for_tests } from "../../testing/registry.js";
@@ -42,7 +43,7 @@ describe("testing/failure module", () => {
 		});
 
 		test("duplicate registration overwrites and warns", async () => {
-			const warn = spyOn(console, "warn").mockImplementation(() => {});
+			const warn = fake_console_warn();
 			try {
 				const first = compose<Extract<DemoError, { kind: "boom" }>>((draw) => ({
 					kind: "boom" as const,
@@ -55,9 +56,9 @@ describe("testing/failure module", () => {
 				failure(DEMO_ERROR_BRAND, "boom", first);
 				failure(DEMO_ERROR_BRAND, "boom", second);
 				expect(await lookup_failure(DEMO_ERROR_BRAND, "boom")).toBe(second);
-				expect(warn).toHaveBeenCalledTimes(1);
+				expect(warn.calls.length).toBe(1);
 			} finally {
-				warn.mockRestore();
+				warn.restore();
 			}
 		});
 	});

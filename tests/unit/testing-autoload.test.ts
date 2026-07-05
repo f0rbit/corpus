@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterAll, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { join } from "node:path";
 import { z } from "zod";
 import { arb } from "../../testing/arb.js";
@@ -6,6 +6,7 @@ import { lookup, __reset_registry_for_tests } from "../../testing/registry.js";
 import { load_from, __set_auto_load_cwd_for_tests } from "../../testing/vending/auto-load.js";
 import { HAPPY_MARKER_BRAND, calls as self_calls } from "../fixtures/vending/happy/self-register.js";
 import { calls as dep_calls } from "../fixtures/vending/happy/node_modules/dep-with-registrar/register.js";
+import { fake_console_warn } from "../fakes/console.js";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures", "vending");
 const HAPPY = join(FIXTURES, "happy");
@@ -83,25 +84,25 @@ describe("testing/vending/auto-load", () => {
 
 	test("discovery failure warns with an actionable message and never throws", async () => {
 		__set_auto_load_cwd_for_tests(join(FIXTURES, "malformed"));
-		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		const warn = fake_console_warn();
 		try {
 			expect(await lookup(HAPPY_MARKER_BRAND)).toBeUndefined();
-			expect(warn).toHaveBeenCalledTimes(1);
-			expect(String(warn.mock.calls[0]?.[0])).toContain("load_from");
+			expect(warn.calls.length).toBe(1);
+			expect(String(warn.calls[0]?.[0])).toContain("load_from");
 		} finally {
-			warn.mockRestore();
+			warn.restore();
 		}
 	});
 
 	test("broken dependency registrar warns per package but does not block lookups", async () => {
 		__set_auto_load_cwd_for_tests(join(FIXTURES, "missing-registrar"));
-		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		const warn = fake_console_warn();
 		try {
 			expect(await lookup(HAPPY_MARKER_BRAND)).toBeUndefined();
-			expect(warn).toHaveBeenCalledTimes(1);
-			expect(String(warn.mock.calls[0]?.[0])).toContain("broken-registrar");
+			expect(warn.calls.length).toBe(1);
+			expect(String(warn.calls[0]?.[0])).toContain("broken-registrar");
 		} finally {
-			warn.mockRestore();
+			warn.restore();
 		}
 	});
 

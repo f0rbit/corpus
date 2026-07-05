@@ -6,13 +6,14 @@
 import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta, EventHandler } from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
-import { create_emitter, parse_snapshot_meta } from "../utils.js";
+import { create_emitter, parse_snapshot_meta, raw_snapshot_meta_schema } from "../utils.js";
 import { ok, err } from "../types.js";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
 import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
+import { z } from "zod";
 
 /** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
 const TX_DIR_PREFIX = ".tx-";
@@ -77,7 +78,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		const parsed = await try_catch_async(
 			async () => {
 				const content = await file.text();
-				const entries = JSON.parse(content) as [string, Parameters<typeof parse_snapshot_meta>[0]][];
+				const entries = z.array(z.tuple([z.string(), raw_snapshot_meta_schema])).parse(JSON.parse(content));
 				return new Map(entries.map(([key, raw]) => [key, parse_snapshot_meta(raw)]));
 			},
 			() => null,

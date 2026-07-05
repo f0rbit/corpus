@@ -13,6 +13,7 @@ import type {
 	ParentRef,
 	Parser,
 } from "./types.js";
+import { z } from "zod";
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -411,21 +412,43 @@ export function filter_snapshots(metas: SnapshotMeta[], opts: ListOpts = {}): Sn
 }
 
 /**
+ * Zod schema for a single parent reference, as persisted on disk or in a
+ * database row (a `parents` column re-hydrated via `JSON.parse`). Source of
+ * truth for validating untrusted `ParentRef`-shaped data at storage boundaries
+ * — the domain type itself stays hand-authored in `types.ts`.
+ */
+export const parent_ref_schema: z.ZodType<ParentRef> = z.object({
+	store_id: z.string(),
+	version: z.string(),
+	role: z.string().optional(),
+});
+
+/**
+ * Zod schema for the raw snapshot-meta shape as read from disk (file backend
+ * `_meta.json`) or a database row (Cloudflare/D1 backend), before
+ * `parse_snapshot_meta` normalises it into a `SnapshotMeta`. This schema is
+ * the single source of truth for `parse_snapshot_meta`'s parameter shape —
+ * corpus's own partial-commit gotcha means on-disk meta can be malformed, so
+ * the raw shape is validated rather than cast.
+ */
+export const raw_snapshot_meta_schema = z.object({
+	store_id: z.string(),
+	version: z.string(),
+	data_key: z.string(),
+	created_at: z.union([z.string(), z.date()]),
+	invoked_at: z.union([z.string(), z.date()]).nullish(),
+	parents: z.union([z.string(), z.array(parent_ref_schema)]).nullish(),
+	tags: z.union([z.string(), z.array(z.string())]).nullish(),
+	content_hash: z.string().optional(),
+	content_type: z.string().optional(),
+	size_bytes: z.number().optional(),
+});
+
+/**
  * Parse a raw snapshot object (from JSON or database row) into a proper SnapshotMeta.
  * Handles date string conversion and JSON parsing of array fields.
  */
-export function parse_snapshot_meta(raw: {
-	store_id: string;
-	version: string;
-	data_key: string;
-	created_at: string | Date;
-	invoked_at?: string | Date | null;
-	parents?: string | ParentRef[] | null;
-	tags?: string | string[] | null;
-	content_hash?: string;
-	content_type?: string;
-	size_bytes?: number;
-}): SnapshotMeta {
+export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema>): SnapshotMeta {
 	return {
 		store_id: raw.store_id,
 		version: raw.version,
@@ -438,10 +461,14 @@ export function parse_snapshot_meta(raw: {
 			: undefined,
 		parents: raw.parents
 			? typeof raw.parents === "string"
-				? (JSON.parse(raw.parents) as ParentRef[])
+				? z.array(parent_ref_schema).parse(JSON.parse(raw.parents))
 				: raw.parents
 			: [],
-		tags: raw.tags ? (typeof raw.tags === "string" ? (JSON.parse(raw.tags) as string[]) : raw.tags) : undefined,
+		tags: raw.tags
+			? typeof raw.tags === "string"
+				? z.array(z.string()).parse(JSON.parse(raw.tags))
+				: raw.tags
+			: undefined,
 		content_hash: raw.content_hash ?? "",
 		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,
