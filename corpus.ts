@@ -23,7 +23,7 @@ import type {
 } from "./types.js";
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
-import { try_catch, try_catch_async } from "./result.js";
+import { try_catch, try_catch_async, pipe } from "./result.js";
 import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
@@ -255,23 +255,21 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		},
 
 		async get(version: string): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-			const handle_result = await get_handle_impl(version);
-			if (!handle_result.ok) return handle_result;
-
-			const value_result = await handle_result.value.handle.value();
-			if (!value_result.ok) return value_result;
-
-			return ok({ meta: handle_result.value.meta, data: value_result.value });
+			return pipe(get_handle_impl(version))
+				.flat_map(async ({ meta, handle }) => {
+					const value_result = await handle.value();
+					return value_result.ok ? ok({ meta, data: value_result.value }) : value_result;
+				})
+				.result();
 		},
 
 		async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-			const handle_result = await get_latest_handle_impl();
-			if (!handle_result.ok) return handle_result;
-
-			const value_result = await handle_result.value.handle.value();
-			if (!value_result.ok) return value_result;
-
-			return ok({ meta: handle_result.value.meta, data: value_result.value });
+			return pipe(get_latest_handle_impl())
+				.flat_map(async ({ meta, handle }) => {
+					const value_result = await handle.value();
+					return value_result.ok ? ok({ meta, data: value_result.value }) : value_result;
+				})
+				.result();
 		},
 
 		get_handle: get_handle_impl,
@@ -287,18 +285,12 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		},
 
 		async delete(version: string): Promise<Result<void, CorpusError>> {
-			const meta_result = await backend.metadata.get(id, version);
-			if (!meta_result.ok) {
-				return meta_result;
-			}
-
-			const delete_meta_result = await backend.metadata.delete(id, version);
-			if (!delete_meta_result.ok) {
-				return delete_meta_result;
-			}
-
-			emit({ type: "meta_delete", store_id: id, version });
-			return ok(undefined);
+			return pipe(backend.metadata.get(id, version))
+				.flat_map(() => backend.metadata.delete(id, version))
+				.map(() => {
+					emit({ type: "meta_delete", store_id: id, version });
+				})
+				.result();
 		},
 	};
 

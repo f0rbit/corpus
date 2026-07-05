@@ -43,6 +43,14 @@ export default define_lint_config({
 			},
 		},
 		{
+			// fetch_result's default parse_body is a documented ergonomic default over
+			// an unconstrained generic T — it cannot Zod-validate a type it knows nothing
+			// about. Callers wanting validation supply their own parse_body doing
+			// schema.parse(response.json()) or similar.
+			files: ["result.ts"],
+			rules: { "f0rbit/require-schema-at-boundary": "off" },
+		},
+		{
 			// arbitrary-construction errors throw with actionable messages (documented design)
 			files: ["testing/**"],
 			rules: { "functional/no-throw-statements": "off" },
@@ -77,6 +85,28 @@ export default define_lint_config({
 			// documented migration, not this lint pass.
 			files: ["observations/index.ts", "observations/storage.ts"],
 			rules: { "@typescript-eslint/no-deprecated": "off" },
+		},
+		{
+			// row.derived_from is a DB TEXT column corpus itself writes and reads back —
+			// a round-trip of corpus's own data, not external input crossing a trust
+			// boundary. See AGENTS.md's require-schema-at-boundary rollout note.
+			files: ["observations/storage.ts"],
+			rules: { "f0rbit/require-schema-at-boundary": "off" },
+		},
+		{
+			// testing/registry.ts + testing/vending/** degrade duplicate-registration and
+			// auto-load discovery failures to console.warn by design (documented in
+			// AGENTS.md's testing-substrate section) — the message points callers at
+			// testing.load_from(...). Not a redesign target for this lint pass.
+			files: ["testing/registry.ts", "testing/vending/**"],
+			rules: { "no-console": "off" },
+		},
+		{
+			// fake_console_warn is the in-memory fake that intercepts console.warn for
+			// the testing-substrate warn-UX assertions above — it necessarily reads and
+			// reassigns the real global to record/restore it.
+			files: ["tests/fakes/console.ts"],
+			rules: { "no-console": "off" },
 		},
 		{
 			// test code: fakes and assertions may throw/try/use classes; Result discipline

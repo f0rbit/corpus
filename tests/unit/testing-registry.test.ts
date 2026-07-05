@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
+import { fake_console_warn } from "../fakes/console.js";
 import * as fc from "fast-check";
 import { z } from "zod";
 import { arbitrary, lookup, failure, lookup_failure, __reset_registry_for_tests } from "../../testing/registry.js";
@@ -39,16 +40,16 @@ describe("testing/registry", () => {
 		});
 
 		test("duplicate registration overwrites and warns", async () => {
-			const warn = spyOn(console, "warn").mockImplementation(() => {});
+			const warn = fake_console_warn();
 			try {
 				const first = fc.constant("a" as UserId);
 				const second = fc.constant("b" as UserId);
 				arbitrary(USER_ID_BRAND, first);
 				arbitrary(USER_ID_BRAND, second);
 				expect(await lookup(USER_ID_BRAND)).toBe(second);
-				expect(warn).toHaveBeenCalledTimes(1);
+				expect(warn.calls.length).toBe(1);
 			} finally {
-				warn.mockRestore();
+				warn.restore();
 			}
 		});
 	});
@@ -76,7 +77,7 @@ describe("testing/registry", () => {
 		});
 
 		test("duplicate schema registration overwrites and warns", async () => {
-			const warn = spyOn(console, "warn").mockImplementation(() => {});
+			const warn = fake_console_warn();
 			try {
 				const schema = z.string();
 				const first = fc.constant("a");
@@ -84,9 +85,9 @@ describe("testing/registry", () => {
 				arbitrary(schema, first);
 				arbitrary(schema, second);
 				expect(await lookup(schema)).toBe(second);
-				expect(warn).toHaveBeenCalledTimes(1);
+				expect(warn.calls.length).toBe(1);
 			} finally {
-				warn.mockRestore();
+				warn.restore();
 			}
 		});
 	});
@@ -121,7 +122,7 @@ describe("testing/registry", () => {
 		});
 
 		test("duplicate failure registration overwrites and warns", async () => {
-			const warn = spyOn(console, "warn").mockImplementation(() => {});
+			const warn = fake_console_warn();
 			try {
 				const first = fc.record({
 					kind: fc.constant("not_found" as const),
@@ -134,9 +135,9 @@ describe("testing/registry", () => {
 				failure(DEMO_ERROR_BRAND, "not_found", first);
 				failure(DEMO_ERROR_BRAND, "not_found", second);
 				expect(await lookup_failure(DEMO_ERROR_BRAND, "not_found")).toBe(second);
-				expect(warn).toHaveBeenCalledTimes(1);
+				expect(warn.calls.length).toBe(1);
 			} finally {
-				warn.mockRestore();
+				warn.restore();
 			}
 		});
 	});
