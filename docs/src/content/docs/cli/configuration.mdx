@@ -1,0 +1,228 @@
+---
+title: CLI Configuration
+description: Configure backend connections, environments, and optional codec definitions.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The CLI discovers connection parameters in order of precedence: explicit flags → config file → wrangler sniffing → environment variables. For metadata-only commands (`stores`, `versions`, `show`, `lineage`), you can work with just environment variables. Only `cat` with codec-based decoding and `clone` require a config file.
+
+## Discovery precedence
+
+| Level | Source | Applies to | Notes |
+|-------|--------|-----------|-------|
+| 1 | CLI flags | `--env`, `--file`, `--config` | Explicit overrides |
+| 2 | `corpus.config.ts` | `environments` block | Checked-in per-workspace config |
+| 3 | `wrangler.toml`/`.jsonc` | D1 & R2 bindings | Upward search stops at `.git` |
+| 4 | Environment variables | Fallback connection params | `CORPUS_D1_DATABASE_ID`, `CORPUS_R2_BUCKET` |
+
+For Cloudflare D1 and R2 connection details:
+
+**Highest precedence wins.** If `corpus.config.ts` defines an environment with a `database_id`, that value is used even if `wrangler.toml` lists candidates. The fallback env vars (`CORPUS_D1_DATABASE_ID`, `CORPUS_R2_BUCKET`) only activate if wrangler sniffing finds nothing—useful for workspaces with SST-managed or IaC-templated placeholder IDs.
+
+## corpus.config.ts
+
+Create a `corpus.config.ts` file in your workspace root (or pass `--config <path>` to override). Use `define_config` to get type checking:
+
+```typescript
+import { define_config } from '@f0rbit/corpus/cli'
+
+export default define_config({
+  stores: [
+    { id: 'users', codec: /* optional */ },
+    { id: 'posts', codec: /* optional */ },
+  ],
+  environments: {
+    remote: {
+      account_id: 'your-account-id',
+      database_id: 'your-d1-id',
+      bucket: 'your-r2-bucket',
+    },
+    staging: {
+      database_id: 'staging-d1-id',
+      bucket: 'staging-r2-bucket',
+    },
+    local: {
+      file: './corpus-data',
+    },
+  },
+  default_env: 'remote',
+})
+```
+
+### Stores block
+
+The `stores` array lists store definitions. If present, only these stores are considered valid by the CLI (for validation). **Each store must have an `id`** that matches your production store definition. The optional `codec` field is a codec object with a `decode` method, used by `corpus cat` to decode that store's snapshot data (see [`cat`](/corpus/cli/overview#cat) — without a matching entry here, `cat` falls back to a content-type-based rendering of `text/*` and `application/json` only).
+
+<Aside type="tip">
+For true single-source-of-truth, import your store definitions from your application instead of duplicating them:
+
+```typescript
+import { define_config } from '@f0rbit/corpus/cli'
+import { my_stores } from '@myapp/schema'  // Import your real store defs
+
+export default define_config({
+  stores: my_stores.map(s => ({ id: s.id, codec: s.codec })),
+  environments: { /* ... */ },
+})
+```
+</Aside>
+
+### Environments block
+
+Name your environments and define connection parameters:
+
+**Remote (Cloudflare D1 + R2):**
+```typescript
+remote: {
+  account_id: 'your-cf-account-id',        // Falls back to CLOUDFLARE_ACCOUNT_ID / wrangler sniff if omitted
+  database_id: 'your-d1-database-id',      // Falls back to wrangler sniff / CORPUS_D1_DATABASE_ID if omitted
+  bucket: 'your-r2-bucket-name',           // Falls back to wrangler sniff / CORPUS_R2_BUCKET if omitted
+  d1_base_url?: 'https://api.cloudflare.com/...',  // Optional: D1 API base (default)
+  r2_endpoint?: 'https://your-r2.example.com',     // Optional: R2 custom endpoint
+}
+```
+
+All fields here are individually optional in the schema — resolution falls through to wrangler sniffing and then environment variables per the precedence table above. A run only fails if `account_id`, `database_id`, `bucket`, or the `CLOUDFLARE_API_TOKEN` env var can't be resolved from *any* source.
+
+**File (local file system):**
+```typescript
+local: {
+  file: './corpus-data',  // Path to corpus data directory
+}
+```
+
+Use the environment by name or set a `default_env`:
+
+```bash
+corpus stores                           # Uses default_env
+corpus stores --env staging             # Override with --env
+corpus clone remote ./backup            # Use "remote" environment as source
+corpus clone remote ./backup --env staging  # Override with --env
+```
+
+## Environment variables
+
+The CLI reads the following environment variables as a fallback source:
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID | `abc123...` |
+| `CLOUDFLARE_API_TOKEN` | Bearer token for D1/R2 access | `yJhbGc...` |
+| `CORPUS_D1_DATABASE_ID` | D1 database ID (lowest precedence) | `12345678-abcd-...` |
+| `CORPUS_R2_BUCKET` | R2 bucket name (lowest precedence) | `my-bucket` |
+| `CORPUS_R2_ACCESS_KEY_ID` | R2 API token ID (S3 access key) | `abc123...` |
+| `CORPUS_R2_SECRET_ACCESS_KEY` | R2 API token secret (S3 secret) | `yJhbGc...` |
+
+### Token scopes
+
+**D1 and R2 require different credentials:**
+
+- **D1 API token**: Create a token in the Cloudflare dashboard with **read-only** D1 scope. The CLI only reads metadata and does not modify your database. Token name suggestion: "Corpus read-only CLI"
+
+- **R2 S3 credentials**: Create an R2 API token with **Object Read Only** scope:
+  - The API token ID becomes `CORPUS_R2_ACCESS_KEY_ID`
+  - The secret is SHA-256-hashed to derive `CORPUS_R2_SECRET_ACCESS_KEY` (see below)
+
+### R2 S3 credentials derivation
+
+When you mint an R2 API token, Cloudflare provides:
+1. Token ID (e.g., `abc123def456`)
+2. Secret value (a long random string)
+
+Export these for S3-compatible access:
+
+```bash
+export CORPUS_R2_ACCESS_KEY_ID="<token-id>"
+export CORPUS_R2_SECRET_ACCESS_KEY="<sha256-of-secret>"
+```
+
+To compute the SHA-256:
+
+```bash
+# macOS / Linux
+echo -n "your-secret-string" | sha256sum
+# or
+echo -n "your-secret-string" | openssl dgst -sha256 -hex
+
+# Node.js
+import crypto from 'crypto'
+console.log(crypto.createHash('sha256').update('your-secret-string').digest('hex'))
+
+# Bun
+console.log(new Bun.CryptoHasher('sha256').update('your-secret-string').digest('hex'))
+```
+
+## Wrangler sniffing
+
+If no `corpus.config.ts` is present, the CLI searches upward for `wrangler.toml` or `wrangler.jsonc` and extracts D1 and R2 binding information. This is automatic and requires no additional config.
+
+Sniffing reads a single `wrangler` file — `wrangler.toml`, then `wrangler.jsonc`, then `wrangler.json`, first match wins (it does not merge candidates across multiple files). Within that file, both the top-level bindings and every `[env.<name>]` block are collected as candidates. If multiple D1 databases or R2 buckets are found, the CLI returns an error naming each candidate's binding name and source block, plus the config field that resolves the ambiguity:
+
+```
+error: ambiguous D1 database: found 3 candidates
+  (DB (top-level), DB (staging), DB (production)).
+Set database_id in corpus.config.ts.
+```
+
+Define an environment in `corpus.config.ts` with an explicit `database_id` to resolve the ambiguity:
+
+```typescript
+export default define_config({
+  environments: {
+    production: {
+      database_id: 'db_prod',
+      bucket: 'my-r2-bucket',
+    },
+  },
+})
+```
+
+Then run:
+
+```bash
+corpus stores --env production
+```
+
+## Bare environment usage
+
+For quick exploration in a bare directory (no config file), export the minimal env vars:
+
+```bash
+# Required for remote backend
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+export CLOUDFLARE_API_TOKEN="your-token"
+export CORPUS_D1_DATABASE_ID="your-d1-id"
+export CORPUS_R2_BUCKET="your-bucket"
+
+# Optional for data transfer
+export CORPUS_R2_ACCESS_KEY_ID="token-id"
+export CORPUS_R2_SECRET_ACCESS_KEY="sha256-of-secret"
+
+corpus stores
+corpus clone remote ./local-clone
+```
+
+No `corpus.config.ts`, no `wrangler.toml` — the CLI resolves everything from env vars.
+
+## CLI flags
+
+Override discovery with flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--config <path>` | Path to `corpus.config.ts` (or `.js`) |
+| `--env <name>` | Environment name from config or wrangler |
+| `--file <path>` | File backend path (overrides all config) |
+
+Example:
+
+```bash
+corpus stores --config ./alt-config.ts --env staging
+corpus clone remote ./backup --file ./alt-corpus-data
+```
+
+## Next steps
+
+- [CLI Overview](/corpus/cli/overview) for command reference
+- [Clone Semantics](/corpus/cli/clone) for backup and incremental transfer details

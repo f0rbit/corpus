@@ -1,4 +1,4 @@
-# @f0rbit/corpus v0.7.0
+# @f0rbit/corpus v0.8.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -11,6 +11,7 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - `@f0rbit/corpus` (`index.ts`) — A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 - `@f0rbit/corpus/file` (`file.ts`) — File-system storage backend (Node.js/Bun only)
 - `@f0rbit/corpus/cloudflare` (`cloudflare.ts`) — Cloudflare Workers compatible exports This entry point excludes the file backend which uses Node.js APIs
+- `@f0rbit/corpus/remote` (`remote.ts`) — Remote backend for laptop-side Cloudflare access (Bun only)
 - `@f0rbit/corpus/types` (`types.ts`) — Type definitions for the corpus library.
 - `@f0rbit/corpus/schema` (`schema.ts`) — Database schema definitions for Drizzle ORM.
 - `@f0rbit/corpus/testing` (`testing/index.ts`) — Property-based testing substrate for corpus.
@@ -38,6 +39,11 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - [Drizzle Schema](https://f0rbit.github.io/corpus/api/schema/): Database schema exports for direct Drizzle ORM access to corpus tables
 - [Streaming](https://f0rbit.github.io/corpus/api/streaming/): Stream-based reads and writes for large payloads via SnapshotHandle, get_handle, and put_stream.
 - [Utility Functions](https://f0rbit.github.io/corpus/api/utilities/): Extended utilities for Result types, concurrency control, hashing, and versioning in Corpus.
+
+### Cli
+- [Clone Semantics](https://f0rbit.github.io/corpus/cli/clone/): Understand incremental copying, idempotency, and limitations of the clone command.
+- [CLI Configuration](https://f0rbit.github.io/corpus/cli/configuration/): Configure backend connections, environments, and optional codec definitions.
+- [CLI Overview](https://f0rbit.github.io/corpus/cli/overview/): Read-only operations to inspect and clone Corpus data from the command line.
 
 ### Guides
 - [Storage Backends](https://f0rbit.github.io/corpus/guides/backends/): Learn about the different storage backends available in Corpus and when to use each one.
@@ -106,6 +112,14 @@ Every public export, grouped by the source module that defines it.
 
 ### corpus.ts
 - Values: `create_corpus`, `create_store`
+
+### copy.ts
+- Values: `copy`
+- Types: `CopyOpts`, `CopyProgressEvent`, `CopySummary`
+
+### cli/config-schema.ts
+- Values: `define_config`
+- Types: `CorpusCliConfig`
 
 ### backend/memory.ts
 - Values: `create_memory_backend`
@@ -179,6 +193,18 @@ Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)
 ### backend/file.ts
 - Values: `create_file_backend`, `recover`
 - Types: `FileBackendConfig`
+
+### backend/remote.ts
+- Values: `create_remote_backend`
+- Types: `RemoteBackendConfig`
+
+### backend/remote-d1.ts
+- Values: `create_d1_http_db`, `d1_endpoint_url`
+- Types: `D1HttpConfig`
+
+### backend/remote-r2.ts
+- Values: `create_r2_data_storage`
+- Types: `R2S3Config`
 
 ### testing/arb.ts
 - Values: `arb`

@@ -1,0 +1,317 @@
+---
+title: CLI Overview
+description: Read-only operations to inspect and clone Corpus data from the command line.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `@f0rbit/corpus` package ships a read-only CLI for inspecting and cloning versioned snapshots. Access production data locally, audit metadata across stores, and clone entire backends to file storage for local testing and debugging.
+
+## Installation
+
+The CLI is bundled with the `@f0rbit/corpus` package — there's no separate CLI package.
+
+Run it directly, without installing, via the **scoped** package specifier:
+
+```bash
+bunx @f0rbit/corpus --help
+```
+
+<Aside type="caution">
+`bunx corpus` (unscoped) resolves a **different**, unrelated npm package. Always use the scoped form: `bunx @f0rbit/corpus`.
+</Aside>
+
+Or install it as a dev dependency and invoke the `corpus` bin directly:
+
+```bash
+bun add -d @f0rbit/corpus
+corpus --help
+```
+
+Or define a package script:
+
+```json
+{
+  "scripts": {
+    "corpus": "corpus"
+  }
+}
+```
+
+Then invoke as `bun run corpus <command>`.
+
+## Exit codes
+
+- **0** — Command completed successfully
+- **1** — Command encountered an error (configuration, storage, or data error)
+- **2** — Usage error (missing required argument, invalid flag)
+
+## Commands
+
+All commands are read-only and require backend connectivity. Most work with minimal config (see [Configuration](/corpus/cli/configuration)), though `cat` optionally uses `corpus.config.ts` for codec-based decoding.
+
+### stores
+
+List all available stores in the backend.
+
+```bash
+corpus stores                 # List store IDs
+corpus stores --counts        # Include version count per store
+corpus stores --json          # Machine-readable format
+corpus stores --quiet         # Result only (no decorative text)
+```
+
+**Examples:**
+
+```bash
+# Bare environment — works with only env credentials
+$ export CLOUDFLARE_API_TOKEN="xxx" CLOUDFLARE_ACCOUNT_ID="yyy"
+$ export CORPUS_D1_DATABASE_ID="zzz" CORPUS_R2_BUCKET="my-bucket"
+$ corpus stores
+id
+──────────────
+users
+posts
+comments
+```
+
+**--json output shape:**
+
+```json
+{
+  "stores": [
+    {
+      "id": "users",
+      "version_count": 42,
+      "latest_created_at": "2025-07-19T14:23:10.000Z"
+    }
+  ]
+}
+```
+
+`version_count` and `latest_created_at` are only present when `--counts` is passed; without it, each entry is just `{ "id": "..." }`.
+
+### versions
+
+List versions in a store with optional filtering.
+
+```bash
+corpus versions <store>                    # All versions
+corpus versions <store> --limit 10         # First 10 versions
+corpus versions <store> --tag published    # Versions with tag "published"
+corpus versions <store> --after 2025-01-01T00:00:00Z  # Versions created after date
+corpus versions <store> --before 2025-07-01T00:00:00Z # Versions created before date
+corpus versions <store> --json              # Machine-readable
+```
+
+<Aside type="tip">
+`--after` and `--before` require a **full** ISO-8601 datetime (date + time + `Z` or offset, e.g. `2025-01-01T00:00:00Z`). A bare date like `2025-01-01` is rejected with an "invalid date" error.
+</Aside>
+
+**--json output shape:**
+
+```json
+{
+  "store": "users",
+  "versions": [
+    {
+      "version": "v3",
+      "parents": [],
+      "created_at": "2025-07-19T14:23:10.000Z",
+      "invoked_at": "2025-07-19T14:15:00.000Z",
+      "content_hash": "sha256:abc...",
+      "content_type": "application/json",
+      "size_bytes": 2048,
+      "data_key": "users/sha256:abc...",
+      "tags": ["published", "stable"]
+    }
+  ]
+}
+```
+
+`invoked_at` and `tags` are only present when the snapshot carries them.
+
+### show
+
+Display full metadata for a snapshot version, optionally including observations.
+
+```bash
+corpus show <store> <version>              # Metadata in table format
+corpus show <store> <version> --observations # Include linked observations
+corpus show <store> <version> --json       # Machine-readable format
+```
+
+**--json output shape:**
+
+```json
+{
+  "meta": {
+    "store_id": "users",
+    "version": "v3",
+    "parents": [],
+    "created_at": "2025-07-19T14:23:10.000Z",
+    "content_hash": "sha256:abc...",
+    "content_type": "application/json",
+    "size_bytes": 2048,
+    "data_key": "users/sha256:abc..."
+  },
+  "observations": [
+    {
+      "id": "obs-123",
+      "type": "quality-score",
+      "created_at": "2025-07-19T14:25:00.000Z",
+      "source": { "path": "$.quality" },
+      "confidence": 0.95
+    }
+  ]
+}
+```
+
+### cat
+
+Output snapshot data. Supports three render paths:
+
+1. **With config codec**: Use a codec defined in `corpus.config.ts` (preferred)
+2. **Content-type fallback**: Auto-render `text/*` and `application/json` without config (for exploration)
+3. **Raw binary**: Stream literal bytes with `--raw`
+
+```bash
+corpus cat <store> <version>         # Use config codec, or fallback
+corpus cat <store> <version> --raw   # Literal bytes
+corpus cat <store> <version> --json  # Machine-readable (all modes)
+corpus cat <store> latest            # `latest` alias for most recent version
+```
+
+**--json output shape:**
+
+All three modes produce the same JSON shape, with `encoding` indicating interpretation:
+
+```json
+{
+  "store": "posts",
+  "version": "v5",
+  "content_type": "application/json",
+  "size_bytes": 512,
+  "encoding": "utf8",
+  "content": "{\"title\":\"Hello\",\"body\":\"...\"}"
+}
+```
+
+For `--raw`, `encoding` is `"base64"` (literal stored bytes as base64). For codec-decoded or fallback paths, `encoding` is `"utf8"`.
+
+<Aside type="tip">
+The fallback path requires no config but only renders `text/*` and `application/json`. Binary data or content with custom codecs (gzip, encrypt) requires a config file. If the content type is unknown, use `--raw` and pipe to a tool like `xxd`.
+</Aside>
+
+### lineage
+
+Show the parent graph of a snapshot, tracing ancestors up to a depth limit.
+
+```bash
+corpus lineage <store> <version>           # Default depth 10
+corpus lineage <store> <version> --depth 5 # Custom depth
+corpus lineage <store> <version> --json    # Machine-readable
+```
+
+Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are detected and marked `(cycle)` to prevent infinite output.
+
+**--json output shape:**
+
+```json
+{
+  "root": { "store": "summaries", "version": "v2" },
+  "nodes": [
+    {
+      "store": "summaries",
+      "version": "v2",
+      "depth": 0,
+      "parents": [
+        { "store_id": "transcripts", "version": "v10", "role": "source" }
+      ]
+    }
+  ]
+}
+```
+
+A node for an ancestor that couldn't be loaded additionally carries `"missing": true` (with `parents: []`).
+
+### clone
+
+Copy snapshots from a source backend to a file backend, incrementally skipping versions and blobs already present.
+
+```bash
+corpus clone <source> <dest>                    # Clone all versions
+corpus clone <source> <dest> --store users      # Specific store(s)
+corpus clone <source> <dest> --tag published    # Versions with tag
+corpus clone <source> <dest> --dry-run          # Preview without writing
+corpus clone <source> <dest> --concurrency 8    # Parallel transfers (default 4)
+corpus clone <source> <dest> --json             # Machine-readable summary
+```
+
+**Source** can be:
+- An environment name (resolved from `wrangler.toml` or config): `corpus clone remote ~/clones/prod`
+- A file path: `corpus clone ~/old-backup ~/new-backup`
+- The name of a config environment: `corpus clone staging ~/test-data`
+
+**Destination** must be a file path (v1 restriction): `corpus clone remote ./local-backup`
+
+**--json output shape:**
+
+```json
+{
+  "stores": ["users", "posts", "comments"],
+  "versions_copied": 15,
+  "versions_skipped": 30,
+  "data_objects_copied": 20,
+  "data_objects_skipped": 18,
+  "bytes_copied": 1048576,
+  "dry_run": false
+}
+```
+
+<Aside type="caution">
+In dry-run mode, `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` are always 0 — these counts are not tracked during a dry run (unknown, not "zero"). The summary still includes an accurate `versions_copied` and `versions_skipped` count. See [Clone Semantics](/corpus/cli/clone) for full details.
+</Aside>
+
+## Output formatting
+
+### Coloured output
+
+Tables are coloured when stdout is a TTY (interactive terminal), unless `--json` is set or `NO_COLOR` is set. `--quiet` does **not** affect table colour — it only suppresses spinners and notes (see below).
+
+The progress spinner is gated separately: it only runs when stderr is a TTY, and is disabled under `--json`, `--quiet`, `NO_COLOR`, or when the `CI` env var is detected.
+
+### Quiet mode
+
+`--quiet` suppresses decorative output (spinners, progress notes) but keeps result lines and summary tables:
+
+```bash
+corpus stores --quiet        # No spinner, just the store list
+corpus clone remote ./dest --quiet  # Progress notes suppressed
+```
+
+### JSON mode
+
+`--json` emits a single, valid JSON document to stdout with no additional formatting or progress output:
+
+```bash
+corpus stores --json | jq '.stores | length'
+corpus versions users --json | jq '.versions[0]'
+```
+
+JSON output is always valid and parseable, with no ANSI escape codes, spinners, or progress text.
+
+### Piping
+
+Spinners (progress indicators) write to stderr, not stdout, so pipes stay clean:
+
+```bash
+corpus stores | wc -l           # stdout clean, spinner on stderr
+corpus cat store ver --raw | sha256sum  # raw bytes unpolluted
+```
+
+## Next steps
+
+- [Configure](/corpus/cli/configuration) your backend connections and optional store definitions
+- [Clone documentation](/corpus/cli/clone) for incremental backup and data transfer
+- [Guides: Cloudflare](/corpus/guides/cloudflare) for production deployment details

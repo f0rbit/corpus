@@ -1,0 +1,194 @@
+---
+title: Clone Semantics
+description: Understand incremental copying, idempotency, and limitations of the clone command.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`corpus clone` copies snapshots (metadata + data) from one backend to another, transferring only what's missing. It's idempotent, resumes on interruption, and follows content-hash deduplication semantics (restic-style incremental).
+
+## Core semantics
+
+### Immutability
+
+A corpus snapshot is **immutable**. Once a version is created in a store, its metadata (version string, timestamps, content hash, data key) never changes. This enables:
+
+- **Metadata-based skip**: If a version already exists at the destination, it's skipped immediately—no content comparison needed. Presence of metadata IS the "already copied" signal.
+- **Content-hash dedup**: If two versions reference the same content hash (same data blob), the blob is transferred once and reused by both versions at the destination.
+
+### Incremental transfer
+
+On each `clone` run:
+
+1. **Versions**: For each source version, check `destination.metadata.get(store_id, version)`. If found, skip. If missing, copy metadata and data.
+2. **Data**: For each copied version, write its data blob to the destination using the source's `data_key` (verbatim, unchanged). If a blob with the same `data_key` already exists at the destination (from a prior run or another version), skip.
+
+Result: Repeated `clone` runs against the same destination are idempotent—they copy nothing the second time.
+
+### Ordering guarantee
+
+**Data is always written before metadata** at the destination. If an interruption occurs between a data write and the corresponding metadata write, the next `clone` run will:
+
+1. Detect the missing metadata
+2. Re-check if the data blob exists (it does)
+3. Skip the data re-write
+4. Write the metadata
+
+This prevents "dangling metadata" (metadata pointing at non-existent data). Orphan data blobs at the destination are harmless and self-heal on a future run if the version completes, or remain unused if that version never fully copies.
+
+<Aside type="note">
+If you interrupt a clone mid-run (Ctrl+C), the next `corpus clone` invocation resumes from where it left off. No cleanup or recovery step needed.
+</Aside>
+
+## Directionality and scope
+
+**v1 supports:**
+- **Source**: Any backend (remote Cloudflare D1+R2, local file, memory)
+- **Destination**: File backend only
+
+Remote-to-remote (prod→staging, staging→file→prod) is not yet supported. File-to-remote (local→prod push) is deferred to a future version.
+
+**Scope:**
+- Clones snapshots (versions + data) only. **Observations are not copied** in v1.
+- Copies all tags and parent references verbatim from the source.
+- Does not modify the source in any way (read-only).
+
+## Filtering
+
+Narrow the clone scope with flags:
+
+```bash
+corpus clone source dest --store users --store posts
+corpus clone source dest --tag published
+corpus clone source dest --store users --tag published
+```
+
+- `--store <id>`: Copy only named stores. Repeat to select multiple.
+- `--tag <tag>`: Copy only versions carrying the specified tag. Repeat for multiple tags (AND semantics—a version must have ALL listed tags).
+
+If neither flag is provided, all stores and versions are copied.
+
+## Dry-run mode
+
+Preview a clone without writing:
+
+```bash
+corpus clone source dest --dry-run
+```
+
+**Dry-run behavior:**
+- Checks if each version exists at the destination (so `versions_copied` / `versions_skipped` reflect what a real run would do)
+- **Does not touch the destination's data layer**—no data is read, written, or checked
+- Outputs `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` as 0 (unknown, not "zero")
+- Run time may be fast or slow depending on source metadata latency
+
+Use dry-run to:
+- Estimate version counts before committing to a transfer
+- Verify source connectivity
+- Predict idempotency on a second run
+
+<Aside type="caution">
+Don't interpret dry-run's zero data counts as "no data to transfer." They're unknown. A real `clone` run will transfer the actual bytes.
+</Aside>
+
+## Concurrency
+
+By default, `clone` transfers up to 4 versions in parallel per store:
+
+```bash
+corpus clone source dest --concurrency 8
+```
+
+Concurrency applies only to version-level transfers (data + metadata per version). Metadata writes are serialized per store to work around the file backend's unsynchronized read-modify-write on the metadata file—this is an implementation detail, not a limit on data throughput.
+
+Increase concurrency for faster transfers, but be mindful of:
+- Remote backend rate limits (D1, R2)
+- Local disk I/O (if destination is local file backend)
+
+## Observations exclusion
+
+Observations (typed annotations on snapshots) are **not copied** in v1. Only snapshot metadata and data transfer. A future version will add `--include-observations` to copy the observation graph.
+
+If your snapshots carry observations in production, they won't appear in the cloned local copy. The `corpus show --observations` command will show no results on cloned versions.
+
+## Data key aliasing caveat
+
+The file backend's `data_path` function sanitises the `/` character in `data_key` values, mapping them to `_`:
+
+```
+data_key "australia-house/summary/2024-11-21/v1" → filename "australia-house_summary_2024-11-21_v1.bin"
+data_key "australia_house/summary/2024-11-21/v1" → filename "australia_house_summary_2024-11-21_v1.bin"
+```
+
+Two **distinct** source data keys can alias to the same destination file, silently overwriting one another. This is a known limitation with file destinations, not a bug.
+
+**Mitigation:**
+- Use the default data key layout (`${store_id}/${content_hash}`) — it never collides (single `/`, hex characters only)
+- If using a custom `data_key_fn` with nested paths (e.g., `store/category/date/version`), audit for literal `_` characters in key segments. If segments use only kebab-case and ISO-8601 dates, collisions are unlikely.
+- For mission-critical backups, inspect the cloned file backend and cross-check byte counts:
+
+```bash
+corpus show source-store version                           # size_bytes from source
+corpus cat dest-clone-store version --raw | wc -c          # byte count from clone
+```
+
+The root fix (per-store locking or per-version immutable storage layout) is planned for a future release.
+
+## Examples
+
+### Clone all versions from Cloudflare to local file backend
+
+```bash
+# Set up credentials
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+export CLOUDFLARE_API_TOKEN="your-token"
+export CORPUS_D1_DATABASE_ID="d1-id"
+export CORPUS_R2_BUCKET="bucket-name"
+export CORPUS_R2_ACCESS_KEY_ID="token-id"
+export CORPUS_R2_SECRET_ACCESS_KEY="sha256-hash"
+
+# Full clone
+corpus clone remote ~/my-clone
+
+# Incremental (second run skips already-copied versions)
+corpus clone remote ~/my-clone
+```
+
+### Clone specific stores only
+
+```bash
+corpus clone remote ~/backup \
+  --store users \
+  --store posts \
+  --concurrency 8
+```
+
+### Clone published versions only
+
+```bash
+corpus clone remote ~/prod-snapshots --tag published
+```
+
+### Clone with high concurrency for faster transfer
+
+```bash
+# 16 concurrent version transfers (careful with rate limits)
+corpus clone remote ~/clone --concurrency 16
+```
+
+### Dry-run to check what would transfer
+
+```bash
+$ corpus clone remote ~/clone --dry-run
+stores  versions_copied  versions_skipped
+──────────────────────────────────────────
+users   15               5
+posts   8                12
+```
+
+In a real run, 23 versions would be copied (15 + 8) and 17 skipped.
+
+## Next steps
+
+- [CLI Overview](/corpus/cli/overview) for all commands
+- [Configuration](/corpus/cli/configuration) for backend setup
