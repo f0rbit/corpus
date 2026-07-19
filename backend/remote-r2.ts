@@ -1,6 +1,6 @@
 /**
  * @module Backends
- * @description R2 S3-compatible object storage using Bun.S3Client.
+ * @description R2 S3-compatible object storage using Bun's native S3Client.
  */
 
 import { try_catch_async } from "../result.js";
@@ -17,7 +17,7 @@ import type { DataStorage, DataStorageHandle } from "./base.js";
  *
  * @example
  * ```ts
- * const config: r2_s3_config = {
+ * const config: R2S3Config = {
  *   account_id: "abc123def456",
  *   bucket: "my-corpus-bucket",
  *   access_key_id: "token_id_here",
@@ -25,7 +25,7 @@ import type { DataStorage, DataStorageHandle } from "./base.js";
  * }
  * ```
  */
-export type r2_s3_config = {
+export type R2S3Config = {
 	/** Cloudflare account ID. */
 	account_id: string;
 	/** R2 bucket name. */
@@ -42,7 +42,7 @@ export type r2_s3_config = {
  * Structural type for the S3 file handle.
  * Represents exactly the methods we use from Bun.S3Client's file handles.
  */
-type s3_file_like = {
+type S3FileLike = {
 	exists: () => Promise<boolean>;
 	arrayBuffer: () => Promise<ArrayBufferLike>;
 	stream: () => ReadableStream<Uint8Array>;
@@ -55,12 +55,12 @@ type s3_file_like = {
  * Structural type for the S3 client.
  * Represents exactly the methods we use from Bun.S3Client.
  */
-type s3_client_like = {
-	file: (key: string) => s3_file_like;
+type S3ClientLike = {
+	file: (key: string) => S3FileLike;
 };
 
 /**
- * Creates an R2 data storage adapter using Bun.S3Client.
+ * Creates an R2 data storage adapter using Bun's native S3Client.
  * @category Backends
  * @group Storage Backends
  *
@@ -87,12 +87,12 @@ type s3_client_like = {
  * }
  * ```
  */
-export function create_r2_data_storage(config: r2_s3_config): DataStorage {
+export function create_r2_data_storage(config: R2S3Config): DataStorage {
 	const endpoint = config.endpoint ?? `https://${config.account_id}.r2.cloudflarestorage.com`;
 
 	// Construct client using Bun.S3Client. Public surface uses structural typing
 	// to avoid leaking the Bun global into emitted .d.ts.
-	const s3_client: s3_client_like = new Bun.S3Client({
+	const s3_client: S3ClientLike = new Bun.S3Client({
 		accessKeyId: config.access_key_id,
 		secretAccessKey: config.secret_access_key,
 		bucket: config.bucket,
@@ -133,11 +133,12 @@ export function create_r2_data_storage(config: r2_s3_config): DataStorage {
 
 		async delete(data_key) {
 			const file = s3_client.file(data_key);
-			// Ignore 404s on delete (idempotent).
-			await try_catch_async(
+			// Ignore 404s on delete (idempotent) — result intentionally unchecked.
+			const result = await try_catch_async(
 				() => file.delete(),
 				() => undefined,
 			);
+			void result;
 		},
 
 		async exists(data_key) {

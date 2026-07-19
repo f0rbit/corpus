@@ -20,6 +20,7 @@
 		"index.ts",
 		"cloudflare.ts",
 		"file.ts",
+		"remote.ts",
 		"types.ts",
 		"corpus.ts",
 		"utils.ts",

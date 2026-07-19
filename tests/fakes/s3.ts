@@ -7,12 +7,12 @@
  * real signature validation would be redundant in tests.
  */
 
-export interface FakeS3Server {
+export type FakeS3Server = {
 	url: string;
 	stop: () => void;
 	has: (key: string) => boolean;
 	keys: () => string[];
-}
+};
 
 const s3_404_xml = (key: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Error>
@@ -30,7 +30,7 @@ const escape_xml = (text: string): string =>
 		.replace(/'/g, "&apos;");
 
 const parse_s3_path = (url: URL): { bucket: string; key: string } | null => {
-	const hostname = url.hostname ?? "localhost";
+	const hostname = url.hostname;
 
 	// Try virtual-host style first: {bucket}.{host}
 	// e.g., mybucket.s3.amazonaws.com -> bucket=mybucket, key from pathname
@@ -78,7 +78,10 @@ export function create_fake_s3(): FakeS3Server {
 				return new Response("Bad Request", { status: 400 });
 			}
 
-			const { bucket: _bucket, key } = parsed;
+			// The bucket segment is parsed but unused — the fake is single-bucket
+			// (one Map for all objects), matching how Bun.S3Client's `bucket`
+			// config option is only ever exercised, never asserted against here.
+			const { key } = parsed;
 
 			const method = request.method.toUpperCase();
 
@@ -147,11 +150,13 @@ export function create_fake_s3(): FakeS3Server {
 	});
 
 	const port = server.port ?? 0;
-	const url = `http://localhost:${port}`;
+	const url = `http://localhost:${String(port)}`;
 
 	return {
 		url,
-		stop: () => server.stop(),
+		stop: () => {
+			void server.stop();
+		},
 		has: (key: string) => objects.has(key),
 		keys: () => [...objects.keys()],
 	};

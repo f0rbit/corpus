@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { create_r2_data_storage, type r2_s3_config } from "../../backend/remote-r2.js";
+import { create_r2_data_storage, type R2S3Config } from "../../backend/remote-r2.js";
 import type { DataStorage } from "../../backend/base.js";
 
 // Mock S3 file handles for testing
@@ -60,7 +60,7 @@ describe("remote-r2 DataStorage adapter", () => {
 			return mock_client;
 		};
 
-		const config: r2_s3_config = {
+		const config: R2S3Config = {
 			account_id: "test-account",
 			bucket: "test-bucket",
 			access_key_id: "test-key",

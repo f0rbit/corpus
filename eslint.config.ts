@@ -53,9 +53,11 @@ export default define_lint_config({
 		{
 			// sqlite-proxy callback contract expects throw on failure; the shared drizzle
 			// layer wraps this in try_catch_async and converts to Result. This is the
-			// sanctioned fetch-edge boundary (documented in AGENTS.md).
+			// sanctioned fetch-edge boundary (documented in AGENTS.md) -- the try/catch
+			// around fetch()/response.json() is what maps native throws into the
+			// callback's own thrown Error, so both rules are scoped off together here.
 			files: ["backend/remote-d1.ts"],
-			rules: { "functional/no-throw-statements": "off" },
+			rules: { "functional/no-throw-statements": "off", "functional/no-try-statements": "off" },
 		},
 		{
 			// arbitrary-construction errors throw with actionable messages (documented design)

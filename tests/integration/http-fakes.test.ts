@@ -10,11 +10,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { corpus_snapshots } from "../../schema";
-import { corpus_observations } from "../../observations/schema";
-import { create_fake_d1_http } from "../fakes/d1-http";
-import { create_fake_s3 } from "../fakes/s3";
-import type { D1RawResponse } from "../fakes/d1-http";
+import { d1_http_response_schema } from "../../backend/remote-d1.js";
+import { corpus_observations } from "../../observations/schema.js";
+import { corpus_snapshots } from "../../schema.js";
+import { create_fake_d1_http } from "../fakes/d1-http.js";
+import { create_fake_s3 } from "../fakes/s3.js";
 
 describe("D1 HTTP Server Fake", () => {
 	let server: ReturnType<typeof create_fake_d1_http>;
@@ -41,12 +41,12 @@ describe("D1 HTTP Server Fake", () => {
 		});
 
 		expect(response.status).toBe(200);
-		const data = (await response.json()) as D1RawResponse;
+		const data = d1_http_response_schema.parse(await response.json());
 		expect(data.success).toBe(true);
 		expect(data.errors).toEqual([]);
 		expect(data.result).toBeDefined();
 		expect(Array.isArray(data.result)).toBe(true);
-		if (data.result && data.result[0]) {
+		if (data.result[0]) {
 			expect(data.result[0].success).toBe(true);
 			expect(data.result[0].results?.rows).toBeDefined();
 		}
@@ -81,11 +81,11 @@ describe("D1 HTTP Server Fake", () => {
 		});
 
 		expect(response.status).toBe(200);
-		const data = (await response.json()) as D1RawResponse;
+		const data = d1_http_response_schema.parse(await response.json());
 		expect(data.success).toBe(false);
 		expect(Array.isArray(data.errors)).toBe(true);
-		expect(data.errors?.length ?? 0).toBeGreaterThan(0);
-		expect(data.errors?.[0]?.code).toBe(7500);
+		expect(data.errors.length).toBeGreaterThan(0);
+		expect(data.errors[0]?.code).toBe(7500);
 	});
 
 	it("returns 404 for invalid path", async () => {
@@ -131,9 +131,9 @@ describe("D1 HTTP Server Fake", () => {
 		});
 
 		expect(response.status).toBe(200);
-		const data = (await response.json()) as D1RawResponse;
+		const data = d1_http_response_schema.parse(await response.json());
 		expect(data.success).toBe(true);
-		expect(data.result?.[0]?.results?.rows.length ?? 0).toBeGreaterThan(0);
+		expect(data.result[0]?.results?.rows.length ?? 0).toBeGreaterThan(0);
 	});
 });
 

@@ -10,8 +10,6 @@
 
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { z } from "zod";
-import { try_catch_async } from "../result.js";
-import type { CorpusError } from "../types.js";
 import type { DrizzleDb } from "./drizzle-storage.js";
 
 /**
@@ -109,8 +107,8 @@ export function create_d1_http_db(config: D1HttpConfig): DrizzleDb {
 	// Intentional throw inside the sqlite-proxy callback boundary.
 	// Drizzle's proxy contract expects throw on failure; the calling layer
 	// (shared drizzle storage) wraps this in try_catch_async and converts to Result.
-	// This is the sanctioned callback boundary (documented in AGENTS.md).
-	/* eslint-disable-next-line @typescript-eslint/no-throw-literal -- intentional: sqlite-proxy callback contract */
+	// This is the sanctioned callback boundary (documented in AGENTS.md and the
+	// eslint.config.ts override for this file — no inline disables here).
 	async function proxy_callback(
 		sql: string,
 		params: unknown[],
@@ -133,20 +131,21 @@ export function create_d1_http_db(config: D1HttpConfig): DrizzleDb {
 			});
 		} catch (e) {
 			const error = e instanceof Error ? e : new Error(String(e));
-			throw new Error(`D1 HTTP request failed: ${error.message}`);
+			throw new Error(`D1 HTTP request failed: ${error.message}`, { cause: e });
 		}
 
 		// Handle non-2xx status codes
 		if (!response.ok) {
-			throw new Error(`D1 HTTP error ${response.status}: ${response.statusText}`);
+			throw new Error(`D1 HTTP error ${String(response.status)}: ${response.statusText}`);
 		}
 
 		let parsed_response: unknown;
 		try {
-			parsed_response = await response.json();
+			const json: unknown = await response.json();
+			parsed_response = json;
 		} catch (e) {
 			const error = e instanceof Error ? e : new Error(String(e));
-			throw new Error(`Failed to parse D1 HTTP response: ${error.message}`);
+			throw new Error(`Failed to parse D1 HTTP response: ${error.message}`, { cause: e });
 		}
 
 		// Validate against Zod schema (f0rbit/require-schema-at-boundary)
@@ -164,7 +163,7 @@ export function create_d1_http_db(config: D1HttpConfig): DrizzleDb {
 		}
 
 		// Extract the results from the envelope
-		if (!envelope.result || envelope.result.length === 0) {
+		if (envelope.result.length === 0) {
 			throw new Error("D1 HTTP response missing result");
 		}
 
@@ -179,9 +178,9 @@ export function create_d1_http_db(config: D1HttpConfig): DrizzleDb {
 			return { rows: [] };
 		}
 
-		// After check above, results is definitely not undefined
-		// But TypeScript can't fully narrow results.rows, so we handle both cases
-		const all_rows = results.rows || [];
+		// After the check above, `results` is defined and `results.rows` is a
+		// required (never-undefined) field per `d1_http_result_schema`.
+		const all_rows = results.rows;
 
 		// For "get" method, drizzle expects a single row (not an array of rows)
 		if (method === "get") {

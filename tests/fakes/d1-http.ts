@@ -15,16 +15,17 @@
  * SQL errors return HTTP 200 with `success: false`, matching actual CF behaviour.
  */
 
-import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { create_fake_d1 } from "./cloudflare";
 import type { Database } from "bun:sqlite";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
+import { create_fake_d1 } from "./cloudflare.js";
 
-interface D1RawRequest {
-	sql: string;
-	params?: unknown[];
-}
+const d1_raw_request_schema = z.object({
+	sql: z.string(),
+	params: z.array(z.unknown()).optional(),
+});
 
-export interface D1RawResponse {
+export type D1RawResponse = {
 	success: boolean;
 	errors?: Array<{ code: number; message: string }>;
 	result?: Array<{
@@ -34,13 +35,13 @@ export interface D1RawResponse {
 			rows: unknown[][];
 		};
 	}>;
-}
+};
 
-export interface FakeD1HttpServer {
+export type FakeD1HttpServer = {
 	url: string;
 	stop: () => void;
 	sqlite: Database;
-}
+};
 
 export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 	const fake_d1 = create_fake_d1(tables);
@@ -68,13 +69,14 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 			}
 
 			try {
-				const body = (await request.json()) as D1RawRequest;
-				const { sql, params = [] } = body;
+				const raw_body: unknown = await request.json();
+				const parsed_body = d1_raw_request_schema.safeParse(raw_body);
 
-				if (!sql || typeof sql !== "string") {
+				if (!parsed_body.success) {
 					const response: D1RawResponse = {
 						success: false,
 						errors: [{ code: 7500, message: "Invalid SQL in request body" }],
+						result: [],
 					};
 					return new Response(JSON.stringify(response), {
 						status: 200,
@@ -82,12 +84,17 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 					});
 				}
 
+				const { sql, params = [] } = parsed_body.data;
+
 				try {
 					const statement = fake_d1.prepare(sql) as {
-						bind: (...args: unknown[]) => { raw: () => Promise<unknown[][]> };
+						bind: (...args: unknown[]) => { raw: () => Promise<unknown[][] | null> };
 					};
 					const bound = statement.bind(...params);
-					const rows = await bound.raw();
+					// bun:sqlite's Statement.values() returns null (not []) for statements
+					// with no result rows (INSERT/UPDATE/DELETE) — normalize to match D1's
+					// actual /raw response shape, which always carries an array.
+					const rows = (await bound.raw()) ?? [];
 					// Column names are optional in the D1 response; default to empty array
 					const columns: string[] = [];
 
@@ -99,7 +106,7 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 								success: true,
 								results: {
 									columns,
-									rows: rows as unknown[][],
+									rows,
 								},
 							},
 						],
@@ -113,6 +120,7 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 					const response: D1RawResponse = {
 						success: false,
 						errors: [{ code: 7500, message }],
+						result: [],
 					};
 					return new Response(JSON.stringify(response), {
 						status: 200,
@@ -124,6 +132,7 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 				const response: D1RawResponse = {
 					success: false,
 					errors: [{ code: 7500, message: "Failed to parse request body as JSON" }],
+					result: [],
 				};
 				return new Response(JSON.stringify(response), {
 					status: 200,
@@ -134,11 +143,13 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 	});
 
 	const port = server.port ?? 0;
-	const url = `http://localhost:${port}`;
+	const url = `http://localhost:${String(port)}`;
 
 	return {
 		url,
-		stop: () => server.stop(),
+		stop: () => {
+			void server.stop();
+		},
 		sqlite: fake_d1.sqlite,
 	};
 }

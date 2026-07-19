@@ -746,9 +746,12 @@ import { create_memory_backend } from "../../backend/memory.js";
 import { create_file_backend } from "../../backend/file.js";
 import { create_layered_backend } from "../../backend/layered.js";
 import { create_cloudflare_backend } from "../../backend/cloudflare.js";
+import { create_remote_backend } from "../../backend/remote.js";
 import { corpus_snapshots } from "../../schema.js";
 import { corpus_observations } from "../../observations/schema.js";
 import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare.js";
+import { create_fake_d1_http, type FakeD1HttpServer } from "../fakes/d1-http.js";
+import { create_fake_s3, type FakeS3Server } from "../fakes/s3.js";
 import { rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -799,6 +802,37 @@ run_backend_contract_tests("CloudflareBackend (faked D1 + R2)", () =>
 		r2: create_fake_r2(),
 	}),
 );
+
+// Fresh D1 HTTP + S3 fake servers per factory invocation (matches every other
+// registration's "fresh state per test" contract). Servers are closable but
+// there's no afterEach hook in run_backend_contract_tests to stop THIS run's
+// pair — instead each invocation stops the PREVIOUS run's pair before
+// creating its own, so at most one stale pair is ever alive, and the very
+// last pair is reclaimed on process exit like every other backend's leftover
+// state in this file (e.g. FileBackend's temp dir).
+let remote_fakes: { d1: FakeD1HttpServer; s3: FakeS3Server } | null = null;
+
+run_backend_contract_tests("RemoteBackend (faked D1 HTTP + S3)", () => {
+	const previous = remote_fakes;
+	const d1 = create_fake_d1_http([corpus_snapshots, corpus_observations]);
+	const s3 = create_fake_s3();
+	remote_fakes = { d1, s3 };
+	previous?.d1.stop();
+	previous?.s3.stop();
+
+	return create_remote_backend({
+		account_id: "test-account",
+		database_id: "test-database",
+		api_token: "test-token",
+		d1_base_url: d1.url,
+		r2: {
+			bucket: "test-bucket",
+			access_key_id: "test-access-key-id",
+			secret_access_key: "test-secret-access-key",
+			endpoint: s3.url,
+		},
+	});
+});
 
 const big = (size: number): Uint8Array => {
 	const buf = new Uint8Array(size);
