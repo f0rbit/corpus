@@ -336,6 +336,27 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(result?.store_id).toBe("store-a");
 				});
 			});
+
+			// `list_stores` is optional on `MetadataClient` — self-skip for any
+			// backend that doesn't implement it, same pattern as the transaction
+			// contract's `apply_batch` guard below.
+			describe("list_stores", () => {
+				it("yields each store id exactly once", async () => {
+					if (!backend.metadata.list_stores) return;
+
+					await backend.metadata.put(make_meta("store-a", "v1"));
+					await backend.metadata.put(make_meta("store-b", "v1"));
+					await backend.metadata.put(make_meta("store-b", "v2"));
+
+					const ids: string[] = [];
+					for await (const store_id of backend.metadata.list_stores()) {
+						ids.push(store_id);
+					}
+
+					expect(ids.toSorted()).toEqual(["store-a", "store-b"]);
+					expect(new Set(ids).size).toBe(ids.length);
+				});
+			});
 		});
 
 		describe("data client", () => {

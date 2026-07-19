@@ -61,6 +61,13 @@ export type LayeredBackendOptions = {
 export function create_layered_backend(options: LayeredBackendOptions): Backend {
 	const { read, write, list_strategy = "merge" } = options;
 
+	// Bottom write layer is the source of truth for both `apply_batch` and
+	// `list_stores` — cache layers above it are read accelerators only.
+	const bottom_write = write.at(-1);
+	const list_stores: (() => AsyncIterable<string>) | undefined = bottom_write?.metadata.list_stores?.bind(
+		bottom_write.metadata,
+	);
+
 	const metadata: MetadataClient = {
 		async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
 			for (const backend of read) {
@@ -156,6 +163,8 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 			}
 			return null;
 		},
+
+		...(list_stores ? { list_stores } : {}),
 	};
 
 	const data: DataClient = {
@@ -202,13 +211,13 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 
 	const observations = create_layered_observations_client(read, write);
 
-	// Forward apply_batch to the bottom write layer (last entry in `write`).
-	// Cache layers above it are read accelerators only; transactional commits
-	// land at the bottom and the cache fills lazily on subsequent reads.
-	// Only present if a bottom write layer exists and supports apply_batch —
-	// otherwise the layered backend hides the method, falling back to the
-	// sequential best-effort path in `corpus.transaction()`.
-	const bottom_write = write.at(-1);
+	// Forward apply_batch to the bottom write layer (last entry in `write`,
+	// computed above alongside `list_stores`). Cache layers above it are read
+	// accelerators only; transactional commits land at the bottom and the
+	// cache fills lazily on subsequent reads. Only present if a bottom write
+	// layer exists and supports apply_batch — otherwise the layered backend
+	// hides the method, falling back to the sequential best-effort path in
+	// `corpus.transaction()`.
 	const apply_batch: ((ops: BatchOp[]) => Promise<Result<void, CorpusError>>) | undefined =
 		bottom_write?.apply_batch?.bind(bottom_write);
 

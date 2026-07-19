@@ -3,7 +3,7 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta, EventHandler } from "../types.js";
+import type { Backend, BatchOp, CorpusError, MetadataClient, Result, SnapshotMeta, EventHandler } from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter, parse_snapshot_meta, raw_snapshot_meta_schema } from "../utils.js";
@@ -186,7 +186,18 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		},
 	};
 
-	const metadata = create_metadata_client(metadata_storage, emit);
+	const metadata: MetadataClient = {
+		...create_metadata_client(metadata_storage, emit),
+		async *list_stores() {
+			const ids: string[] = [];
+			for await (const store_id of list_all_stores()) {
+				ids.push(store_id);
+			}
+			for (const id of ids.toSorted()) {
+				yield id;
+			}
+		},
+	};
 	const data = create_data_client(data_storage, emit);
 
 	const file_path = join(base_path, "_observations.json");

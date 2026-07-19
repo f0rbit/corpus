@@ -225,6 +225,16 @@ export type MetadataClient = {
 	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
 	find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>;
+	/**
+	 * Enumerate every distinct store id known to this backend. Optional —
+	 * added for the `corpus` CLI's `stores` command and un-filtered `copy()`,
+	 * which both need enumeration but must not force every custom backend to
+	 * implement it. Built-in backends (memory, file, cloudflare, layered) all
+	 * implement it; callers that need enumeration and find it absent should
+	 * surface an actionable `invalid_config` error rather than silently
+	 * treating the result as empty.
+	 */
+	list_stores?: () => AsyncIterable<string>;
 };
 
 /** @internal */

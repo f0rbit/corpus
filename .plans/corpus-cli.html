@@ -1,0 +1,1363 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Plan: corpus CLI</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+        --todo: #6e7681;
+        --doing: #d29922;
+        --done: #2ea043;
+        --blocked: #f85149;
+        --decision: #db61a2;
+      }
+      html, body {
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 2rem;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      h1, h2, h3 {
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.3em;
+      }
+      h1 { font-size: 1.8rem; }
+      h2 { font-size: 1.4rem; margin-top: 2.5rem; }
+      h3 { font-size: 1.1rem; border: none; padding: 0; margin-top: 1.5rem; }
+      h4 {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin: 0 0 0.3em 0;
+      }
+      code, pre {
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 0.9em;
+      }
+      code {
+        background: var(--panel);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        background: var(--panel);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.75em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .badge.todo { background: var(--todo); color: #fff; }
+      .badge.doing { background: var(--doing); color: #000; }
+      .badge.done { background: var(--done); color: #fff; }
+      .badge.blocked { background: var(--blocked); color: #fff; }
+      .badge.decision { background: var(--decision); color: #fff; }
+      .badge.recommended { background: var(--accent); color: #000; }
+      .root-cause {
+        background: var(--panel);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1rem 0;
+      }
+      .root-cause p {
+        margin: 0.4em 0;
+      }
+      .option {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+        opacity: 0.85;
+      }
+      .option.recommended {
+        opacity: 1;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent) inset;
+      }
+      .option > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .option h3 {
+        margin: 0;
+        flex: 1;
+      }
+      .option h4 {
+        margin-top: 0.9rem;
+      }
+      .philosophy-score th:first-child,
+      .philosophy-score td:first-child {
+        width: 35%;
+      }
+      .philosophy-score td:nth-child(2) {
+        font-family: "SF Mono", Menlo, monospace;
+        font-weight: 600;
+        width: 60px;
+        text-align: center;
+      }
+      .recommendation {
+        background: rgba(88, 166, 255, 0.08);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1.5rem 0;
+      }
+      .recommendation h3 {
+        margin-top: 0;
+        border: none;
+        padding: 0;
+      }
+      .task {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+      .task > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .task h3 {
+        margin: 0;
+        flex: 1;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.4em 1em;
+        font-size: 0.85em;
+        color: var(--muted);
+        margin: 0 0 0.75rem 0;
+      }
+      .meta dt {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .meta dd {
+        margin: 0;
+      }
+      .task section {
+        margin-top: 0.75rem;
+      }
+      .proof {
+        background: rgba(46, 160, 67, 0.08);
+        border-left: 3px solid var(--done);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .empty-proof {
+        background: rgba(110, 118, 129, 0.08);
+        border-left: 3px solid var(--todo);
+        padding: 0.5rem 0.75rem;
+        color: var(--muted);
+        font-style: italic;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary {
+        background: rgba(219, 97, 162, 0.08);
+        border-left: 3px solid var(--decision);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary ul {
+        margin: 0.3em 0;
+        padding-left: 1.5em;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1em 0;
+      }
+      th, td {
+        padding: 0.5em 0.75em;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        font-weight: 600;
+        color: var(--muted);
+        font-size: 0.8em;
+        text-transform: uppercase;
+      }
+      a { color: var(--accent); }
+      .phase {
+        margin: 2rem 0;
+        padding-left: 1rem;
+        border-left: 3px solid var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Plan: corpus CLI</h1>
+        <span class="badge todo">todo</span>
+        <p>A read-only <code>corpus</code> CLI (list stores, list versions, show metadata + observations, cat decoded data, lineage) plus <code>clone</code> (prod→file, file→file), built on two new library-core capabilities: a laptop-side <strong>remote backend</strong> (Cloudflare D1 HTTP + R2 S3 API implementing the existing <code>Backend</code> surface) and a generic <strong><code>copy(source, dest)</code></strong> with content-hash-skip incremental semantics. The CLI is a thin veneer shipped as a <code>bin</code> inside <code>@f0rbit/corpus</code> — zero new runtime dependencies (node:util <code>parseArgs</code>, <code>Bun.S3Client</code>, native fetch). Config discovery follows the drizzle-kit pattern: an optional <code>corpus.config.ts</code> in the consumer workspace supplies store definitions (required only for <code>cat</code> decoding), while <code>wrangler.toml</code>/<code>wrangler.jsonc</code> sniffing + env vars cover connection params so metadata commands work with NO config. Targets the unpublished 0.8.0.</p>
+      </header>
+
+      <section id="root-cause">
+        <h2>Root cause</h2>
+        <div class="root-cause">
+          <p><strong>Stated goal:</strong> A <code>corpus</code> CLI that discovers D1/R2 config from the workspace, inspects file-system backends, lists/views snapshot metadata, and clones prod into a local file backend.</p>
+          <p><strong>Underlying need:</strong> Operational visibility into versioned snapshot data across environments — today every "what's actually in prod?" question means a throwaway script or the Cloudflare dashboard, and there is no sanctioned way to reproduce prod data locally for debugging. The missing primitives are library-level: corpus has no backend reachable from a laptop (the Cloudflare backend needs Worker bindings) and no cross-backend copy operation.</p>
+          <p><strong>Why this matters:</strong> Solving this as "just a CLI" (ad-hoc REST calls + a clone loop inside the CLI) would duplicate the SQL/row-mapping layer that <code>backend/cloudflare.ts</code> already owns, and lock incremental copy — useful to every corpus consumer, including the pipelines orchestrator — inside one tool. Putting the remote backend and <code>copy()</code> in library core makes the CLI a veneer and the capabilities reusable, contract-tested, and property-tested like every other backend.</p>
+        </div>
+      </section>
+
+      <section id="alternatives">
+        <h2>Alternatives considered</h2>
+        <p>User-fixed constraints (not re-litigated): prod access is direct Cloudflare APIs (D1 HTTP REST + R2 S3-compatible), and v1 is read-only + clone. The axes explored below are the remaining open ones: remote-backend transport shape, packaging, config-discovery shape, and where clone logic lives. Page-vs-integrate gate: N/A — no app UI or nav is touched; docs additions are content pages in the existing Starlight site.</p>
+
+        <article class="option recommended" id="option-1">
+          <header>
+            <h3>Option 1: Shared-drizzle-spine remote backend + core copy() + bin-in-package CLI</h3>
+            <span class="badge recommended">recommended</span>
+          </header>
+          <p>Extract the drizzle query layer from <code>backend/cloudflare.ts</code> into a shared module generic over an async drizzle SQLite database. The remote backend feeds it a <code>drizzle-orm/sqlite-proxy</code> instance whose callback POSTs to D1's HTTP <code>/raw</code> endpoint; R2 data goes through a <code>DataStorage</code> adapter over <code>Bun.S3Client</code>. <code>copy(source, dest)</code> lives in library core with restic-style hash-skip incremental semantics. The CLI ships as a <code>bin</code> inside <code>@f0rbit/corpus</code> (source under <code>cli/</code>, compiled into <code>dist/cli/</code>) with zero new runtime deps. Config discovery: optional <code>corpus.config.ts</code> (drizzle-kit pattern, needed for codecs) + wrangler-file sniffing + env vars for connection params.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>drizzle-kit / drizzle-orm</strong> — the <code>d1-http</code> driver takes <code>{accountId, databaseId, token}</code> for laptop→D1 control-plane access, and runtime HTTP queries go through <code>sqlite-proxy</code>'s callback shape; chosen so tooling needs only an API token, no Worker. <a href="https://orm.drizzle.team/docs/connect-drizzle-proxy">source</a>, <a href="https://orm.drizzle.team/docs/guides/d1-http-with-drizzle-kit">source</a></li>
+            <li><strong>wrangler</strong> — <code>d1 execute --remote</code> POSTs to the same D1 REST query endpoint; the CLI deliberately reuses the dashboard REST control-plane so a laptop needs only an account API token. <a href="https://developers.cloudflare.com/d1/wrangler-commands/">source</a></li>
+            <li><strong>restic</strong> — <code>restic copy</code> transfers snapshots incrementally, moving only blobs missing at the destination, implemented against one narrow Backend interface shared by all storage providers. <a href="https://restic.readthedocs.io/en/latest/045_working_with_repos.html">source</a></li>
+            <li><strong>DVC</strong> — push/pull diffs local cache against remote CAS by content hash; sync is a storage-layer capability, not a UI feature. <a href="https://dvc.org/doc/user-guide/data-management/remote-storage">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul>
+            <li>One drizzle query layer serves both the Workers-binding backend and the HTTP backend — schema changes in <code>schema.ts</code> flow to both; they cannot drift.</li>
+            <li>The remote backend is a real <code>Backend</code>, so it plugs into <code>run_backend_contract_tests</code> unchanged; every CLI command is backend-generic for free.</li>
+            <li>Zero new runtime dependencies: <code>node:util</code> parseArgs, <code>Bun.S3Client</code>, native fetch, and drizzle-orm is already a dependency — bin-in-package costs the library nothing.</li>
+            <li>Single module graph: <code>bunx corpus</code> resolves the bin from the consumer's own <code>@f0rbit/corpus</code> install — the exact same package instance the consumer's <code>corpus.config.ts</code> imports. No dual-package hazard for codecs, brands, or Result helpers.</li>
+            <li><code>copy()</code> in core is reusable by other consumers (e.g. pipelines server-side seeding) and property-testable with the 0.7.0 testing substrate.</li>
+          </ul>
+          <h4>Cons</h4>
+          <ul>
+            <li>Refactoring <code>backend/cloudflare.ts</code> onto a shared layer is the riskiest single step — mitigated by the existing contract suite running the real backend against the bun:sqlite D1 fake.</li>
+            <li>Typing the shared layer generically over drizzle's <code>BaseSQLiteDatabase</code> variants (d1 vs sqlite-proxy) takes care; drizzle's generics are deep.</li>
+            <li>The published package carries a bun-only bin (Bun.S3Client) although the library itself stays runtime-agnostic — acceptable: the bin only executes when invoked, and the CLI's audience runs bun.</li>
+          </ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr>
+                <th>Principle</th>
+                <th>Score</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>5/5</td>
+                <td><code>schema.ts</code> stays the only SQL shape; one shared drizzle layer for both D1 paths; consumer's <code>corpus.config.ts</code> is the only place store definitions/codecs exist — the CLI never re-declares them.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>5/5</td>
+                <td>Drizzle-inferred rows end-to-end; D1 HTTP envelope and wrangler files Zod-parsed at the boundary (<code>f0rbit/require-schema-at-boundary</code> clean); CopySummary/config types are <code>z.infer</code> or literal-union shaped.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>4/5</td>
+                <td>Reusing <code>Backend</code>/<code>MetadataStorage</code>/<code>DataStorage</code> means a signature change breaks the remote backend at compile time. −1: the sqlite-proxy callback is a stringly SQL/params tunnel by design — mitigated because drizzle generates the SQL.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>5/5</td>
+                <td>Command functions return inferred Result chains via <code>pipe()</code>; a change to <code>SnapshotMeta</code> surfaces in CLI renderers and copy(), where the bug would be.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>Remote backend tested as real code over in-process fakes: a <code>Bun.serve</code> D1-HTTP shim wrapping the existing bun:sqlite fake + a Map-backed S3 server. Contract suite plug-in. CLI commands take injected <code>{backend, output}</code> — no process spawning in the main tests.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-2">
+          <header>
+            <h3>Option 2: Hand-rolled REST remote client (no drizzle reuse)</h3>
+          </header>
+          <p>Same CLI shape and core <code>copy()</code>, but the remote backend is a from-scratch REST client: hand-written SQL strings POSTed to the D1 query endpoint, hand-rolled row→<code>SnapshotMeta</code> mapping, R2 via <code>aws4fetch</code> or Bun's S3 client. No refactor of <code>backend/cloudflare.ts</code>.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>wrangler (r2 object commands)</strong> — uses the Cloudflare REST API with a hand-rolled client rather than the S3 endpoint; chosen because wrangler standardises on the CF control-plane + account token everywhere. <a href="https://developers.cloudflare.com/r2/api/">source</a></li>
+            <li><strong>kopia</strong> — each storage provider is a small hand-rolled client behind a minimal BLOB interface; all higher logic is client-side and provider-agnostic. <a href="https://kopia.io/docs/advanced/architecture/">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul>
+            <li>Zero refactor risk to the production Cloudflare backend.</li>
+            <li>Transport is fully explicit — no drizzle generics to wrangle; easy to read the exact SQL sent.</li>
+          </ul>
+          <h4>Cons</h4>
+          <ul>
+            <li>Hand-written SQL violates the repo's "Drizzle is the sole source of truth" convention and duplicates <code>schema.ts</code> knowledge — a schema change must be manually mirrored in SQL strings and row mapping.</li>
+            <li>Duplicates the row→<code>SnapshotMeta</code> mapping that <code>backend/cloudflare.ts</code> + <code>parse_snapshot_meta</code> already own; two implementations to keep in sync forever.</li>
+            <li>Same testing cost as Option 1 (still needs the HTTP fakes) with strictly less type safety.</li>
+          </ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr>
+                <th>Principle</th>
+                <th>Score</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>2/5</td>
+                <td>SQL strings + row mapping duplicated against <code>schema.ts</code> and the cloudflare backend — the definitional "two definitions in sync" smell.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>3/5</td>
+                <td>Zod at the HTTP boundary helps, but column lists and placeholders in strings are untyped.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>3/5</td>
+                <td>Renaming a column in <code>schema.ts</code> breaks the cloudflare backend at compile time but the remote client only at runtime.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td>Downstream of the mapping layer, inference works the same as Option 1.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>Same <code>Backend</code>-shaped result, same contract-suite plug-in and fakes as Option 1.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-3">
+          <header>
+            <h3>Option 3: Standalone @f0rbit/corpus-cli package owning transport + clone</h3>
+          </header>
+          <p>A separate workspace package (new <code>workspaces</code> field at root, or a standalone nested package like <code>docs/</code>) publishing <code>@f0rbit/corpus-cli</code>. The library core stays untouched: the CLI package implements remote access (REST helpers) and the clone loop internally, treating <code>@f0rbit/corpus</code> purely as a dependency.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>drizzle-kit</strong> — ships separate from drizzle-orm as a dedicated tooling package with its own release cadence; chosen to keep the runtime ORM dependency-lean while the kit carries CLI-only deps. <a href="https://orm.drizzle.team/docs/guides/d1-http-with-drizzle-kit">source</a></li>
+            <li><strong>DVC</strong> — a CLI-first tool where all sync/transfer logic lives in the CLI codebase rather than a reusable library layer. <a href="https://dvc.org/doc/user-guide/data-management/remote-storage">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul>
+            <li>Library package stays byte-identical; CLI deps and release cadence fully isolated.</li>
+            <li>No lint-exception churn in the library's config maps.</li>
+          </ul>
+          <h4>Cons</h4>
+          <ul>
+            <li>Dual module graph: the CLI's bundled corpus vs the consumer's installed corpus that <code>corpus.config.ts</code> imports. Structural types mostly survive, but the 0.7.0 testing substrate's brand symbols and any <code>instanceof</code>-adjacent behaviour do not — a real hazard this repo just spent a plan avoiding (see the dev-checkout guard in AGENTS.md).</li>
+            <li><code>copy()</code> and the remote backend are trapped inside the CLI — unusable by pipelines or consumer scripts, and not pluggable into <code>run_backend_contract_tests</code>.</li>
+            <li>Version-skew matrix (cli 0.x against corpus 0.y) for a single-maintainer stack that gains nothing from the split; repo currently has no <code>workspaces</code> field (<code>docs/</code> is standalone), so this also adds workspace machinery.</li>
+          </ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr>
+                <th>Principle</th>
+                <th>Score</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>2/5</td>
+                <td>Clone + row handling re-implemented outside core; two corpus module graphs at runtime.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>4/5</td>
+                <td>Within the CLI package, typing can be as strict as Option 1.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>3/5</td>
+                <td>Cross-package version skew moves breakage from compile time to install time.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td>Fine within the package; ruptured at the package boundary on skew.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>3/5</td>
+                <td>CLI-side clone/remote logic can't join the backend contract suite; needs its own parallel harness.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-4">
+          <header>
+            <h3>Option 4: Config-instance-first — corpus.config.ts exports built Backends; CLI is a dumb generic driver</h3>
+          </header>
+          <p>No wrangler sniffing and no connection-param resolution in the CLI at all. <code>corpus.config.ts</code> exports fully-built backend factories per environment (<code>environments: { prod: () => create_remote_backend(...), local: () => create_file_backend(...) }</code>) plus store definitions. The CLI only ever drives a <code>Backend</code> it was handed. The remote backend still ships in the library (as in Option 1).</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Alchemy / SST</strong> — <code>infra.ts</code> config-as-code exporting real typed resources; chosen so the config file is executable truth rather than declarative strings. <a href="https://alchemy.run">source</a></li>
+            <li><strong>drizzle-kit</strong> — <code>defineConfig</code> with explicit driver credentials per environment; no ambient discovery. <a href="https://orm.drizzle.team/docs/guides/d1-http-with-drizzle-kit">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul>
+            <li>Maximum explicitness — the CLI has zero environment-resolution logic to test; strictest possible typing throughout.</li>
+            <li>Trivially testable: hand the CLI a memory backend.</li>
+          </ul>
+          <h4>Cons</h4>
+          <ul>
+            <li>Fails the stated requirement that metadata-only commands work with NO config: a bare wrangler workspace gets nothing until someone writes boilerplate backend wiring.</li>
+            <li>Forces consumers to restate account/database/bucket ids that <code>wrangler.toml</code> already holds — two definitions of connection facts kept in sync by hand.</li>
+            <li>Every consumer writes the same <code>create_remote_backend</code> plumbing the CLI could have derived.</li>
+          </ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr>
+                <th>Principle</th>
+                <th>Score</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>3/5</td>
+                <td>Config is executable truth, but it duplicates connection facts wrangler.toml already owns — sync-by-hand smell for exactly the values that rot.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>5/5</td>
+                <td>Backend factories are fully typed; no stringly env resolution anywhere.</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>5/5</td>
+                <td>Misconfiguration is a type error in the consumer's config file.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>5/5</td>
+                <td>Same as Option 1.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>CLI driver is generic over <code>Backend</code>; tests inject memory backends directly.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <section class="recommendation">
+          <h3>Recommendation: Option 1</h3>
+          <p>Option 1 scores highest (4.8 avg vs 4.6 for Option 4, 3.4 for Options 2/3) and is the only option that satisfies both halves of the requirement: zero-config metadata inspection in a wrangler workspace AND single-source store definitions for decoding. Options 2 and 3 both pay a permanent duplication tax (SQL/row-mapping, or a second module graph + version skew) for a one-time saving on refactor risk that the existing contract suite already de-risks. Option 4's best idea survives inside Option 1: <code>corpus.config.ts</code> MAY export explicit environment overrides (connection params, even a custom backend factory) as the escape hatch, while wrangler sniffing + env vars cover the zero-config path.</p>
+        </section>
+      </section>
+
+      <section id="affected-areas">
+        <h2>Affected areas</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Path</th>
+              <th>Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>backend/drizzle-storage.ts</code></td>
+              <td>new — shared drizzle snapshot-metadata + observations storage layer, generic over async drizzle SQLite db</td>
+            </tr>
+            <tr>
+              <td><code>backend/cloudflare.ts</code></td>
+              <td>modify — refactor onto the shared layer (public API unchanged; keeps R2 + apply_batch specifics)</td>
+            </tr>
+            <tr>
+              <td><code>types.ts</code></td>
+              <td>modify — add optional <code>list_stores?: () =&gt; AsyncIterable&lt;string&gt;</code> to <code>MetadataClient</code></td>
+            </tr>
+            <tr>
+              <td><code>backend/memory.ts</code>, <code>backend/file.ts</code>, <code>backend/layered.ts</code></td>
+              <td>modify — implement <code>list_stores</code></td>
+            </tr>
+            <tr>
+              <td><code>backend/remote-d1.ts</code>, <code>backend/remote-r2.ts</code>, <code>backend/remote.ts</code></td>
+              <td>new — D1 HTTP sqlite-proxy driver, S3 DataStorage over Bun.S3Client, assembled <code>create_remote_backend</code></td>
+            </tr>
+            <tr>
+              <td><code>remote.ts</code> (repo root)</td>
+              <td>new — root shim backing the <code>@f0rbit/corpus/remote</code> entry point (bun-only; not in the main barrel)</td>
+            </tr>
+            <tr>
+              <td><code>copy.ts</code></td>
+              <td>new — <code>copy(source, dest, opts)</code> incremental cross-backend copy; exported from the main barrel</td>
+            </tr>
+            <tr>
+              <td><code>cli/**</code></td>
+              <td>new — CLI entry, output funnel, config discovery, wrangler sniffing, command implementations</td>
+            </tr>
+            <tr>
+              <td><code>index.ts</code></td>
+              <td>modify — export <code>copy</code>, <code>define_config</code>, related types</td>
+            </tr>
+            <tr>
+              <td><code>package.json</code></td>
+              <td>modify — <code>bin.corpus</code>, exports <code>./remote</code>, version 0.8.0</td>
+            </tr>
+            <tr>
+              <td><code>tsconfig.build.json</code></td>
+              <td>modify — include <code>remote.ts</code>, <code>copy.ts</code>, <code>cli/*.ts</code>, <code>cli/commands/*.ts</code></td>
+            </tr>
+            <tr>
+              <td><code>eslint.config.ts</code>, <code>.oxlintrc.json</code></td>
+              <td>modify — scoped exception entries for <code>cli/output.ts</code> (no-console) per the exception-map convention</td>
+            </tr>
+            <tr>
+              <td><code>tests/fakes/d1-http.ts</code>, <code>tests/fakes/s3.ts</code></td>
+              <td>new — Bun.serve D1-HTTP shim over the bun:sqlite fake; Map-backed S3 server</td>
+            </tr>
+            <tr>
+              <td><code>tests/integration/backend-contract.test.ts</code></td>
+              <td>modify — register RemoteBackend run; add list_stores contract block</td>
+            </tr>
+            <tr>
+              <td><code>tests/integration/copy.test.ts</code>, <code>tests/property/copy-laws.test.ts</code>, <code>tests/integration/cli-*.test.ts</code>, <code>tests/unit/cli-*.test.ts</code></td>
+              <td>new — copy integration + property suites; CLI command/config/output tests</td>
+            </tr>
+            <tr>
+              <td><code>docs/src/content/docs/cli/*.mdx</code>, <code>docs/astro.config.mjs</code>, <code>README.md</code>, <code>AGENTS.md</code></td>
+              <td>new/modify — CLI docs group, sidebar, README section, AGENTS.md updates</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture-decisions">
+        <h2>Architecture decisions</h2>
+        <p>Non-obvious calls within Option 1. None require user sign-off; all are documented here as the record.</p>
+        <ul>
+          <li><strong>Read-only is CLI policy, not a backend property.</strong> The remote backend implements the full <code>MetadataStorage</code>/<code>DataStorage</code> surface (D1 HTTP supports INSERT/DELETE; S3 supports PUT). This keeps it pluggable into <code>run_backend_contract_tests</code> unchanged. The v1 CLI simply exposes no mutating commands; clone writes only to its destination backend. Docs recommend read-scoped tokens (D1 read + R2 <em>Object Read Only</em>) as the enforcement layer that actually matters.</li>
+          <li><strong>No <code>apply_batch</code> on the remote backend in v1.</strong> <code>Backend.apply_batch</code> is optional, and every transaction-contract test self-skips via <code>if (!backend.apply_batch) return</code> — verified against <code>tests/integration/backend-contract.test.ts:560-660</code>. The D1 HTTP endpoint's multi-statement semantics don't guarantee a single transaction, so claiming atomicity would be a lie. <code>corpus.transaction()</code> falls back to sequential + compensating deletes if anyone runs one against remote.</li>
+          <li><strong><code>list_stores</code> as an optional <code>MetadataClient</code> method.</strong> The CLI's <code>stores</code> command and un-filtered <code>copy()</code> need store enumeration, which <code>MetadataClient</code> lacks. Adding it as <em>optional</em> (<code>list_stores?</code>) is non-breaking for custom backends. Implementations: memory = distinct <code>store_id</code> over the meta Map; file = existing <code>list_all_stores()</code> walker (keeps the <code>_*</code>/<code>.*</code> filter); drizzle shared layer = <code>selectDistinct</code> on <code>store_id</code>; layered = delegate to the bottom (write) layer. <code>copy()</code> and the CLI return <code>err({ kind: "invalid_config", ... })</code> with an actionable message when the method is absent and no explicit <code>--store</code> filter was given.</li>
+          <li><strong>Copy ordering: data before metadata.</strong> A version "exists" at the destination iff its metadata row exists — the same metadata-is-source-of-truth reasoning as the cloudflare <code>apply_batch</code> orphan policy. Interrupted clones leave orphan data objects at the destination, which are harmless (content-addressed) and healed/skipped on re-run. Skip rules: version skipped when <code>dest.metadata.get(store, version)</code> is ok; data transfer skipped when <code>dest.data.exists(meta.data_key)</code> — so clone twice is a no-op second time.</li>
+          <li><strong><code>copy()</code> preserves <code>SnapshotMeta</code> verbatim</strong> — version, created_at, content_hash, data_key, parents, tags all copied untouched (a clone is a replica, not a re-ingest). Consequence: custom <code>data_key_fn</code> layouts land at the destination with source keys, which is where the file-backend <code>data_path</code> sanitisation aliasing gotcha (<code>backend/file.ts:64</code>, <code>/</code>→<code>_</code>) can bite. Documented in the clone docs; NOT fixed here (tracked in <code>.plans/corpus-testing-substrate.html</code> out-of-scope).</li>
+          <li><strong><code>Bun.S3Client</code> over aws4fetch.</strong> Zero-dep and native; the CLI/remote backend runs exclusively under bun on laptops/CI, never in Workers. Wrapped behind the <code>DataStorage</code> interface so tests drive fakes. Read path needs only GetObject/HeadObject (data keys come from metadata rows — no ListObjects needed). Public types of <code>backend/remote-r2.ts</code> are structural (mirroring how <code>backend/cloudflare.ts</code> types D1/R2 structurally) so emitted <code>.d.ts</code> never references the <code>Bun</code> global.</li>
+          <li><strong>D1 transport: sqlite-proxy against the <code>/raw</code> endpoint.</strong> <code>drizzle(async (sql, params, method) =&gt; ...)</code> where the callback POSTs to <code>POST /accounts/{account_id}/d1/database/{database_id}/raw</code> — rows-as-arrays matches the proxy driver's <code>{rows}</code> contract directly. The response envelope is Zod-parsed (<code>d1_http_response_schema</code>) before rows reach drizzle; HTTP/auth failures map to <code>storage_error</code> with the operation name.</li>
+          <li><strong><code>define_config</code> lives in a pure module.</strong> <code>cli/config-schema.ts</code> holds the <code>CorpusCliConfig</code> type, its Zod schema (for the data-shaped parts; store definitions/codecs are validated structurally since functions aren't Zod-able), and the <code>define_config</code> identity helper — no bun/node APIs, so the main barrel re-exports it and Workers consumers can import types safely. The loader (<code>cli/load-config.ts</code>: upward search for <code>corpus.config.ts</code>, dynamic import — bun imports TS natively) is bun-only and never enters the barrel.</li>
+          <li><strong>Connection resolution precedence: explicit flags &gt; <code>corpus.config.ts</code> environments &gt; wrangler sniff + env vars.</strong> Secrets (API token, R2 keys) come ONLY from env vars or flags — never from the config file. Env vars: <code>CLOUDFLARE_API_TOKEN</code>, <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>CORPUS_R2_ACCESS_KEY_ID</code>, <code>CORPUS_R2_SECRET_ACCESS_KEY</code> (R2 S3 creds derive from an R2 API token: key id = token id, secret = SHA-256 of token value — documented, not computed).</li>
+          <li><strong>Wrangler sniffing scope:</strong> <code>wrangler.toml</code> via Bun's native TOML support, <code>wrangler.json</code>/<code>wrangler.jsonc</code> via a minimal comment/trailing-comma-stripping pass + <code>JSON.parse</code>, both Zod-validated down to the three facts we need: <code>account_id</code>, <code>d1_databases[].database_id</code>, <code>r2_buckets[].bucket_name</code>. Ambiguity (multiple D1 bindings) is an error naming the candidates, resolvable via config or flags.</li>
+          <li><strong>CLI structure:</strong> <code>bin: { "corpus": "./dist/cli/index.js" }</code> with a <code>#!/usr/bin/env bun</code> shebang (tsc preserves shebangs). Two-stage <code>node:util</code> parseArgs: first positional selects the command, remainder re-parsed against that command's option spec. All printing funnels through <code>cli/output.ts</code> (injectable sink for tests, <code>--json</code> mode) — the ONLY file with a <code>no-console</code> exception, added to the config exception maps with a why-comment (precedent: <code>testing/registry.ts</code>).</li>
+          <li><strong>Command surface (v1):</strong> <code>corpus stores</code>, <code>corpus versions &lt;store&gt; [--tag ... --limit --before --after]</code>, <code>corpus show &lt;store&gt; &lt;version&gt; [--observations]</code>, <code>corpus cat &lt;store&gt; &lt;version&gt; [--raw]</code>, <code>corpus lineage &lt;store&gt; &lt;version&gt; [--depth]</code>, <code>corpus clone &lt;source&gt; &lt;dest&gt; [--store ... --tag ... --dry-run --concurrency]</code>. Backend selectors: <code>--env &lt;name&gt;</code> (config environment; implicit <code>remote</code> when wrangler + creds suffice) or <code>--file &lt;path&gt;</code>; clone source/dest accept an env name or a filesystem path. v1 clone destinations must be file backends.</li>
+          <li><strong>Versioning:</strong> lands in the still-unpublished 0.8.0 line (0.7.0 testing substrate is also unpublished). Additive only — whether to publish 0.7.0 and 0.8.0 separately or together is the user's call and out of this plan.</li>
+        </ul>
+      </section>
+
+      <section id="phases">
+        <h2>Phases</h2>
+        <svg viewBox="0 0 980 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task dependency graph" style="max-width: 100%; height: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+          <style>
+            .box { fill: #0d1117; stroke: #58a6ff; rx: 6; }
+            .lbl { fill: #c9d1d9; font: 12px monospace; }
+            .ph { fill: #8b949e; font: 11px sans-serif; }
+            .edge { stroke: #6e7681; stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+          </style>
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L7,3 L0,6" fill="none" stroke="#6e7681"></path>
+            </marker>
+          </defs>
+          <text x="20" y="24" class="ph">Phase 1 (seq)</text>
+          <rect x="20" y="34" width="86" height="30" class="box"></rect>
+          <text x="30" y="53" class="lbl">1.1 drizzle</text>
+          <rect x="20" y="74" width="86" height="30" class="box"></rect>
+          <text x="30" y="93" class="lbl">1.2 stores</text>
+          <text x="160" y="24" class="ph">Phase 2 (par → seq)</text>
+          <rect x="160" y="34" width="86" height="30" class="box"></rect>
+          <text x="170" y="53" class="lbl">2.1 d1http</text>
+          <rect x="160" y="74" width="86" height="30" class="box"></rect>
+          <text x="170" y="93" class="lbl">2.2 r2/s3</text>
+          <rect x="160" y="114" width="86" height="30" class="box"></rect>
+          <text x="170" y="133" class="lbl">2.3 fakes</text>
+          <rect x="290" y="74" width="96" height="30" class="box"></rect>
+          <text x="300" y="93" class="lbl">2.4 remote</text>
+          <text x="430" y="24" class="ph">Phase 3 (seq)</text>
+          <rect x="430" y="74" width="86" height="30" class="box"></rect>
+          <text x="440" y="93" class="lbl">3.1 copy()</text>
+          <text x="560" y="24" class="ph">Phase 4 (par)</text>
+          <rect x="560" y="34" width="86" height="30" class="box"></rect>
+          <text x="570" y="53" class="lbl">4.1 config</text>
+          <rect x="560" y="114" width="86" height="30" class="box"></rect>
+          <text x="570" y="133" class="lbl">4.2 skeleton</text>
+          <text x="690" y="24" class="ph">Phase 5 (par)</text>
+          <rect x="690" y="34" width="86" height="30" class="box"></rect>
+          <text x="700" y="53" class="lbl">5.1 read</text>
+          <rect x="690" y="114" width="96" height="30" class="box"></rect>
+          <text x="700" y="133" class="lbl">5.2 cat/clone</text>
+          <text x="830" y="24" class="ph">Phase 6 (par)</text>
+          <rect x="830" y="34" width="86" height="30" class="box"></rect>
+          <text x="840" y="53" class="lbl">6.1 docs</text>
+          <rect x="830" y="114" width="96" height="30" class="box"></rect>
+          <text x="840" y="133" class="lbl">6.2 readme</text>
+          <path d="M106,49 L128,49 L128,89 L160,49" class="edge" style="display:none"></path>
+          <path d="M106,49 C130,49 135,89 160,89" class="edge"></path>
+          <path d="M106,89 C130,89 135,49 160,49" class="edge"></path>
+          <path d="M106,89 L160,129" class="edge"></path>
+          <path d="M246,49 L290,84" class="edge"></path>
+          <path d="M246,89 L290,89" class="edge"></path>
+          <path d="M246,129 L290,94" class="edge"></path>
+          <path d="M386,89 L430,89" class="edge"></path>
+          <path d="M516,89 L560,49" class="edge"></path>
+          <path d="M516,89 L560,129" class="edge"></path>
+          <path d="M646,49 L690,49" class="edge"></path>
+          <path d="M646,129 L690,129" class="edge"></path>
+          <path d="M646,49 L690,124" class="edge"></path>
+          <path d="M786,49 L830,49" class="edge"></path>
+          <path d="M786,129 L830,129" class="edge"></path>
+        </svg>
+        <p>Each phase ends with a verification coder (squash-integrate worktrees where parallel, typecheck, <code>bun test</code>, <code>bun run lint &amp;&amp; bun run fmt:check</code>, adversary checklists, proof slots, commit, PR) followed by pr-shepherd to merge. Parallel tasks run as <code>coder-fast</code> in worktrees and do NOT run build/test/lint themselves.</p>
+
+        <section class="phase" id="phase-1">
+          <h3>Phase 1: Shared drizzle spine + store enumeration</h3>
+          <p>Sequential (one <code>coder</code>). Extracts the query layer the remote backend will reuse, and closes the store-enumeration gap in <code>MetadataClient</code>. Riskiest refactor first, protected by the existing contract suite.</p>
+
+          <article class="task" id="task-1-1">
+            <header>
+              <h3>Task 1.1: Extract shared drizzle storage layer from the Cloudflare backend</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>backend/drizzle-storage.ts</code> (new), <code>backend/cloudflare.ts</code> (modify)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~300 (mostly moved, not new)</dd>
+              <dt>Dependencies</dt>
+              <dd>none</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (phase is sequential)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p><code>backend/cloudflare.ts</code> (repo <code>/Users/tom/dev/corpus</code>) builds a <code>MetadataClient</code> and an <code>ObservationsStorage</code> inline over <code>drizzle(config.d1)</code> (driver <code>drizzle-orm/d1</code>), querying <code>corpus_snapshots</code> (<code>schema.ts</code>) and <code>corpus_observations</code> (<code>observations/schema.ts</code>). Rows are normalised via <code>parse_snapshot_meta</code> from <code>utils.ts</code> (Zod-backed via <code>raw_snapshot_meta_schema</code> — do NOT duplicate that shape). A remote backend (next phase) will run the identical queries through a <code>drizzle-orm/sqlite-proxy</code> database. Both drizzle database types extend <code>BaseSQLiteDatabase&lt;"async", ...&gt;</code> and share the select/insert/delete query-builder API; <code>db.batch()</code> is NOT shared (D1-specific usage stays in cloudflare.ts). Repo conventions: Result from <code>./types.js</code>, <code>try_catch_async</code> at edges, snake_case, no new inline lint disables (exception maps live in <code>eslint.config.ts</code> / <code>.oxlintrc.json</code>). The contract suite (<code>tests/integration/backend-contract.test.ts</code>) already runs the real cloudflare backend against a bun:sqlite fake (<code>tests/fakes/cloudflare.ts</code>) — it is the safety net for this refactor.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>Create <code>backend/drizzle-storage.ts</code> exporting: (1) <code>create_drizzle_snapshot_metadata(db, emit)</code> returning the full <code>MetadataClient</code> implementation currently inlined in cloudflare.ts (get/put/delete/list/get_latest/get_children/find_by_hash including the <code>json_each</code> parents query and the <code>eq()</code>-not-<code>like()</code> store_id filter — see commit <code>02bee7f</code>); (2) <code>create_drizzle_observations_storage(db)</code> (current <code>create_cloudflare_storage</code>); (3) the statement builders <code>meta_insert_stmt</code>/<code>meta_delete_stmt</code>/<code>obs_insert_stmt</code>/<code>obs_delete_stmt</code> (exported so cloudflare.ts's <code>apply_batch</code> keeps using them). Type the <code>db</code> parameter with the narrowest generic that accepts both <code>drizzle-orm/d1</code> and <code>drizzle-orm/sqlite-proxy</code> databases (start from <code>BaseSQLiteDatabase&lt;"async", T, Record&lt;string, never&gt;&gt;</code>; if an <code>any</code> in a variance position is unavoidable, add it to the existing <code>.oxlintrc.json</code> variance-escape override with a why-comment — never inline). Refactor <code>create_cloudflare_backend</code> to consume the shared layer; keep R2 <code>DataClient</code>, event emission wiring, and <code>apply_batch</code> local. Public API of <code>@f0rbit/corpus/cloudflare</code> must be byte-compatible.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/backend-contract.test.ts tests/integration/cloudflare-backend.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: typecheck clean; contract suite green for all registered backends including "CloudflareBackend (faked D1 + R2)"; lint clean with no new inline disables.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>No behaviour drift: <code>eq()</code> (not <code>like()</code>) for store_id filtering; <code>json_each</code> parents query unchanged; tag filtering still post-query in JS.</li>
+                  <li>No <code>any</code> outside a documented exception-map entry; no <code>as</code> casts added beyond what existed.</li>
+                  <li><code>parse_snapshot_meta</code> / <code>raw_snapshot_meta_schema</code> remain the only row-shape authority — no duplicated row type literal.</li>
+                  <li><code>@f0rbit/corpus/cloudflare</code> export surface unchanged (diff <code>cloudflare.ts</code> shim exports before/after).</li>
+                  <li>Error events still emitted on every failure path (<code>emit({ type: "error", ... })</code> parity with the pre-refactor code).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="proof">
+                <p><code>backend/drizzle-storage.ts</code> created (386 LOC) exporting <code>create_drizzle_snapshot_metadata</code>, <code>create_drizzle_observations_storage</code>, <code>meta_insert_stmt</code>/<code>meta_delete_stmt</code>/<code>obs_insert_stmt</code>/<code>obs_delete_stmt</code>, and <code>DrizzleDb&lt;TRunResult&gt;</code> (narrowed to <code>BaseSQLiteDatabase&lt;"async", TRunResult, Record&lt;string, never&gt;&gt;</code> — no <code>any</code>). <code>backend/cloudflare.ts</code> net -262 LOC, refactored onto the shared layer; <code>db.batch()</code> stays local as documented.</p>
+                <p><code>bun run typecheck</code>: clean (<code>tsc --noEmit</code>, zero errors). <code>bun test</code>: 769 pass / 0 fail across 36 files (4769 expect() calls), including the full contract suite for all 5 registered backend runs — <code>CloudflareBackend (faked D1 + R2)</code> green. <code>bun run build</code> (<code>tsc -p tsconfig.build.json</code>): clean emit.</p>
+                <p>Cast audit vs. <code>git show HEAD:backend/cloudflare.ts</code> (pre-refactor): 3 pre-existing <code>as</code> casts identified (2× <code>as typeof query</code> in the metadata <code>list</code> and observations <code>query_rows</code> limit-clause narrowing, 1× <code>as readonly [Stmt, ...Stmt[]]</code> in <code>apply_batch</code>'s <code>db.batch()</code> call). Post-refactor: 2 relocated verbatim into <code>backend/drizzle-storage.ts</code> (lines 174, 336), 1 remains in <code>backend/cloudflare.ts</code> (line 208, inside <code>apply_batch</code> which stayed local). Zero new casts.</p>
+                <p><code>eq()</code> (not <code>like()</code>) confirmed for store_id filtering; <code>json_each</code> parents query in <code>get_children</code> unchanged; tag filtering still post-query in JS (<code>list</code>'s <code>opts?.tags?.length &amp;&amp; !opts.tags.every(...)</code> loop). <code>parse_snapshot_meta</code>/<code>raw_snapshot_meta_schema</code> remain sole row-shape authority — <code>snapshot_row_to_meta</code> in the new module still delegates to it, no duplicated literal. <code>emit({ type: "error", ... })</code> parity preserved on every failure branch in both the metadata and observations implementations. <code>@f0rbit/corpus/cloudflare</code> export surface (via <code>cloudflare.ts</code> root shim) unchanged — only internal imports moved.</p>
+                <p>Lint: zero errors outside <code>.claude/worktrees/agent-a0f1a274e5ac8cea7/</code> (documented foreign-session noise, out of scope per AGENTS.md) — all 21 <code>error</code>-level findings are confined to that path; the two files with matching basenames under the real tree (<code>utils.ts</code>, <code>tests/property/corpus-error-paths.test.ts</code>) carry only pre-existing graduated <code>warning</code>-level <code>f0rbit/no-ambient-effects</code> findings. <code>bun run fmt:check</code>: "All matched files use the correct format."</p>
+              </div>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-2">
+            <header>
+              <h3>Task 1.2: Optional list_stores on MetadataClient, implemented in all built-in backends</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>types.ts</code>, <code>backend/drizzle-storage.ts</code>, <code>backend/memory.ts</code>, <code>backend/file.ts</code>, <code>backend/layered.ts</code>, <code>tests/integration/backend-contract.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~130</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (phase is sequential)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p><code>MetadataClient</code> (<code>types.ts:220</code>) has no way to enumerate store ids; the CLI's <code>stores</code> command and un-filtered <code>copy()</code> need one. Adding a required method would break custom backends (public type), so it must be optional. Existing per-backend facts: memory backend (<code>backend/memory.ts</code>) keys metadata as <code>`${store_id}:${version}`</code> in a Map of <code>SnapshotMeta</code> (values carry <code>store_id</code>); file backend already has an internal <code>list_all_stores()</code> walker (<code>backend/file.ts:96</code>) which filters out <code>_*</code> (internal) and <code>.*</code> (tx staging) directories — that filter MUST be preserved; the drizzle shared layer (from task 1.1) can use <code>db.selectDistinct({ store_id: corpus_snapshots.store_id }).from(corpus_snapshots)</code>; layered backend composes layers with a bottom write layer that is the source of truth. Contract suite entry point: <code>run_backend_contract_tests(name, factory, cleanup?)</code>.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>Add <code>list_stores?: () =&gt; AsyncIterable&lt;string&gt;</code> to <code>MetadataClient</code> in <code>types.ts</code> with a JSDoc block matching surrounding style (documenting optionality + consumer fallback expectations). Implement it in: the drizzle shared layer (selectDistinct, wrapped in <code>try_catch_async</code>; on error, yield nothing after emitting an error event — match <code>list</code>'s degraded behaviour); memory (distinct <code>store_id</code> over map values, sorted for determinism); file (delegate to <code>list_all_stores()</code>); layered (delegate to bottom write layer). Add a contract-suite block that, when <code>backend.metadata.list_stores</code> is defined, puts snapshots into two stores and asserts both ids are yielded exactly once (self-skip via <code>if (!backend.metadata.list_stores) return</code> — same pattern as the transaction contract's <code>apply_batch</code> guard).</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/backend-contract.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: new list_stores contract block passes for memory, file, layered, and cloudflare-over-fakes runs; zero failures elsewhere.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li><code>list_stores</code> is optional (<code>?</code>) — no existing custom-backend implementer is broken; no other <code>MetadataClient</code> signature touched.</li>
+                  <li>File implementation preserves the <code>_*</code> AND <code>.*</code> directory filters (staging dirs from crashed transactions must not appear as stores).</li>
+                  <li>No duplicate store ids yielded (drizzle selectDistinct; memory de-dupes via Set).</li>
+                  <li>Deterministic ordering (sorted) so CLI output and tests are stable.</li>
+                  <li>Errors don't throw across the AsyncIterable boundary — degraded-to-empty with an emitted error event, mirroring <code>list</code>.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="proof">
+                <p><code>list_stores?: () =&gt; AsyncIterable&lt;string&gt;</code> added to <code>MetadataClient</code> in <code>types.ts:225-234</code> with JSDoc documenting optionality + the <code>invalid_config</code> fallback expectation. Implemented in: drizzle shared layer (<code>db.selectDistinct({ store_id }).from(corpus_snapshots)</code> wrapped in <code>try_catch_async</code>, sorted via <code>.toSorted()</code>, degrades to empty + emits an error event on failure — mirrors <code>list</code>); memory (<code>Set&lt;string&gt;</code> over <code>meta_store.values()</code>, sorted); file (delegates to the pre-existing <code>list_all_stores()</code> walker at <code>backend/file.ts:96</code>, re-sorted at the call site); layered (binds the bottom write layer's <code>list_stores</code> alongside the existing <code>apply_batch</code> bind, spread in only when present).</p>
+                <p>Contract-suite block added at <code>tests/integration/backend-contract.test.ts</code> (<code>describe("list_stores", ...)</code>): self-skips via <code>if (!backend.metadata.list_stores) return</code>, puts 3 snapshots across 2 stores, asserts both ids yielded exactly once via <code>ids.toSorted()</code> equality + a <code>Set</code> size check for no duplicates.</p>
+                <p><code>bun test tests/integration/backend-contract.test.ts -t "list_stores"</code>: 5 pass / 0 fail (10 expect() calls) — one per registered backend run (<code>MemoryBackend</code>, <code>FileBackend</code>, <code>LayeredBackend (memory read/write)</code>, a second layered variant, and <code>CloudflareBackend (faked D1 + R2)</code>), confirming the shared drizzle layer's <code>selectDistinct</code> path works through the real drizzle d1 driver against the bun:sqlite fake. Full suite: <code>bun test</code> 769 pass / 0 fail across 36 files.</p>
+                <p>Adversary checklist: <code>list_stores</code> is optional (<code>?</code>), no other <code>MetadataClient</code> signature changed. File implementation preserves <code>_*</code>/<code>.*</code> filtering by delegating to the untouched <code>list_all_stores()</code> walker (verified — no diff to that function). No duplicate store ids possible (drizzle <code>selectDistinct</code>; memory via <code>Set</code>). Ordering is deterministic (<code>.toSorted()</code> in all four implementations). No throw across the <code>AsyncIterable</code> boundary — drizzle path degrades to empty + emits <code>{ type: "error" }</code> on failure, matching <code>list</code>'s existing behaviour.</p>
+              </div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-2">
+          <h3>Phase 2: Remote backend (D1 HTTP + R2 S3) with in-process fakes</h3>
+          <p>Tasks 2.1–2.3 run parallel (<code>coder-fast</code> in worktrees, no build/test verification — verification coder handles it). Task 2.4 is sequential assembly (<code>coder</code>) after the parallel batch integrates.</p>
+
+          <article class="task" id="task-2-1">
+            <header>
+              <h3>Task 2.1: D1 HTTP driver — sqlite-proxy callback + Zod response schemas</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>backend/remote-d1.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~160</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-1 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-2-2, task-2-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Goal: a drizzle database over Cloudflare's D1 HTTP API, for laptop-side access with only a Bearer API token. Facts (verified against primary docs): endpoint <code>POST https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/raw</code> with body <code>{"sql": string, "params": unknown[]}</code>, <code>?</code> placeholders; <code>/raw</code> returns rows as arrays (<code>results: { columns: string[], rows: unknown[][] }</code>) inside the standard CF envelope <code>{ success, errors: [{code, message}], result: [{ success, results, meta }] }</code>; auth is <code>Authorization: Bearer &lt;token&gt;</code>. The drizzle proxy driver is <code>drizzle(async (sql, params, method) =&gt; ({ rows }))</code> from <code>drizzle-orm/sqlite-proxy</code> — for method <code>"all"</code>/<code>"values"</code> return rows-as-arrays; for <code>"get"</code> return the first row array; for <code>"run"</code> rows may be empty. Conventions: Result/ok/err from <code>./types.js</code>, <code>try_catch_async</code> from <code>./result.js</code> wraps the fetch edge, errors map to <code>CorpusError</code> <code>{ kind: "storage_error", cause, operation }</code>. Lint rule <code>f0rbit/require-schema-at-boundary</code>: the fetch response JSON MUST flow through a Zod parse before use — define the envelope schemas in this file as the single source of truth. The endpoint base URL must be overridable (<code>base_url</code> option) so tests can point it at an in-process fake server. No console output anywhere (full <code>no-console</code> ban).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>Implement and export from <code>backend/remote-d1.ts</code>: (1) <code>d1_http_config</code> type <code>{ account_id: string; database_id: string; api_token: string; base_url?: string }</code>; (2) Zod schemas <code>d1_http_error_schema</code>, <code>d1_http_response_schema</code> (envelope + raw results shape above), exported for reuse by the fake server tests; (3) <code>create_d1_http_db(config)</code> returning the sqlite-proxy drizzle database whose callback POSTs to <code>{base_url ?? "https://api.cloudflare.com/client/v4"}/accounts/.../raw</code>, Zod-parses the envelope, maps <code>success: false</code> or non-2xx into a thrown Error inside the callback carrying code+message (the drizzle proxy contract expects throw on failure; the shared drizzle layer's <code>try_catch_async</code> converts it to <code>storage_error</code> — this file is inside the sanctioned boundary, so document the throw with a comment and, if <code>eslint-plugin-functional</code>'s no-throw flags it, add a <code>files</code>-scoped entry to <code>eslint.config.ts</code>'s overrides with a why-comment, never inline). Also export a small pure helper <code>d1_endpoint_url(config)</code> for testability. Method mapping per the context block. Do not implement batch.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/remote-backend.test.ts &amp;&amp; bun run lint</pre>
+              <p>(Run by the phase verification coder after 2.4 lands; this task itself only needs the file to typecheck in isolation.) Expected: driver used by contract-suite run in 2.4 passes.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Response JSON is Zod-parsed before any field access — no <code>as</code>-cast of <code>await res.json()</code> (<code>f0rbit/require-schema-at-boundary</code>).</li>
+                  <li>API token never appears in error messages, thrown Error text, or serialised config (redact).</li>
+                  <li><code>method === "get"</code> returns a single row array, not an array of rows — drizzle silently mis-maps otherwise.</li>
+                  <li>Non-2xx AND <code>success: false</code> with 2xx are both failure paths (CF returns 200 with success:false for SQL errors).</li>
+                  <li><code>base_url</code> override respected everywhere (no hardcoded prod URL in the request path).</li>
+                  <li>Any intentional throw is inside the documented sqlite-proxy callback boundary with an exception-map entry, not an inline disable.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-2">
+            <header>
+              <h3>Task 2.2: R2 DataStorage over Bun.S3Client</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>backend/remote-r2.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~110</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-1 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-2-1, task-2-3</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. The backend adapter interface is <code>DataStorage</code> from <code>backend/base.ts</code>: <code>{ get(data_key) =&gt; Promise&lt;DataStorageHandle | null&gt;; put(data_key, data: Uint8Array) =&gt; Promise&lt;void&gt;; delete(data_key) =&gt; Promise&lt;void&gt;; exists(data_key) =&gt; Promise&lt;boolean&gt; }</code> where <code>DataStorageHandle</code> is <code>{ bytes(): Promise&lt;Uint8Array&gt;; stream?(): ReadableStream&lt;Uint8Array&gt;; size?: number }</code>. Adapter methods may throw — <code>create_data_client</code>-style wrapping happens a level up; but prefer returning null for missing keys (<code>get</code>/<code>exists</code> must treat 404/NoSuchKey as null/false, not an error). R2's S3-compatible endpoint: <code>https://&lt;ACCOUNT_ID&gt;.r2.cloudflarestorage.com</code>, SigV4; creds come from an R2 API token (access key id = token id, secret = SHA-256 of token value). <code>Bun.S3Client</code> (bun-native, zero-dep) supports <code>new Bun.S3Client({ accessKeyId, secretAccessKey, bucket, endpoint })</code> and per-key <code>.file(key)</code> handles with <code>.arrayBuffer()</code>, <code>.stream()</code>, <code>.exists()</code>, <code>.write()</code>, <code>.delete()</code>. Precedent for typing: <code>backend/cloudflare.ts</code> defines minimal structural types for D1/R2 instead of importing platform types — this file's exported types must similarly avoid leaking the <code>Bun</code> global into emitted <code>.d.ts</code>. This file is bun-only and will only be reachable via the <code>@f0rbit/corpus/remote</code> entry point (never the main barrel). Naming: snake_case, kebab-case filenames.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>Export from <code>backend/remote-r2.ts</code>: (1) <code>r2_s3_config</code> type <code>{ account_id: string; bucket: string; access_key_id: string; secret_access_key: string; endpoint?: string }</code> (endpoint override for tests; default derived from account_id); (2) <code>create_r2_data_storage(config): DataStorage</code> — <code>get</code> returns a <code>DataStorageHandle</code> with lazy <code>bytes()</code> (arrayBuffer → Uint8Array) and native <code>stream()</code>, returning <code>null</code> when the object is missing (probe with <code>.exists()</code> or catch the not-found error shape); <code>put</code> writes bytes; <code>delete</code> deletes; <code>exists</code> maps to <code>.exists()</code>. Keep the S3 client behind a module-local structural type (e.g. a minimal <code>s3_like</code> type describing exactly the methods used) constructed via <code>new Bun.S3Client(...)</code> in one factory function, so the public surface is Bun-free and tests could substitute a conforming object. Secrets must not be echoed in any error path.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/remote-backend.test.ts &amp;&amp; grep -c "Bun\." dist/backend/remote-r2.d.ts</pre>
+              <p>(Phase verification coder, after 2.4 + build.) Expected: contract suite green; grep over the emitted d.ts finds 0 <code>Bun.</code> references.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Missing object → <code>get</code> null / <code>exists</code> false, never a thrown "NoSuchKey" escaping to callers.</li>
+                  <li>Emitted <code>.d.ts</code> for this module contains no <code>Bun</code> global references (structural public types only).</li>
+                  <li><code>stream()</code> is the native S3 stream, not a buffered one-chunk wrapper (streaming reads are a library feature).</li>
+                  <li>Secrets absent from all Error messages and from any logged/serialised config shape.</li>
+                  <li>Endpoint override used verbatim when provided (tests depend on it); default endpoint derived from account_id exactly once.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-3">
+            <header>
+              <h3>Task 2.3: In-process platform fakes — D1 HTTP server shim + S3 server</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/fakes/d1-http.ts</code> (new), <code>tests/fakes/s3.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~220</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-1 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-2-1, task-2-2</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Testing philosophy: in-memory fakes of the PLATFORM so the real backend code runs through the shared contract suite (see <code>tests/fakes/cloudflare.ts</code>, which fakes the D1 binding surface over bun:sqlite with DDL derived from the Drizzle schema via <code>getTableConfig</code> — reuse <code>create_fake_d1</code> and <code>table_ddl</code> from it; do not fork them). The remote backend under test speaks: (a) D1 HTTP — <code>POST /accounts/{account}/d1/database/{db}/raw</code> with <code>{sql, params}</code>, responding with the CF envelope <code>{ success: true, errors: [], result: [{ success: true, results: { columns, rows } }] }</code> where rows are arrays (bun:sqlite's <code>stmt.values()</code> gives exactly this); (b) S3 — GET/PUT/DELETE/HEAD on <code>/{bucket}/{key}</code> (SigV4 headers present but the fake ignores auth). <code>Bun.serve({ port: 0 })</code> assigns a free port exposed via <code>server.port</code>. Test files are exempt from the functional lint rules (<code>tests/**</code> override exists). Fakes must be closable (<code>server.stop()</code>) for per-suite cleanup.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p><code>tests/fakes/d1-http.ts</code>: export <code>create_fake_d1_http(tables: SQLiteTable[])</code> → <code>{ url: string; stop(): void; sqlite: Database }</code>. Internally build <code>create_fake_d1(tables)</code>'s bun:sqlite database, and serve a <code>Bun.serve</code> handler that (1) matches the <code>/raw</code> route shape, (2) validates Bearer-token presence (any value accepted, but respond 401 when absent — lets tests assert auth headers are sent), (3) executes <code>{sql, params}</code> via <code>sqlite.prepare(sql).values(...params)</code>, (4) responds with the CF envelope; SQL errors become <code>{ success: false, errors: [{ code: 7500, message }] }</code> with HTTP 200 (matches CF behaviour). <code>tests/fakes/s3.ts</code>: export <code>create_fake_s3()</code> → <code>{ url: string; stop(): void; has(key): boolean; keys(): string[] }</code> — a Map&lt;string, Uint8Array&gt; behind GET (200 body / 404 NoSuchKey XML), HEAD (200 with content-length / 404), PUT (store body bytes, 200), DELETE (204); ignore SigV4 signatures; path parsing tolerant of both path-style <code>/{bucket}/{key...}</code> and virtual-host style. Both fakes must never write to the console.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun test tests/integration/remote-backend.test.ts tests/integration/backend-contract.test.ts</pre>
+              <p>(Phase verification coder, after 2.4.) Expected: RemoteBackend contract run green over these fakes; existing fake-based runs unaffected.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Reuses <code>create_fake_d1</code>/<code>table_ddl</code> from <code>tests/fakes/cloudflare.ts</code> — no forked DDL derivation (schema stays single-source).</li>
+                  <li>SQL error → HTTP 200 + <code>success: false</code> (CF's actual behaviour), not a 500 — the driver must handle both.</li>
+                  <li>Missing Bearer header → 401 (so a driver regression that drops auth headers fails tests).</li>
+                  <li>S3 GET of missing key → 404, and PUT stores bytes exactly (round-trip byte equality asserted somewhere in the suite).</li>
+                  <li>Servers bind port 0 (no fixed ports — parallel test runs must not collide) and <code>stop()</code> is invoked in suite cleanup.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-4">
+            <header>
+              <h3>Task 2.4: Assemble create_remote_backend, /remote entry point, contract-suite registration</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>backend/remote.ts</code> (new), <code>remote.ts</code> root shim (new), <code>package.json</code>, <code>tsconfig.build.json</code>, <code>tests/integration/remote-backend.test.ts</code> (new), <code>tests/integration/backend-contract.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~200</dd>
+              <dt>Dependencies</dt>
+              <dd>task-2-1, task-2-2, task-2-3</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (integration step)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Pieces now exist: <code>create_d1_http_db</code> (backend/remote-d1.ts), <code>create_r2_data_storage</code> (backend/remote-r2.ts), the shared drizzle layer <code>create_drizzle_snapshot_metadata</code> / <code>create_drizzle_observations_storage</code> (backend/drizzle-storage.ts), adapter wrappers <code>create_data_client</code> (backend/base.ts), observations client factory <code>create_observations_client</code> (observations/), event emitter <code>create_emitter</code> (utils.ts). Entry-point precedent: <code>file.ts</code> at repo root is a shim re-exporting <code>backend/file.js</code>, mapped in <code>package.json</code> <code>exports["./file"]</code>; <code>tsconfig.build.json</code> has an explicit <code>include</code> list that must gain new root files. The contract suite registers backends at the bottom of <code>tests/integration/backend-contract.test.ts</code> via <code>run_backend_contract_tests(name, factory, cleanup?)</code>; transaction-contract tests self-skip when <code>backend.apply_batch</code> is absent (verified: every one guards with <code>if (!backend.apply_batch) return</code>). Decision from the plan: remote backend ships WITHOUT <code>apply_batch</code> in v1 (D1 HTTP multi-statement calls are not one transaction — claiming atomicity would be false).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <code>backend/remote.ts</code>: export <code>RemoteBackendConfig</code> = <code>{ account_id, database_id, api_token, r2: { bucket, access_key_id, secret_access_key, endpoint? }, d1_base_url?, on_event? }</code> and <code>create_remote_backend(config): Backend</code> wiring: metadata = shared drizzle layer over <code>create_d1_http_db</code>; data = <code>create_data_client(create_r2_data_storage(...), emit)</code>; observations = <code>create_observations_client(create_drizzle_observations_storage(db), metadata)</code>; NO <code>apply_batch</code>. (2) Root shim <code>remote.ts</code> re-exporting <code>create_remote_backend</code> + config types + the d1/r2 sub-factories (mirror <code>file.ts</code>'s style). (3) <code>package.json</code>: add <code>exports["./remote"]</code> (types/import/require → <code>./dist/remote.*</code>). (4) <code>tsconfig.build.json</code>: add <code>"remote.ts"</code> to include. (5) Register in the contract suite: <code>run_backend_contract_tests("RemoteBackend (faked D1 HTTP + S3)", factory, cleanup)</code> where the factory boots <code>create_fake_d1_http([corpus_snapshots, corpus_observations])</code> + <code>create_fake_s3()</code> and points <code>d1_base_url</code>/<code>r2.endpoint</code> at them; cleanup stops both servers. (6) <code>tests/integration/remote-backend.test.ts</code>: remote-specific cases — 401 when token missing → <code>storage_error</code>; SQL error envelope → <code>storage_error</code> with operation name; observations round-trip over HTTP; <code>list_stores</code> yields distinct ids.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/backend-contract.test.ts tests/integration/remote-backend.test.ts &amp;&amp; bun run lint &amp;&amp; bun run build</pre>
+              <p>Expected: RemoteBackend contract run fully green (transaction block self-skipped); build emits <code>dist/remote.js</code> + <code>dist/backend/remote*.js</code>; <code>bun -e "import('@f0rbit/corpus/remote')"</code>-style resolution works from dist.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Remote entry NOT re-exported from the main barrel (<code>index.ts</code>) — Workers consumers must never transitively import Bun-only code.</li>
+                  <li>No <code>apply_batch</code> claimed; confirm <code>corpus.transaction()</code> against remote takes the sequential fallback path without error.</li>
+                  <li>Contract-suite factory creates FRESH fakes per invocation (the suite's beforeEach recreates the backend — shared state across runs would mask bugs).</li>
+                  <li>All error paths carry <code>{ kind: "storage_error", operation }</code> with distinct operation names per client method.</li>
+                  <li><code>package.json</code> exports map entries follow the existing shape exactly (types first, import, require) and <code>files: ["dist"]</code> still covers everything shipped.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-3">
+          <h3>Phase 3: copy() in library core</h3>
+          <p>Sequential (one <code>coder</code>). The clone engine, generic over any two <code>Backend</code>s.</p>
+
+          <article class="task" id="task-3-1">
+            <header>
+              <h3>Task 3.1: copy(source, dest) with hash-skip incremental semantics + integration/property tests</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>copy.ts</code> (new), <code>index.ts</code>, <code>tsconfig.build.json</code>, <code>tests/integration/copy.test.ts</code> (new), <code>tests/property/copy-laws.test.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~230 impl + ~300 tests</dd>
+              <dt>Dependencies</dt>
+              <dd>task-1-2 (list_stores), task-2-4 (remote backend for the remote→file test)</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. <code>Backend</code> (types.ts) = <code>{ metadata: MetadataClient; data: DataClient; observations?; apply_batch? }</code>. <code>MetadataClient.list(store_id, opts?)</code> yields <code>SnapshotMeta</code> (opts: limit/before/after/tags); <code>MetadataClient.get(store_id, version)</code> → Result; optional <code>list_stores()</code>. <code>DataClient.get(data_key)</code> → Result of <code>{ stream(): ReadableStream&lt;Uint8Array&gt;; bytes(): Promise&lt;Uint8Array&gt; }</code>; <code>DataClient.put(data_key, stream_or_bytes)</code>; <code>DataClient.exists(data_key)</code>. Concurrency helpers exist: <code>Semaphore</code>, <code>parallel_map</code> (concurrency.ts) — reuse them, don't reimplement. Design decisions (fixed): data-before-metadata write order (metadata presence = version exists; orphan data at dest is harmless, healed on re-run); skip version when dest metadata.get is ok; skip data transfer when dest data.exists(data_key); <code>SnapshotMeta</code> copied verbatim (version/created_at/data_key/parents/tags untouched); no observations copy in v1; progress via injectable callback (library code has a full no-console ban); errors short-circuit per store but the summary reports what completed. Restic's <code>copy</code> (transfer only blobs missing at destination) is the semantic model. Testing substrate available at <code>testing/</code>: <code>testing.law.idempotent</code>, <code>testing.arb</code>, registered <code>SNAPSHOT_META_BRAND</code> arbitrary (note: it always emits <code>parents: []</code>, never <code>invoked_at</code> — build a richer local arb like <code>tests/property/backend-equivalence.test.ts</code>'s <code>meta_arb</code> if you need parents). fast-check gotcha: any <code>fc.assert</code> over a <code>testing.compose</code>-based arbitrary with a failable property MUST pass <code>{ endOnFailure: true }</code>; plain <code>fc.record</code> arbitraries are unaffected. File-backend gotcha to note in a comment near tests: <code>data_path</code> sanitises <code>/</code>→<code>_</code> so exotic custom data_key layouts can alias — keep generated data keys in the default <code>store/hash</code> shape.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>Implement <code>copy.ts</code> exporting: <code>CopyOpts</code> = <code>{ stores?: string[]; tags?: string[]; dry_run?: boolean; concurrency?: number; on_progress?: (e: CopyProgressEvent) =&gt; void }</code>; <code>CopyProgressEvent</code> discriminated union (<code>store_start</code>, <code>version_copied</code>, <code>version_skipped</code>, <code>data_copied</code>, <code>data_skipped</code>, <code>store_done</code>); <code>CopySummary</code> = <code>{ stores: string[]; versions_copied: number; versions_skipped: number; data_objects_copied: number; data_objects_skipped: number; bytes_copied: number; dry_run: boolean }</code>; <code>async function copy(source: Backend, dest: Backend, opts?: CopyOpts): Promise&lt;Result&lt;CopySummary, CorpusError&gt;&gt;</code>. Store selection: <code>opts.stores</code> if given, else <code>source.metadata.list_stores()</code>, else <code>err({ kind: "invalid_config", message })</code> naming the fix (<code>--store</code> or a backend with list_stores). Per store: iterate <code>source.metadata.list(store, { tags })</code>; for each meta, dest metadata hit → skip; else (unless dry_run) if <code>!await dest.data.exists(meta.data_key)</code> stream <code>source.data.get(meta.data_key)</code> → <code>dest.data.put(meta.data_key, handle.stream())</code> (stream, don't buffer) counting bytes via <code>meta.size_bytes</code>; then <code>dest.metadata.put(meta)</code>. Bound version-level work with <code>parallel_map</code> + <code>concurrency ?? 4</code>. Export <code>copy</code> + types from <code>index.ts</code> (Workers-safe: copy.ts imports only types/result/concurrency). Tests — integration (<code>tests/integration/copy.test.ts</code>): file→file round-trip (listings + bytes equal at dest); idempotency (second copy: 0 copied, all skipped); tag + store filters; dry-run writes nothing; dedup (two versions sharing one content_hash/data_key → 1 data object copied, 2 metadata rows); remote-fake→file clone using phase-2 fakes; missing list_stores + no filter → invalid_config. Property (<code>tests/property/copy-laws.test.ts</code>): generate snapshot sets (local richer meta arb), put into memory source, copy→fresh memory dest twice — assert second-run summary has zero copies (idempotency) and dest listing equals source listing modulo ordering (use the equivalence-rule convention: canonical-sort both arms, compare Dates by epoch ms).</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/copy.test.ts tests/property/copy-laws.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: all copy suites green, including remote-fake→file and the idempotency property (second run copies nothing).</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Data written BEFORE metadata for every version (interruption must never leave metadata pointing at missing data at dest).</li>
+                  <li><code>SnapshotMeta</code> copied verbatim — no regenerated versions/timestamps/data_keys (diff a copied meta field-by-field in a test).</li>
+                  <li>Streams piped, not buffered: no <code>await handle.bytes()</code> in the transfer hot path.</li>
+                  <li><code>parallel_map</code> reused (no bespoke worker-pool); concurrency bound actually honoured.</li>
+                  <li>No console output; progress only via <code>on_progress</code>.</li>
+                  <li>Result discipline: every inner Result checked (<code>f0rbit/must-use-result</code>); failure mid-store surfaces the CorpusError, not a partial silent success.</li>
+                  <li>Property test avoids the <code>fc.gen()</code> shrink hazard (plain <code>fc.*</code> arbitraries or <code>endOnFailure: true</code>).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-4">
+          <h3>Phase 4: CLI foundation — config discovery + skeleton</h3>
+          <p>Two parallel <code>coder-fast</code> tasks in worktrees (disjoint files; 4.2 owns <code>package.json</code>/<code>tsconfig.build.json</code>/lint configs, 4.1 owns the barrel export line in <code>index.ts</code>).</p>
+
+          <article class="task" id="task-4-1">
+            <header>
+              <h3>Task 4.1: Config discovery — corpus.config.ts, wrangler sniffing, env resolution</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/config-schema.ts</code> (new), <code>cli/load-config.ts</code> (new), <code>cli/wrangler.ts</code> (new), <code>cli/resolve-backend.ts</code> (new), <code>index.ts</code> (one export line), <code>tests/unit/cli-config.test.ts</code> (new), <code>tests/fixtures/cli/**</code> (new fixture trees)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~300</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-2 (create_remote_backend), phase-3 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-4-2</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. The CLI (phase 5) needs: (a) the consumer's real store definitions for decoding (<code>cat</code>) — drizzle-kit pattern: a <code>corpus.config.ts</code> in the consumer workspace, dynamically imported (bun imports TS natively); (b) connection params for the remote backend — sniffed from <code>wrangler.toml</code>/<code>wrangler.json</code>/<code>wrangler.jsonc</code> plus env vars, or given explicitly in the config. Fixed decisions: precedence explicit flags &gt; config environments &gt; wrangler sniff + env; secrets ONLY from env/flags (<code>CLOUDFLARE_API_TOKEN</code>, <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>CORPUS_R2_ACCESS_KEY_ID</code>, <code>CORPUS_R2_SECRET_ACCESS_KEY</code>), never the config file; metadata-only commands MUST work with no config file at all. <code>create_remote_backend(config)</code> is imported from <code>./remote.js</code> (root shim); <code>create_file_backend({ base_path })</code> from <code>./file.js</code>. Boundary rule <code>f0rbit/require-schema-at-boundary</code>: wrangler file contents and any parsed JSON must flow through Zod. Wrangler facts needed: top-level <code>account_id</code> (optional), <code>d1_databases[].database_id</code>, <code>r2_buckets[].bucket_name</code> (both possibly under <code>env.*</code> blocks — sniff top-level and flatten <code>env</code> entries, labelling candidates). TOML: use Bun's native TOML support (<code>Bun.TOML.parse</code>; if unavailable in the pinned bun, dynamic-import the .toml file — bun's toml loader — and verify in a test). JSONC: strip <code>//</code> and <code>/* */</code> comments + trailing commas, then <code>JSON.parse</code>, then Zod. The main barrel (<code>index.ts</code>) may only re-export the PURE module (<code>cli/config-schema.ts</code>) — no fs/dynamic-import code reachable from the barrel. Store definitions contain functions (codecs) so the config Zod schema validates data-shaped fields and structurally checks stores (array of <code>{ id: string; codec: { content_type, encode, decode } }</code> via <code>z.custom</code> + explicit checks).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <code>cli/config-schema.ts</code> (pure): <code>CorpusCliConfig</code> type + <code>corpus_cli_config_schema</code> (Zod for data parts) + <code>define_config(config: CorpusCliConfig): CorpusCliConfig</code> identity helper. Shape: <code>{ stores?: StoreDefinition&lt;string, unknown&gt;[]; environments?: Record&lt;string, { account_id?: string; database_id?: string; bucket?: string; d1_base_url?: string; r2_endpoint?: string } | { file: string }&gt;; default_env?: string }</code>. (2) <code>cli/wrangler.ts</code>: <code>sniff_wrangler(dir)</code> → Result of <code>{ account_id?: string; d1_candidates: Array&lt;{binding, database_id, source}&gt;; r2_candidates: Array&lt;{binding, bucket_name, source}&gt; } | null</code> (null = no wrangler file), Zod-validating parsed content; upward directory search stopping at filesystem root or a <code>.git</code> dir. (3) <code>cli/load-config.ts</code>: <code>load_cli_config(explicit_path?)</code> — upward search for <code>corpus.config.ts</code>/<code>corpus.config.js</code>, dynamic import wrapped in <code>try_catch_async</code> → <code>validation_error</code> on bad shape; absent file → ok(null). (4) <code>cli/resolve-backend.ts</code>: <code>resolve_backend(selector, { config, env_vars, cwd })</code> → Result&lt;Backend&gt; implementing the precedence rules; selector is <code>{ env?: string } | { file: string }</code>; the implicit <code>remote</code> env materialises when wrangler sniff + env creds cover all required params; ambiguity (2+ D1 candidates) → <code>invalid_config</code> error listing candidates and the flag/config fix; every error message names the missing piece(s) explicitly. (5) Barrel: add <code>export { define_config, type CorpusCliConfig } from "./cli/config-schema.js"</code> to <code>index.ts</code>. (6) Tests with fixture trees under <code>tests/fixtures/cli/</code> (wrangler-toml project, wrangler-jsonc project, config-file project, bare dir): sniff extraction, precedence order, secret-from-env only, ambiguity error, no-config metadata path resolves. NOTE for fixtures: <code>.prettierignore</code> excludes <code>tests/fixtures/</code> already; if a fixture needs <code>node_modules</code>, check the AGENTS.md gitignore-negation rule — these fixtures should NOT need node_modules.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/unit/cli-config.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: all discovery/precedence tests green; barrel still Workers-safe (no fs import reachable — verified by the adversary via import-graph inspection).</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li><code>index.ts</code> → <code>cli/config-schema.ts</code> import chain contains zero node/bun-only APIs (no fs, no dynamic import, no Bun global).</li>
+                  <li>Every external file read (toml/json/jsonc) is Zod-parsed before field access; no <code>as</code>-casts on parse results.</li>
+                  <li>Secrets are never read from the config file even if present — a fixture asserting a config-file token is IGNORED.</li>
+                  <li>Precedence covered by tests in both directions (flag beats config; config beats sniff).</li>
+                  <li>Error messages are actionable (name the missing env var / flag), not generic "invalid config".</li>
+                  <li>Upward search terminates at fs root and does not escape past a <code>.git</code> boundary.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-2">
+            <header>
+              <h3>Task 4.2: CLI skeleton — entry, arg parsing, output funnel, bin wiring, lint exceptions</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/index.ts</code> (new), <code>cli/args.ts</code> (new), <code>cli/output.ts</code> (new), <code>cli/commands/index.ts</code> (new, registry + stubs), <code>cli/commands/{stores,versions,show,cat,lineage,clone}.ts</code> (new stubs), <code>package.json</code>, <code>tsconfig.build.json</code>, <code>eslint.config.ts</code>, <code>.oxlintrc.json</code>, <code>tests/unit/cli-output.test.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~280</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-3 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-4-1</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Zero-dep CLI under bun: arg parsing via <code>node:util</code> <code>parseArgs</code>, two-stage (first positional = command name with <code>strict: false</code> for the outer pass; each command re-parses its own args with a strict per-command option spec). The repo has a FULL <code>no-console</code> ban (typed ESLint layer). ALL printing must funnel through <code>cli/output.ts</code>; that one file gets a <code>no-console</code> exception added to the exception maps — <code>eslint.config.ts</code>'s <code>overrides</code> array entry (with a why-comment, precedent: <code>testing/registry.ts</code> degrade-to-warn UX and <code>tests/fakes/console.ts</code>) and, if oxlint also flags, a matching <code>.oxlintrc.json</code> override. NEVER an inline disable (<code>reportUnusedDisableDirectives</code> makes those a lint failure). Bin wiring: <code>package.json</code> <code>"bin": { "corpus": "./dist/cli/index.js" }</code>; source file starts with <code>#!/usr/bin/env bun</code> (tsc preserves shebangs); <code>tsconfig.build.json</code> include list gains <code>"cli/*.ts"</code>, <code>"cli/commands/*.ts"</code>. Phase 5 will fill command bodies in DISJOINT files — this task creates the registry + typed stubs so 5.1/5.2 never touch shared files. Conventions: Result from <code>./types.js</code> (relative — this is in-repo code), snake_case, exit codes: 0 ok, 1 command error (rendered CorpusError), 2 usage error.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <code>cli/output.ts</code>: an <code>Output</code> type <code>{ line(text): void; table(rows, columns): void; json(value): void; error(err: CorpusError | string): void; bytes(data: Uint8Array): void }</code> with two constructors — <code>create_console_output({ json_mode })</code> (the ONLY place <code>console.log</code>/<code>process.stdout.write</code> appear; <code>bytes</code> writes raw to stdout for <code>cat --raw</code> piping) and <code>create_capture_output()</code> exposing recorded calls for tests (in-memory sink, philosophy principle 5). Table renderer: plain aligned columns, no dependency. CorpusError rendering switches on <code>error.kind</code> exhaustively (never default — a 13th variant must be a compile error). (2) <code>cli/args.ts</code>: outer parse (global flags <code>--env</code>, <code>--file</code>, <code>--config</code>, <code>--json</code>, <code>--help</code>) + <code>CommandSpec</code> type for per-command specs. (3) <code>cli/commands/index.ts</code>: <code>command_registry: Record&lt;CommandName, Command&gt;</code> where <code>Command</code> = <code>{ name; summary; spec; run(ctx): Promise&lt;Result&lt;void, CorpusError&gt;&gt; }</code> and <code>ctx</code> = <code>{ args; backend_selector; output; cwd; env_vars }</code>; six stub files each exporting a typed command whose <code>run</code> returns <code>err({ kind: "invalid_config", message: "not implemented" })</code>. (4) <code>cli/index.ts</code>: shebang, wire parse → registry dispatch → exit codes; <code>--help</code> and unknown-command paths render usage via output. (5) package.json bin + tsconfig include + lint exception entries. (6) <code>tests/unit/cli-output.test.ts</code>: capture-output assertions (table alignment, json mode routes everything through <code>json()</code>, error rendering per kind) + one spawn smoke test: <code>Bun.spawn(["bun", "cli/index.ts", "--help"])</code> exits 0 with usage text.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/unit/cli-output.test.ts &amp;&amp; bun run lint &amp;&amp; bun cli/index.ts --help</pre>
+              <p>Expected: help text lists all six commands; lint green with the exception-map entries (no inline disables); exit code 0.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li><code>console.*</code>/<code>process.stdout</code> appear in <code>cli/output.ts</code> ONLY (grep the cli/ tree).</li>
+                  <li>Lint exceptions live in the config exception maps with why-comments — zero inline disable comments anywhere in cli/.</li>
+                  <li>CorpusError rendering is an exhaustive switch with a <code>never</code> default (adding an error kind breaks compilation here).</li>
+                  <li>Usage errors exit 2, command errors exit 1, success 0 — asserted in the spawn smoke test.</li>
+                  <li>Command stubs are disjoint files so phase-5 parallel tasks cannot conflict.</li>
+                  <li><code>--json</code> mode never mixes human text onto stdout (machine output purity).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-5">
+          <h3>Phase 5: Commands</h3>
+          <p>Two parallel <code>coder-fast</code> tasks in worktrees; bodies land in the disjoint stub files created in 4.2.</p>
+
+          <article class="task" id="task-5-1">
+            <header>
+              <h3>Task 5.1: Read commands — stores, versions, show, lineage</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/commands/stores.ts</code>, <code>cli/commands/versions.ts</code>, <code>cli/commands/show.ts</code>, <code>cli/commands/lineage.ts</code>, <code>tests/integration/cli-read.test.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~300</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-1, task-4-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-5-2</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Command shape (from 4.2): each file exports a <code>Command</code> with <code>run(ctx)</code> where ctx carries parsed args, a resolved-backend selector, an <code>Output</code>, cwd, env_vars; resolve the backend via <code>resolve_backend</code> (cli/resolve-backend.ts from 4.1). Backend surface: <code>metadata.list_stores?()</code>, <code>metadata.list(store, { limit, before, after, tags })</code>, <code>metadata.get(store, version)</code> → Result&lt;SnapshotMeta&gt;, <code>backend.observations?.query_meta({ source_store_id, source_version })</code> (AsyncIterable). <code>SnapshotMeta</code> fields: store_id, version, parents (ParentRef[] with store_id/version/role?), created_at (Date), invoked_at?, content_hash, content_type, size_bytes, data_key, tags?. All output through <code>ctx.output</code> (table/json modes are output.ts's concern — commands call <code>output.table(...)</code> / structured objects, never format strings by hand). Result discipline: <code>pipe()</code> chains from <code>./result.js</code>, every Result checked. Tests drive command <code>run()</code> directly with <code>create_capture_output()</code> + memory/file backends and (for one case) the phase-2 remote backend over fakes — no process spawning.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p><code>stores</code>: enumerate via <code>list_stores</code> (absent → the actionable invalid_config error); default columns: store id, version count + latest created_at behind <code>--counts</code> (extra list pass per store, only when flagged). <code>versions &lt;store&gt;</code>: flags <code>--tag</code> (repeatable → AND semantics, matching ListOpts.tags), <code>--limit</code> (number), <code>--before</code>/<code>--after</code> (ISO date, Zod-coerced with a clear parse error); columns: version, created_at ISO, size_bytes, content_hash first 12 chars, tags joined. <code>show &lt;store&gt; &lt;version&gt;</code>: full meta as label/value rows (parents as <code>store/version (role)</code> lines); with <code>--observations</code> and a backend that has observations wired, append observation metas (id, type, created_at, path/span); absent observations support → note line, not an error. <code>lineage &lt;store&gt; &lt;version&gt;</code>: walk <code>parents</code> recursively via <code>metadata.get</code> (breadth-first, <code>--depth</code> default 10), render an indented tree with cycle guard (seen-set on <code>store_id/version</code>); missing ancestors render as <code>(missing)</code> rather than failing the walk. Integration tests per command: happy path against memory backend (seeded via <code>create_corpus</code> + stores), not_found paths, tag/limit filtering, lineage over a 3-deep parent chain incl. a missing parent, one <code>stores</code> run against the remote backend over the phase-2 fakes, and json-mode snapshots via capture output.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/cli-read.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: all read-command suites green in both table and json modes.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Zero mutating backend calls in any read command (grep for <code>.put(</code>/<code>.delete(</code> in these four files).</li>
+                  <li>Lineage cycle guard proven by a test with a parent cycle (a→b→a) — terminates, no infinite loop.</li>
+                  <li>Date flags Zod-validated; garbage input → usage error (exit 2 path), not a stack trace.</li>
+                  <li>No hand-rolled formatting in commands — all rendering through <code>Output</code> methods.</li>
+                  <li><code>show</code> on a backend without observations + <code>--observations</code> → informative note, not an error result.</li>
+                  <li>Every Result checked (<code>f0rbit/must-use-result</code> clean without test-dir relaxation, since these are cli/ files).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-5-2">
+            <header>
+              <h3>Task 5.2: cat + clone commands</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/commands/cat.ts</code>, <code>cli/commands/clone.ts</code>, <code>tests/integration/cli-clone.test.ts</code> (new)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~280</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-1, task-4-2, task-3-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-5-1</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. <code>cat</code> needs the consumer's codec: <code>load_cli_config</code> (cli/load-config.ts) yields <code>CorpusCliConfig</code> whose <code>stores</code> are real <code>StoreDefinition</code>s (id + codec with <code>decode(bytes): Promise&lt;T&gt;</code>). Raw stored bytes come from <code>backend.data.get(meta.data_key)</code> → handle with <code>bytes()</code>/<code>stream()</code>; meta from <code>backend.metadata.get(store, version)</code>. Note codecs may be composed (gzip layers) — <code>codec.decode</code> handles the whole stack; <code>--raw</code> means the literal stored bytes (post-encode, including wrapper layers). <code>clone</code> wraps library <code>copy(source, dest, opts)</code> (copy.ts, phase 3) — CopyOpts: stores/tags/dry_run/concurrency/on_progress; CopySummary has versions_copied/versions_skipped/data_objects_copied/data_objects_skipped/bytes_copied. Source/dest selectors: an env name (resolve via <code>resolve_backend</code>) or a filesystem path (contains <code>/</code>, starts with <code>.</code>, or matches an existing dir → <code>create_file_backend({ base_path })</code> from <code>./file.js</code>). v1 restriction: dest MUST resolve to a file backend — reject remote dests with an error naming the out-of-scope push feature. Progress: subscribe <code>on_progress</code> and render one line per store + a final summary via <code>Output</code> (respecting <code>--json</code>: only the final CopySummary as JSON). Known gotcha to surface in <code>clone</code>'s docstring: file-backend <code>data_path</code> sanitises <code>/</code>→<code>_</code>, so custom <code>data_key_fn</code> layouts can alias at a file destination (documented, not fixed here). Tests drive <code>run()</code> directly with capture output; the remote source uses the phase-2 fakes.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p><code>cat &lt;store&gt; &lt;version&gt;</code>: <code>--raw</code> → stream stored bytes to <code>output.bytes</code> (no config needed); default → require config with a store matching the id (missing config or store → error naming <code>corpus.config.ts</code> and the store id), decode via the store's codec, print JSON values via <code>output.json</code>-style pretty text and strings verbatim; decode failure → <code>decode_error</code> rendered with the codec content_type. Support <code>latest</code> as version alias via <code>metadata.get_latest</code>. <code>clone &lt;source&gt; &lt;dest&gt;</code>: parse selectors per context; flags <code>--store</code> (repeatable), <code>--tag</code> (repeatable), <code>--dry-run</code>, <code>--concurrency</code> (default 4); build both backends, enforce file-dest restriction, run <code>copy()</code>, render progress + summary; non-ok copy → rendered error, exit 1. Tests (<code>tests/integration/cli-clone.test.ts</code>): clone file→file via command (fresh tmp dirs under <code>tests/.tmp/</code>, cleaned per-test — repo convention); clone remote-fakes→file with byte-equality spot check + second run all-skip; --dry-run leaves dest empty; --store filter; remote dest rejected; cat --raw on binary store round-trips bytes; cat decoded with a fixture config (json store, gzip-composed store); cat without config → actionable error.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/cli-clone.test.ts &amp;&amp; bun run lint</pre>
+              <p>Expected: clone + cat suites green, including remote-fake→file idempotent second run (0 copied).</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Clone writes ONLY to the destination backend — no mutating call on the source (grep + a test asserting source listing unchanged).</li>
+                  <li>Remote destination rejected with an error that names the deferred push feature (matches out-of-scope wording).</li>
+                  <li><code>cat --raw</code> gives literal stored bytes (gzip-wrapped store: raw ≠ decoded; both asserted).</li>
+                  <li>tmp dirs under <code>tests/.tmp/</code> cleaned per-test (repo convention; no leftovers after suite).</li>
+                  <li>JSON mode emits exactly one JSON document (the summary) — no progress lines interleaved.</li>
+                  <li><code>latest</code> alias resolves through <code>get_latest</code>, not a client-side sort.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+
+        <section class="phase" id="phase-6">
+          <h3>Phase 6: Docs + release prep</h3>
+          <p>Two parallel <code>coder-fast</code> tasks. Verification coder additionally writes the <code>agents-md-updates</code> entries into <code>AGENTS.md</code> and runs <code>bun run docs:build</code>.</p>
+
+          <article class="task" id="task-6-1">
+            <header>
+              <h3>Task 6.1: Starlight docs — CLI group (overview, configuration, clone)</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>docs/src/content/docs/cli/overview.mdx</code>, <code>docs/src/content/docs/cli/configuration.mdx</code>, <code>docs/src/content/docs/cli/clone.mdx</code> (new), <code>docs/astro.config.mjs</code>, <code>docs/src/content/docs/guides/cloudflare.mdx</code> (cross-link)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~380 (mdx)</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-5 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-6-2</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Docs live in <code>docs/</code> (Astro Starlight, standalone package). Pages are MDX under <code>docs/src/content/docs/</code>; the sidebar is configured in <code>docs/astro.config.mjs</code> (add a "CLI" group — mirror the existing "Testing" group's structure). Package name in user-facing docs is <code>@f0rbit/corpus</code> (scoped). After MDX changes ALWAYS run <code>bun run docs:build</code> from the repo root — it regenerates llms.txt and catches broken links/frontmatter. Content sources of truth: command surface + flags from <code>cli/commands/*.ts</code>; config shape from <code>cli/config-schema.ts</code>; precedence rules (flags &gt; config &gt; wrangler sniff + env) from <code>cli/resolve-backend.ts</code>; clone semantics (hash-skip incremental, idempotent, data-before-metadata, v1 file-dest-only) from <code>copy.ts</code>. Token guidance to document: D1 read-scoped API token via <code>CLOUDFLARE_API_TOKEN</code>; R2 API token with <em>Object Read Only</em> scope, S3 creds derived as access key id = token id, secret = SHA-256 of token value; env vars <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>CORPUS_R2_ACCESS_KEY_ID</code>, <code>CORPUS_R2_SECRET_ACCESS_KEY</code>. Gotchas to include: data_path aliasing note for custom data_key_fn layouts at file destinations; clone copies snapshots only (no observations) in v1.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p><code>overview.mdx</code>: install (<code>bunx corpus</code> / package script), the six commands with one worked example each (bare wrangler workspace → <code>corpus stores</code> works with just env creds), exit codes, <code>--json</code> mode. <code>configuration.mdx</code>: <code>corpus.config.ts</code> with <code>define_config</code> (full example importing the consumer's real store definitions — emphasise single-source: same definitions the app uses), environments block, discovery precedence table, wrangler sniffing behaviour + ambiguity resolution, env var reference + token-scope recommendations (read-only posture). <code>clone.mdx</code>: semantics (incremental by content hash, idempotent re-runs, dry-run), directionality (prod→file, file→file; push deferred), interruption behaviour (orphan data healed on re-run), observations exclusion, the data_key_fn aliasing note. Add the sidebar group ordered after "Testing"; cross-link from <code>guides/cloudflare.mdx</code> ("inspecting production" pointer).</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run docs:build</pre>
+              <p>Expected: build succeeds, llms.txt regenerated, no broken links; new pages appear under the CLI sidebar group.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Every documented flag/command exists with that exact name in <code>cli/commands/*.ts</code> (no doc-drift at birth).</li>
+                  <li>Scoped package name <code>@f0rbit/corpus</code> used throughout (repo convention).</li>
+                  <li>Token docs recommend read-only scopes and never show a real-looking secret.</li>
+                  <li><code>docs:build</code> run and green (it is the link checker).</li>
+                  <li>Clone page documents idempotency AND the file-dest-only restriction — the two support questions this doc must preempt.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-6-2">
+            <header>
+              <h3>Task 6.2: README section + version bump to 0.8.0</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>README.md</code>, <code>package.json</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~70</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-5 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-6-1</dd>
+              <dt>Mode</dt>
+              <dd>coder-fast</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>, package <code>@f0rbit/corpus</code> currently at version 0.7.0 (unpublished). This plan's features are additive (new <code>./remote</code> entry, <code>copy()</code>, CLI bin) — semver minor. The npm publish decision (0.7.0 and 0.8.0 separately or together) belongs to the user and is explicitly NOT part of this task. README historically used the unscoped package name; prefer the scoped form <code>@f0rbit/corpus</code> going forward (repo convention). The README has a <code>## todo</code> section used for graduated deferrals — do not touch its existing entries.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <code>package.json</code>: version → <code>0.8.0</code>. (2) README: add a concise "CLI" section after the existing usage sections — install/invoke (<code>bunx corpus stores</code>), the six commands in a table (name + one-liner), a 5-line clone example (prod→file with env vars), and a link to the Starlight CLI docs for details. Add <code>corpus.gc()</code>-style deferred items ONLY if they're already listed; do not invent new todo entries beyond a single line noting CLI mutating commands are deferred.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test &amp;&amp; bun run fmt:check</pre>
+              <p>Expected: version reads 0.8.0; README section renders (markdown-lint-free by inspection); full suite still green.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>No publish-related scripts or CI steps added — publishing stays a human decision.</li>
+                  <li>Scoped package name used in all new README content.</li>
+                  <li>Command table matches the implemented surface exactly (six commands, correct flags in the example).</li>
+                  <li>Existing README <code>## todo</code> entries untouched.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+        </section>
+      </section>
+
+      <section id="breaking">
+        <h2>Breaking changes</h2>
+        <p>None. All library changes are additive: <code>list_stores</code> is optional on <code>MetadataClient</code>; the cloudflare backend refactor preserves its public API byte-for-byte (adversary-checked in task 1.1); <code>./remote</code> is a new entry point; <code>copy</code>/<code>define_config</code> are new exports; the <code>corpus</code> bin is new. No change to <code>VersionSetManifest</code> or any schema consumed by devpad/pipelines.</p>
+      </section>
+
+      <section id="out-of-scope">
+        <h2>Out of scope</h2>
+        <ul>
+          <li><strong>Mutating CLI ops</strong> — <code>put</code>, <code>delete</code>, tag editing. v1 is read-only + clone by user decision. The remote backend already supports writes at the library level, so these are CLI-surface additions later.</li>
+          <li><strong><code>corpus gc</code> via CLI</strong> — R2 orphan-blob collection is tracked in the README todo; the CLI command lands with it, not before.</li>
+          <li><strong>Worker admin-endpoint transport</strong> — the vault-mediated, Worker-side admin API alternative was explicitly declined by the user for v1. Recorded here as the future path if token distribution to laptops ever becomes unacceptable.</li>
+          <li><strong>local→prod push (file→remote clone)</strong> — v1 clone destinations must be file backends. Recommended and justified: the read-only credential posture (D1 read + R2 Object Read Only) is the CLI's real safety net, and prod writes should go through the transactional/pipelines path, not a laptop bulk-copy. Revisit as an explicit <code>corpus push</code> with its own guardrails.</li>
+          <li><strong>Observations copy in clone</strong> — v1 copies snapshots (metadata + data) only. Observations viewing works (<code>show --observations</code>); replicating the observations table cross-backend is a follow-up to <code>copy()</code>.</li>
+          <li><strong>Descendants in lineage</strong> — <code>get_children</code> exists but is a full scan on file/memory backends; v1 lineage walks ancestors only.</li>
+          <li><strong>Cursor-based pagination for huge stores</strong> — <code>ListOpts.cursor</code> is declared but unimplemented across backends; CLI uses limit/before/after. Unblock separately if prod stores outgrow it.</li>
+          <li><strong>file-backend <code>data_path</code> aliasing fix</strong> (<code>/</code>→<code>_</code> collision for custom data_key layouts) — already tracked in <code>.plans/corpus-testing-substrate.html</code> out-of-scope; clone docs note it.</li>
+          <li><strong><code>apply_batch</code> for the remote backend</strong> — would require D1 HTTP transactional batch semantics; revisit if remote transactions become a real workload.</li>
+          <li><strong>Watch/tail mode, shell completions, colored output</strong> — polish deferred until the surface stabilises.</li>
+        </ul>
+      </section>
+
+      <section id="agents-md-updates">
+        <h2>AGENTS.md updates</h2>
+        <p>The phase-6 verification coder writes these into <code>/Users/tom/dev/corpus/AGENTS.md</code> (Layout, Conventions, and Gotchas sections as appropriate); earlier verification coders write the entries for their own phase's facts as they land.</p>
+        <ul>
+          <li>New layout entries: <code>backend/drizzle-storage.ts</code> (shared drizzle metadata/observations layer — the single SQL surface for BOTH <code>backend/cloudflare.ts</code> and <code>backend/remote.ts</code>; schema changes flow through it), <code>backend/remote{,-d1,-r2}.ts</code> + root <code>remote.ts</code> shim (bun-only <code>@f0rbit/corpus/remote</code> entry — never re-export from the main barrel), <code>copy.ts</code>, <code>cli/</code>.</li>
+          <li><code>MetadataClient.list_stores</code> is OPTIONAL — consumers (copy(), CLI) must handle absence with an actionable <code>invalid_config</code> error; contract suite has a self-skipping block for it (same pattern as the <code>apply_batch</code> transaction guards).</li>
+          <li>Remote backend ships without <code>apply_batch</code> deliberately (D1 HTTP multi-statement ≠ one transaction). Transaction-contract tests self-skip via the <code>if (!backend.apply_batch) return</code> guards — do not "add" apply_batch to make something pass.</li>
+          <li>Read-only is CLI policy, not a backend property: the remote backend supports writes; safety comes from read-scoped tokens (documented in docs/cli/configuration). Don't add CLI mutating commands casually — they're out-of-scope by user decision.</li>
+          <li><code>copy()</code> invariants: data before metadata; <code>SnapshotMeta</code> verbatim; idempotent by metadata-hit + <code>data.exists</code> skip. Progress via callback only (no-console ban).</li>
+          <li>CLI printing funnels through <code>cli/output.ts</code> exclusively — it holds the only <code>no-console</code> exception (config exception maps, why-commented). Tests use <code>create_capture_output()</code>; command tests call <code>run(ctx)</code> directly, no process spawning except the one <code>--help</code> smoke test.</li>
+          <li><code>corpus.config.ts</code> discovery: precedence flags &gt; config &gt; wrangler sniff + env vars; secrets only ever from env/flags. <code>define_config</code> + <code>CorpusCliConfig</code> are exported from the main barrel via the PURE module <code>cli/config-schema.ts</code> — keep fs/dynamic-import code out of anything the barrel reaches.</li>
+          <li>New fakes: <code>tests/fakes/d1-http.ts</code> (Bun.serve REST shim over <code>create_fake_d1</code> — reuses the bun:sqlite fake + <code>table_ddl</code>, port 0, CF envelope incl. 200-with-success:false SQL errors) and <code>tests/fakes/s3.ts</code> (Map-backed S3 server, auth ignored). Both must be <code>stop()</code>ed in cleanup.</li>
+          <li>Emitted <code>.d.ts</code> for remote modules must not reference the <code>Bun</code> global — public types are structural (same pattern as <code>backend/cloudflare.ts</code>'s D1/R2 types).</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
