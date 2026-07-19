@@ -13,6 +13,16 @@ export type CommandContext = {
 	output: Output;
 	cwd: string;
 	env_vars: Record<string, string | undefined>;
+	// Global --json flag, threaded from cli/index.ts. Commands gate table()
+	// vs json() on this — never call both (single JSON document per --json
+	// run, see AGENTS.md's --json stability contract). Optional + read as
+	// `ctx.json === true`: the production entrypoint always sets it, tests
+	// only need to set it when asserting json-mode output.
+	json?: boolean;
+	// Test-only backend injection point — bypasses config/wrangler discovery
+	// and resolve_backend entirely so command tests can drive run() directly
+	// against an in-memory/file backend without touching the filesystem.
+	// Documented exception to no-underscore-dangle (.oxlintrc.json).
 	_test_backend?: Backend;
 };
 

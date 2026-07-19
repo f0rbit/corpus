@@ -193,6 +193,63 @@ describe("CLI clone and cat commands", () => {
 			}
 			expect(dest_stores.length).toBe(0);
 		});
+
+		it("--json emits exactly one document — the CopySummary, no progress lines", async () => {
+			const source = create_file_backend({ base_path: TMP_SRC });
+			const bytes = new TextEncoder().encode("test");
+			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
+
+			const output = create_capture_output();
+			const result = await clone_command.run({
+				args: {},
+				positionals: [TMP_SRC, TMP_DEST],
+				backend_selector: {},
+				output,
+				cwd: import.meta.dir,
+				env_vars: {},
+				json: true,
+			});
+
+			expect(result.ok).toBe(true);
+
+			expect(output.calls.filter((c) => c.type === "json").length).toBe(1);
+			expect(output.calls.filter((c) => c.type === "table").length).toBe(0);
+			expect(output.calls.filter((c) => c.type === "note").length).toBe(0);
+			expect(output.calls.filter((c) => c.type === "spinner_start").length).toBe(0);
+
+			const doc = output.calls.find((c) => c.type === "json")!.value as Record<string, unknown>;
+			expect(doc).toHaveProperty("stores", ["docs"]);
+			expect(doc).toHaveProperty("versions_copied", 1);
+			expect(doc).toHaveProperty("versions_skipped", 0);
+			expect(doc).toHaveProperty("data_objects_copied", 1);
+			expect(doc).toHaveProperty("bytes_copied", bytes.byteLength);
+			expect(doc).toHaveProperty("dry_run", false);
+		});
+
+		it("--dry-run table omits data-object/byte counts (never known in dry-run)", async () => {
+			const source = create_file_backend({ base_path: TMP_SRC });
+			const bytes = new TextEncoder().encode("test");
+			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
+
+			const output = create_capture_output();
+			const result = await clone_command.run({
+				args: { "dry-run": true },
+				positionals: [TMP_SRC, TMP_DEST],
+				backend_selector: {},
+				output,
+				cwd: import.meta.dir,
+				env_vars: {},
+			});
+
+			expect(result.ok).toBe(true);
+
+			const table_call = output.calls.find((c) => c.type === "table");
+			expect(table_call).toBeDefined();
+			if (table_call?.type === "table") {
+				expect(table_call.columns).not.toContain("data_objects");
+				expect(table_call.columns).not.toContain("bytes");
+			}
+		});
 	});
 
 	describe("cat command", () => {
@@ -358,6 +415,80 @@ describe("CLI clone and cat commands", () => {
 			if (!result.ok && "message" in result.error) {
 				expect(result.error.message).toContain("--raw");
 			}
+		});
+
+		it("--raw --json emits the stable {store, version, ...} document, base64-encoded", async () => {
+			const backend = create_file_backend({ base_path: TMP_SRC });
+			const bytes = new TextEncoder().encode("raw bytes");
+			await seed(backend, make_meta({ store_id: "data", version: "v1", data_key: "data/hash-v1" }), bytes);
+
+			const output = create_capture_output();
+			const result = await cat_command.run({
+				args: { raw: true },
+				positionals: ["data", "v1"],
+				backend_selector: { file: TMP_SRC },
+				output,
+				cwd: import.meta.dir,
+				env_vars: {},
+				json: true,
+			});
+
+			expect(result.ok).toBe(true);
+
+			const json_calls = output.calls.filter((c) => c.type === "json");
+			expect(json_calls.length).toBe(1);
+			expect(output.calls.filter((c) => c.type === "bytes").length).toBe(0);
+
+			const doc = json_calls[0]!.value as Record<string, unknown>;
+			expect(doc).toMatchObject({
+				store: "data",
+				version: "v1",
+				content_type: "application/octet-stream",
+				size_bytes: bytes.byteLength,
+				encoding: "base64",
+			});
+			expect(doc.content).toBe(Buffer.from(bytes).toString("base64"));
+		});
+
+		it("fallback --json emits utf8-encoded content for text/* without config", async () => {
+			const backend = create_file_backend({ base_path: TMP_SRC });
+			const bytes = new TextEncoder().encode("fallback text");
+			await seed(
+				backend,
+				make_meta({
+					store_id: "text_store",
+					version: "v1",
+					data_key: "text_store/hash-v1",
+					content_type: "text/plain",
+				}),
+				bytes,
+			);
+
+			const output = create_capture_output();
+			const result = await cat_command.run({
+				args: {},
+				positionals: ["text_store", "v1"],
+				backend_selector: { file: TMP_SRC },
+				output,
+				cwd: import.meta.dir,
+				env_vars: {},
+				json: true,
+			});
+
+			expect(result.ok).toBe(true);
+
+			const json_calls = output.calls.filter((c) => c.type === "json");
+			expect(json_calls.length).toBe(1);
+			expect(output.calls.filter((c) => c.type === "line").length).toBe(0);
+
+			const doc = json_calls[0]!.value as Record<string, unknown>;
+			expect(doc).toMatchObject({
+				store: "text_store",
+				version: "v1",
+				content_type: "text/plain",
+				encoding: "utf8",
+				content: "fallback text",
+			});
 		});
 	});
 });

@@ -126,11 +126,14 @@ export const clone_command: Command = {
 			});
 		}
 
-		// Prepare progress tracking
+		// Progress rendering is entirely skipped under --json (plan contract:
+		// "no progress output at all" — a single CopySummary document at the end).
+		const json_mode = ctx.json === true;
 		let current_store = "";
-		const spinner = ctx.output.spinner("Starting...");
+		const spinner = json_mode ? null : ctx.output.spinner("Starting...");
 
 		const on_progress = (event: CopyProgressEvent): void => {
+			if (!spinner) return;
 			if (event.type === "store_start") {
 				current_store = event.store_id;
 				spinner.update(`${current_store}: 0 copied / 0 skipped`);
@@ -152,27 +155,33 @@ export const clone_command: Command = {
 			on_progress,
 		});
 
-		spinner.stop();
+		spinner?.stop();
 
 		if (!copy_result.ok) return copy_result;
 
 		const summary = copy_result.value;
 
-		// Render output — render the summary as a table/lines
-		// NOTE: In --json mode, this needs special handling to output CopySummary directly.
-		// That requires passing the json flag through CommandContext, which is tracked in
-		// the integration coder's report.
-		const summary_rows = [
-			{
-				stores: String(summary.stores.length),
-				versions_copied: String(summary.versions_copied),
-				versions_skipped: String(summary.versions_skipped),
-				data_objects: String(summary.data_objects_copied + summary.data_objects_skipped),
-				bytes: String(summary.bytes_copied),
-			},
-		];
+		if (json_mode) {
+			ctx.output.json(summary);
+			return ok(undefined);
+		}
 
-		ctx.output.table(summary_rows, ["stores", "versions_copied", "versions_skipped", "data_objects", "bytes"]);
+		// dry_run never touches dest.data, so data_objects_*/bytes_copied are
+		// always 0 — showing them would misreport "0 transferred" as fact when
+		// it's really "not tracked in dry-run mode". Omit those columns instead.
+		const summary_row: Record<string, string> = {
+			stores: String(summary.stores.length),
+			versions_copied: String(summary.versions_copied),
+			versions_skipped: String(summary.versions_skipped),
+		};
+		const columns = ["stores", "versions_copied", "versions_skipped"];
+		if (!summary.dry_run) {
+			summary_row.data_objects = String(summary.data_objects_copied + summary.data_objects_skipped);
+			summary_row.bytes = String(summary.bytes_copied);
+			columns.push("data_objects", "bytes");
+		}
+
+		ctx.output.table([summary_row], columns);
 
 		return ok(undefined);
 	},

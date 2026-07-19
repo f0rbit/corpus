@@ -41,7 +41,7 @@ async function main(): Promise<void> {
 
 	const parse_result = await try_catch_async(
 		async () => {
-			return parse_command_args([...(global_args.positionals ?? [])], command.spec);
+			return parse_command_args(global_args.positionals, command.spec);
 		},
 		(error): CorpusError => ({
 			kind: "invalid_config",
@@ -67,6 +67,7 @@ async function main(): Promise<void> {
 		output,
 		cwd: process.cwd(),
 		env_vars: process.env,
+		json: global_args.json,
 	});
 
 	if (!command_result.ok) {

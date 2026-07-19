@@ -1,10 +1,25 @@
 import type { Command, CommandContext } from "./index.js";
-import type { Result, CorpusError } from "../../types.js";
+import type { Result, CorpusError, SnapshotMeta } from "../../types.js";
 import { err, ok } from "../../types.js";
 import { try_catch_async } from "../../result.js";
 import { load_cli_config } from "../load-config.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { resolve_backend } from "../resolve-backend.js";
+
+type CatEncoding = "utf8" | "base64";
+
+// Single place that shapes cat's --json document (plan task 5.2's stable
+// {store, version, content_type, size_bytes, encoding, content} contract).
+function emit_json(ctx: CommandContext, meta: SnapshotMeta, encoding: CatEncoding, content: string): void {
+	ctx.output.json({
+		store: meta.store_id,
+		version: meta.version,
+		content_type: meta.content_type,
+		size_bytes: meta.size_bytes,
+		encoding,
+		content,
+	});
+}
 
 export const cat_command: Command = {
 	name: "cat",
@@ -56,13 +71,18 @@ export const cat_command: Command = {
 
 		const meta = meta_result.value;
 
-		// Handle raw output
+		// Handle raw output — literal stored bytes, no codec involved.
 		if (raw) {
 			const data_result = await backend.data.get(meta.data_key);
 			if (!data_result.ok) return data_result;
 
-			const handle = data_result.value;
-			const bytes = await handle.bytes();
+			const bytes = await data_result.value.bytes();
+
+			if (ctx.json) {
+				emit_json(ctx, meta, "base64", Buffer.from(bytes).toString("base64"));
+				return ok(undefined);
+			}
+
 			ctx.output.bytes(bytes);
 			return ok(undefined);
 		}
@@ -82,8 +102,7 @@ export const cat_command: Command = {
 			const data_result = await backend.data.get(meta.data_key);
 			if (!data_result.ok) return data_result;
 
-			const handle = data_result.value;
-			const bytes = await handle.bytes();
+			const bytes = await data_result.value.bytes();
 
 			const decode_fn = (store_def.codec as Record<string, unknown>).decode as (data: Uint8Array) => Promise<unknown>;
 
@@ -96,19 +115,30 @@ export const cat_command: Command = {
 			);
 			if (!decode_result.ok) return decode_result;
 
+			if (ctx.json) {
+				emit_json(ctx, meta, "utf8", JSON.stringify(decode_result.value));
+				return ok(undefined);
+			}
+
 			ctx.output.line(JSON.stringify(decode_result.value, null, 2));
 			return ok(undefined);
 		}
 
-		// Fallback: use content_type from meta
+		// Fallback: use content_type from meta. note() self-suppresses under
+		// --json/--quiet in the real console output, so it's safe to always call.
 		if (meta.content_type.startsWith("text/")) {
 			ctx.output.note("(no corpus.config.ts — rendered from content_type, not a codec)");
 			const data_result = await backend.data.get(meta.data_key);
 			if (!data_result.ok) return data_result;
 
-			const handle = data_result.value;
-			const bytes = await handle.bytes();
+			const bytes = await data_result.value.bytes();
 			const text = new TextDecoder().decode(bytes);
+
+			if (ctx.json) {
+				emit_json(ctx, meta, "utf8", text);
+				return ok(undefined);
+			}
+
 			ctx.output.line(text);
 			return ok(undefined);
 		}
@@ -118,8 +148,7 @@ export const cat_command: Command = {
 			const data_result = await backend.data.get(meta.data_key);
 			if (!data_result.ok) return data_result;
 
-			const handle = data_result.value;
-			const bytes = await handle.bytes();
+			const bytes = await data_result.value.bytes();
 
 			const parse_result = await try_catch_async(
 				async () => {
@@ -133,6 +162,11 @@ export const cat_command: Command = {
 				}),
 			);
 			if (!parse_result.ok) return parse_result;
+
+			if (ctx.json) {
+				emit_json(ctx, meta, "utf8", JSON.stringify(parse_result.value));
+				return ok(undefined);
+			}
 
 			ctx.output.line(JSON.stringify(parse_result.value, null, 2));
 			return ok(undefined);

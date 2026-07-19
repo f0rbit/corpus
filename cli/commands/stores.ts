@@ -14,7 +14,6 @@ export const stores_command: Command = {
 		},
 	},
 	async run(ctx: CommandContext): Promise<Result<void, CorpusError>> {
-		 
 		let backend = ctx._test_backend;
 
 		if (!backend) {
@@ -30,15 +29,11 @@ export const stores_command: Command = {
 			}
 			const config = config_result.value;
 
-			const backend_result = await resolve_backend(
-				ctx.backend_selector,
-				wrangler,
-				{
-					config,
-					env_vars: ctx.env_vars,
-					cwd: ctx.cwd,
-				},
-			);
+			const backend_result = await resolve_backend(ctx.backend_selector, wrangler, {
+				config,
+				env_vars: ctx.env_vars,
+				cwd: ctx.cwd,
+			});
 
 			if (!backend_result.ok) {
 				return backend_result;
@@ -47,7 +42,6 @@ export const stores_command: Command = {
 			backend = backend_result.value;
 		}
 
-		// Check if list_stores is available
 		if (!backend.metadata.list_stores) {
 			return err({
 				kind: "invalid_config",
@@ -59,16 +53,14 @@ export const stores_command: Command = {
 
 		const stores_list: Array<{
 			id: string;
-			version_count?: string;
-			latest_created_at?: string;
+			version_count?: number;
+			latest_created_at?: Date;
 		}> = [];
 
-		// Collect all store ids
 		for await (const store_id of backend.metadata.list_stores()) {
 			stores_list.push({ id: store_id });
 		}
 
-		// If --counts flag is set, fetch version counts and latest created_at
 		if (ctx.args.counts) {
 			for (const store of stores_list) {
 				let version_count = 0;
@@ -81,27 +73,39 @@ export const stores_command: Command = {
 					}
 				}
 
-				store.version_count = String(version_count);
-				if (latest_created_at) {
-					store.latest_created_at = latest_created_at.toISOString();
-				}
+				store.version_count = version_count;
+				store.latest_created_at = latest_created_at;
 			}
 		}
 
 		spin.stop();
 
-		// Output results
+		if (ctx.json) {
+			ctx.output.json({
+				stores: stores_list.map((s) => ({
+					id: s.id,
+					...(s.version_count !== undefined ? { version_count: s.version_count } : {}),
+					...(s.latest_created_at ? { latest_created_at: s.latest_created_at.toISOString() } : {}),
+				})),
+			});
+			return ok(undefined);
+		}
+
 		if (ctx.args.counts) {
-			ctx.output.table(stores_list, ["id", "version_count", "latest_created_at"]);
+			ctx.output.table(
+				stores_list.map((s) => ({
+					id: s.id,
+					version_count: s.version_count !== undefined ? String(s.version_count) : "",
+					latest_created_at: s.latest_created_at?.toISOString() ?? "",
+				})),
+				["id", "version_count", "latest_created_at"],
+			);
 		} else {
 			ctx.output.table(
 				stores_list.map((s) => ({ id: s.id })),
 				["id"],
 			);
 		}
-
-		// JSON output
-		ctx.output.json({ stores: stores_list });
 
 		return ok(undefined);
 	},
