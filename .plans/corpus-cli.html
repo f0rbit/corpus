@@ -769,7 +769,7 @@
           <article class="task" id="task-2-1">
             <header>
               <h3>Task 2.1: D1 HTTP driver — sqlite-proxy callback + Zod response schemas</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -811,14 +811,14 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <p>Commit <code>3180005</code> (D1 HTTP driver) + squash-integrated into PR at <code>backend/remote-d1.ts</code>. <code>bun run typecheck</code> clean; <code>bun test</code> 838/838 pass incl. the RemoteBackend contract run (43 tests) and <code>tests/integration/http-fakes.test.ts</code>'s direct driver-envelope assertions. Adversary checklist verified by hand: (1) <code>response.json()</code> is typed <code>unknown</code> and flows through <code>d1_http_response_schema.safeParse</code> before any field access, zero <code>as</code>-casts in the file (<code>grep -n " as "</code> empty); (2) <code>config.api_token</code> is only interpolated into the <code>Authorization: Bearer</code> header, never into a thrown Error string (verified by grep across all remote backend files); (3) <code>method === "get"</code> branch returns <code>{ rows: [first_row] }</code>, a single-row array, not the full row set; (4) both non-2xx (<code>!response.ok</code>) and 2xx-with-<code>success:false</code> throw distinct Error paths, both caught by the shared drizzle layer's <code>try_catch_async</code> and mapped to <code>storage_error</code> — exercised by <code>remote-backend.test.ts</code>'s "rejects an unauthorized D1 HTTP response" and "maps a D1 SQL error envelope" tests; (5) <code>base_url</code> override is the only URL source in <code>d1_endpoint_url</code>, no hardcoded prod URL in the request path itself (prod URL is only the <code>??</code> fallback default); (6) the throw is scoped via a <code>files: ["backend/remote-d1.ts"]</code> override in <code>eslint.config.ts</code> (lines 53–61) with a why-comment, no inline disables.</p>
             </section>
           </article>
 
           <article class="task" id="task-2-2">
             <header>
               <h3>Task 2.2: R2 DataStorage over Bun.S3Client</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -859,14 +859,14 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <p>Commit <code>b6ad712</code> (R2 S3 DataStorage adapter) at <code>backend/remote-r2.ts</code>. <code>bun run typecheck</code> clean; <code>bun test</code> green incl. <code>tests/unit/remote-r2.test.ts</code> (9 tests: round-trip, missing-key null/false, idempotent delete, native streaming, size metadata) and the RemoteBackend contract run's data-client suite. Build: <code>bun run build</code> emits <code>dist/backend/remote-r2.js</code> + <code>.d.ts</code>; <code>grep -n "Bun\." dist/backend/remote-r2.d.ts</code> → 0 matches (confirmed directly, not just via the integration coder's prior report). Adversary checklist: (1) <code>get</code> probes via <code>file.exists()</code> wrapped in <code>try_catch_async</code> and returns <code>null</code> on miss/failure, never a thrown NoSuchKey escaping to the caller; (2) emitted <code>.d.ts</code> confirmed Bun-free by direct grep above — public surface is the structural <code>S3ClientLike</code>/<code>S3FileLike</code> types, not <code>Bun.S3Client</code>; (3) <code>stream()</code> returns <code>file.stream()</code> directly (native S3 stream), no buffering wrapper; (4) grep across the file for <code>access_key_id</code>/<code>secret_access_key</code> shows both only flow into the <code>Bun.S3Client</code> constructor's config object, never into a template string or Error; (5) <code>endpoint</code> override is used verbatim when provided, default is the single <code>config.endpoint ?? \`https://${account_id}.r2.cloudflarestorage.com\`</code> expression.</p>
             </section>
           </article>
 
           <article class="task" id="task-2-3">
             <header>
               <h3>Task 2.3: In-process platform fakes — D1 HTTP server shim + S3 server</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -907,14 +907,14 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <p>Commit <code>cfcf1a0</code> (in-process HTTP fakes) at <code>tests/fakes/d1-http.ts</code> + <code>tests/fakes/s3.ts</code>. <code>bun test tests/integration/http-fakes.test.ts</code> green (12 self-tests: valid-query envelope shape, 401 on missing Bearer, SQL-error envelope at HTTP 200, S3 GET/PUT/HEAD/DELETE round-trip, 404 for missing key, virtual-host style URLs, exact byte round-trip). Adversary checklist: (1) <code>create_fake_d1_http</code> imports and reuses <code>create_fake_d1</code> from <code>tests/fakes/cloudflare.ts</code> verbatim (<code>import { create_fake_d1 } from "./cloudflare.js"</code>) — no forked DDL derivation; (2) SQL errors return HTTP 200 + <code>success: false</code> (both the malformed-request-body branch and the caught-SQL-exception branch), never a 500 — exercised by "returns error envelope on SQL error with HTTP 200"; (3) missing <code>Authorization</code> header or a non-"Bearer "-prefixed value → 401, verified by "returns 401 when Bearer token is missing"; (4) S3 GET of missing key → 404 with <code>NoSuchKey</code> XML body (verified: response text contains "NoSuchKey"), PUT stores bytes exactly (asserted via <code>toEqual</code> byte-array round-trip, including a full 0–255 byte-value sweep in "stores bytes exactly without corruption"); (5) both servers bind <code>Bun.serve({ port: 0 })</code> (grep-confirmed, no fixed ports) and every test's <code>afterEach</code> calls <code>server.stop()</code>.</p>
             </section>
           </article>
 
           <article class="task" id="task-2-4">
             <header>
               <h3>Task 2.4: Assemble create_remote_backend, /remote entry point, contract-suite registration</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -955,7 +955,7 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <p>Commit <code>40c0091</code> (assembly) at <code>backend/remote.ts</code>, root <code>remote.ts</code> shim, <code>package.json</code>, <code>tsconfig.build.json</code>, <code>tests/integration/remote-backend.test.ts</code>, <code>tests/integration/backend-contract.test.ts</code>. Full gate run by this verification coder on branch <code>corpus-cli/phase-2</code> at HEAD <code>40c0091</code>: <code>bun run typecheck</code> clean; <code>bun test</code> → 838 pass / 0 fail across 39 files (4916 expect() calls), including the "RemoteBackend (faked D1 HTTP + S3)" contract-suite registration (43 tests, transaction-contract block self-skipped) and the 6 remote-specific tests in <code>remote-backend.test.ts</code>; <code>bun run lint</code> → 21 errors / 82 warnings, all 21 errors confined to the foreign <code>.claude/worktrees/agent-a0f1a274e5ac8cea7/</code> checkout (documented AGENTS.md gotcha, unrelated to this repo's source), zero errors in any repo-root file; <code>bun run fmt:check</code> clean (105 files); <code>bun run build</code> clean, emits <code>dist/remote.js</code>/<code>.d.ts</code> + <code>dist/backend/remote{,-d1,-r2}.js</code>/<code>.d.ts</code>; <code>bun -e "import('@f0rbit/corpus/remote')"</code> resolves and returns <code>[create_d1_http_db, create_r2_data_storage, create_remote_backend, d1_endpoint_url]</code>. Spot-checks: (a) <code>exports["./remote"]</code> is byte-identical in shape/key-order to <code>exports["./file"]</code> (types/import/require → dist paths); (b) zero <code>as</code>-casts of fetched JSON in any <code>backend/remote-*.ts</code> file (grep-confirmed) — Zod parse is the sole boundary; (c) grep for <code>api_token</code>/<code>secret_access_key</code>/<code>access_key_id</code> across all remote files shows no occurrence inside an error-construction or template-string context, only header/config-object use; (d) <code>grep -n remote index.ts cloudflare.ts</code> → no matches, remote entry is unreachable from the main barrel or <code>/cloudflare</code>. Adversary checklist: apply_batch confirmed absent (<code>expect(backend.apply_batch).toBeUndefined()</code> in "corpus.transaction() takes the sequential fallback path"); contract-suite factory creates fresh <code>create_fake_d1_http</code>/<code>create_fake_s3</code> pairs per invocation (stops the previous pair, documented in a code comment at <code>backend-contract.test.ts:806-812</code>); error paths carry distinct <code>operation</code> names per method via the shared <code>storage_error(operation)</code> helper in <code>backend/drizzle-storage.ts</code>, exercised directly by the "storage_error with the operation name" tests.</p>
             </section>
           </article>
         </section>
