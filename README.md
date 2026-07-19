@@ -33,6 +33,46 @@ if (result.ok) {
 }
 ```
 
+## cli
+
+A read-only command-line tool for querying and cloning corpus snapshots across backends.
+
+### install & usage
+
+```bash
+bunx @f0rbit/corpus stores          # list all stores
+bunx @f0rbit/corpus versions <store>  # list versions
+bunx @f0rbit/corpus show <store> <version>  # metadata
+bunx @f0rbit/corpus cat <store> <version>   # snapshot data
+bunx @f0rbit/corpus lineage <store> <version>  # parent graph
+bunx @f0rbit/corpus clone <src> <dest>  # copy snapshots
+```
+
+### commands
+
+| Command    | Purpose                                                                                            |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| `stores`   | List all stores in the backend, optionally with version counts (`--counts`)                        |
+| `versions` | List versions in a store, with filtering (`--limit`, `--before`, `--after`, `--tag`)               |
+| `show`     | Show metadata for a snapshot (version, content hash, size, parents, tags, observations)            |
+| `cat`      | Output snapshot data—decoded via config codecs or raw bytes (`--raw`), with JSON export (`--json`) |
+| `lineage`  | Show the ancestor graph for a snapshot, rendering as tree or JSON                                  |
+| `clone`    | Copy snapshots from source to destination backend, with dry-run support and progress tracking      |
+
+### clone example
+
+```bash
+export CLOUDFLARE_API_TOKEN="<token>"
+export CORPUS_D1_DATABASE_ID="<db-id>"
+export CORPUS_R2_BUCKET="<bucket>"
+
+bunx @f0rbit/corpus clone remote ~/corpus-backup
+```
+
+The remote backend works with Cloudflare D1 and R2 via HTTP APIs (no Worker required on read-only paths). See the [CLI documentation](https://corpus.f0rbit.dev/cli/) for full config discovery, backend resolution, codec setup, and schema-validated content retrieval.
+
+**Mutating commands** (put, delete, tag editing) are deferred—v1 is read-only with safe token postures (read-scoped credentials).
+
 ## for package authors
 
 If you're building a package with types you want to test via property-based testing, add a testing registrar to vend arbitraries and failure cases. See [`docs/templates/testing/register.ts`](docs/templates/testing/register.ts) for a copy-paste template with full comments, and the [testing documentation](docs/src/content/docs/testing/) for the full substrate reference.

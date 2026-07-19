@@ -1,6 +1,6 @@
 {
 	"name": "@f0rbit/corpus",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
 	"keywords": [
 		"data-store",
