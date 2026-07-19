@@ -69,13 +69,18 @@ export async function resolve_backend(
 		wrangler_sniff?.account_id ||
 		ctx.env_vars.CLOUDFLARE_ACCOUNT_ID;
 
+	// Lowest-precedence fallback: config > wrangler sniff > env. Closes the
+	// placeholder-wrangler gap for consumers whose checked-in wrangler.toml
+	// carries IaC-templated ids (e.g. SST) that sniff can't resolve.
 	const database_id =
 		(env_config && "database_id" in env_config ? env_config.database_id : undefined) ||
-		wrangler_sniff?.d1_candidates[0]?.database_id;
+		wrangler_sniff?.d1_candidates[0]?.database_id ||
+		ctx.env_vars.CORPUS_D1_DATABASE_ID;
 
 	const bucket =
 		(env_config && "bucket" in env_config ? env_config.bucket : undefined) ||
-		wrangler_sniff?.r2_candidates[0]?.bucket_name;
+		wrangler_sniff?.r2_candidates[0]?.bucket_name ||
+		ctx.env_vars.CORPUS_R2_BUCKET;
 
 	const d1_base_url = env_config && "d1_base_url" in env_config ? env_config.d1_base_url : undefined;
 
@@ -90,11 +95,11 @@ export async function resolve_backend(
 
 	if (!account_id) missing.push("account_id (via CLOUDFLARE_ACCOUNT_ID env or config)");
 	if (!database_id) {
-		missing.push("database_id (via corpus.config.ts or wrangler.toml)");
+		missing.push("database_id (via corpus.config.ts, wrangler.toml, or CORPUS_D1_DATABASE_ID env)");
 	}
 
 	if (!bucket) {
-		missing.push("bucket (via corpus.config.ts or wrangler.toml)");
+		missing.push("bucket (via corpus.config.ts, wrangler.toml, or CORPUS_R2_BUCKET env)");
 	}
 
 	if (!api_token) missing.push("CLOUDFLARE_API_TOKEN env var");

@@ -53,6 +53,15 @@
 			"rules": {
 				"typescript/no-explicit-any": "off"
 			}
+		},
+		{
+			// `_test_backend` is CommandContext's test-only backend injection point
+			// (bypasses config/wrangler resolution in command tests) — documented on
+			// the type itself in cli/commands/index.ts.
+			"files": ["cli/**"],
+			"rules": {
+				"no-underscore-dangle": ["error", { "allow": ["_test_backend"] }]
+			}
 		}
 	]
 }
