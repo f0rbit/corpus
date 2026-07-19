@@ -42,6 +42,11 @@
 			"import": "./dist/cloudflare.js",
 			"require": "./dist/cloudflare.js"
 		},
+		"./remote": {
+			"types": "./dist/remote.d.ts",
+			"import": "./dist/remote.js",
+			"require": "./dist/remote.js"
+		},
 		"./types": {
 			"types": "./dist/types.d.ts",
 			"import": "./dist/types.js",
