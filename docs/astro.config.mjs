@@ -56,6 +56,14 @@ export default defineConfig({
           ],
         },
         {
+          label: 'CLI',
+          items: [
+            { label: 'Overview', slug: 'cli/overview' },
+            { label: 'Configuration', slug: 'cli/configuration' },
+            { label: 'Clone Semantics', slug: 'cli/clone' },
+          ],
+        },
+        {
           label: 'Testing',
           items: [
             { label: 'Overview', slug: 'testing/overview' },
