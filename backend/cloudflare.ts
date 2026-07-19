@@ -3,28 +3,22 @@
  * @description Cloudflare Workers storage backend using D1 and R2.
  */
 
-import { and, desc, eq, gt, inArray, like, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import {
-	corpus_observations,
-	create_observations_client,
-	type ObservationsStorage,
-	type StorageQueryOpts,
-} from "../observations/index.js";
-import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
-import { corpus_snapshots } from "../schema.js";
-import type {
-	Backend,
-	BatchOp,
-	CorpusError,
-	DataClient,
-	EventHandler,
-	MetadataClient,
-	Result,
-	SnapshotMeta,
-} from "../types.js";
+import { create_observations_client } from "../observations/index.js";
+import { first, to_fallback, try_catch_async } from "../result.js";
+import type { Backend, BatchOp, CorpusError, DataClient, EventHandler, MetadataClient, Result } from "../types.js";
 import { err, ok } from "../types.js";
-import { create_emitter, parse_snapshot_meta } from "../utils.js";
+import { create_emitter } from "../utils.js";
+import {
+	create_drizzle_observations_storage,
+	create_drizzle_snapshot_metadata,
+	meta_delete_stmt,
+	meta_insert_stmt,
+	obs_delete_stmt,
+	obs_insert_stmt,
+	storage_error,
+	to_error,
+} from "./drizzle-storage.js";
 
 type D1Database = { prepare: (sql: string) => unknown };
 type R2Bucket = {
@@ -39,124 +33,6 @@ export type CloudflareBackendConfig = {
 	r2: R2Bucket;
 	on_event?: EventHandler;
 };
-
-function to_error(cause: unknown): Error {
-	return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-function storage_error(operation: string): (cause: unknown) => CorpusError {
-	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
-}
-
-function create_cloudflare_storage(db: ReturnType<typeof drizzle>): ObservationsStorage {
-	return {
-		async put_row(row) {
-			const result = await try_catch_async(async () => {
-				await db.insert(corpus_observations).values(row);
-			}, storage_error("observations.put"));
-			if (!result.ok) return result;
-			return ok(row);
-		},
-
-		async get_row(id) {
-			return try_catch_async(async () => {
-				const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
-				return to_nullable(first(rows));
-			}, storage_error("observations.get"));
-		},
-
-		async *query_rows(opts: StorageQueryOpts = {}) {
-			const conditions: ReturnType<typeof eq>[] = [];
-
-			if (opts.type) {
-				if (Array.isArray(opts.type)) {
-					conditions.push(inArray(corpus_observations.type, opts.type));
-				} else {
-					conditions.push(eq(corpus_observations.type, opts.type));
-				}
-			}
-			if (opts.source_store_id) {
-				conditions.push(eq(corpus_observations.source_store_id, opts.source_store_id));
-			}
-			if (opts.source_version) {
-				conditions.push(eq(corpus_observations.source_version, opts.source_version));
-			}
-			if (opts.source_prefix) {
-				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
-			}
-			if (opts.created_after) {
-				conditions.push(gt(corpus_observations.created_at, opts.created_after));
-			}
-			if (opts.created_before) {
-				conditions.push(lt(corpus_observations.created_at, opts.created_before));
-			}
-			if (opts.observed_after) {
-				conditions.push(gt(corpus_observations.observed_at, opts.observed_after));
-			}
-			if (opts.observed_before) {
-				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
-			}
-
-			let query = db
-				.select()
-				.from(corpus_observations)
-				.where(conditions.length > 0 ? and(...conditions) : undefined)
-				.orderBy(desc(corpus_observations.created_at));
-
-			if (opts.limit) {
-				query = query.limit(opts.limit) as typeof query;
-			}
-
-			const rows = await query;
-			for (const row of rows) {
-				yield row;
-			}
-		},
-
-		async delete_row(id) {
-			return try_catch_async(async () => {
-				const existing = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
-
-				if (existing.length === 0) {
-					return false;
-				}
-
-				await db.delete(corpus_observations).where(eq(corpus_observations.id, id));
-				return true;
-			}, storage_error("observations.delete"));
-		},
-
-		async delete_by_source(store_id, version, path) {
-			return try_catch_async(async () => {
-				const conditions = [
-					eq(corpus_observations.source_store_id, store_id),
-					eq(corpus_observations.source_version, version),
-				];
-
-				if (path !== undefined) {
-					conditions.push(eq(corpus_observations.source_path, path));
-				}
-
-				const to_delete = await db
-					.select()
-					.from(corpus_observations)
-					.where(and(...conditions));
-
-				const count = to_delete.length;
-
-				if (count > 0) {
-					await db.delete(corpus_observations).where(and(...conditions));
-				}
-
-				return count;
-			}, storage_error("observations.delete_by_source"));
-		},
-	};
-}
-
-function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
-	return parse_snapshot_meta(row);
-}
 
 /**
  * Creates a Cloudflare Workers storage backend using D1 and R2.
@@ -201,153 +77,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	const { r2, on_event } = config;
 	const emit = create_emitter(on_event);
 
-	const metadata: MetadataClient = {
-		async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
-			const lookup = await try_catch_async(async () => {
-				const rows = await db
-					.select()
-					.from(corpus_snapshots)
-					.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)))
-					.limit(1);
-
-				const row = to_nullable(first(rows));
-				return row ? snapshot_row_to_meta(row) : null;
-			}, storage_error("metadata.get"));
-
-			if (!lookup.ok) {
-				emit({ type: "error", error: lookup.error });
-				return lookup;
-			}
-			emit({ type: "meta_get", store_id, version, found: !!lookup.value });
-			if (!lookup.value) {
-				return err({ kind: "not_found", store_id, version });
-			}
-			return ok(lookup.value);
-		},
-
-		async put(meta): Promise<Result<void, CorpusError>> {
-			const result = await try_catch_async(async () => {
-				await meta_insert_stmt(meta);
-			}, storage_error("metadata.put"));
-			if (!result.ok) {
-				emit({ type: "error", error: result.error });
-				return result;
-			}
-			emit({ type: "meta_put", store_id: meta.store_id, version: meta.version });
-			return ok(undefined);
-		},
-
-		async delete(store_id, version): Promise<Result<void, CorpusError>> {
-			const result = await try_catch_async(async () => {
-				await meta_delete_stmt(store_id, version);
-			}, storage_error("metadata.delete"));
-			if (!result.ok) {
-				emit({ type: "error", error: result.error });
-				return result;
-			}
-			emit({ type: "meta_delete", store_id, version });
-			return ok(undefined);
-		},
-
-		async *list(store_id, opts): AsyncIterable<SnapshotMeta> {
-			const conditions = [eq(corpus_snapshots.store_id, store_id)];
-
-			if (opts?.before) {
-				conditions.push(lt(corpus_snapshots.created_at, opts.before.toISOString()));
-			}
-			if (opts?.after) {
-				conditions.push(gt(corpus_snapshots.created_at, opts.after.toISOString()));
-			}
-
-			let query = db
-				.select()
-				.from(corpus_snapshots)
-				.where(and(...conditions))
-				.orderBy(desc(corpus_snapshots.created_at));
-
-			if (opts?.limit) {
-				query = query.limit(opts.limit) as typeof query;
-			}
-
-			const rows = await try_catch_async(() => query, storage_error("metadata.list"));
-			if (!rows.ok) {
-				emit({ type: "error", error: rows.error });
-				return;
-			}
-
-			let count = 0;
-
-			for (const row of rows.value) {
-				const meta = snapshot_row_to_meta(row);
-
-				if (opts?.tags?.length && !opts.tags.every((t) => meta.tags?.includes(t))) {
-					continue;
-				}
-
-				yield meta;
-				count++;
-			}
-
-			emit({ type: "meta_list", store_id, count });
-		},
-
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
-			const lookup = await try_catch_async(async () => {
-				const rows = await db
-					.select()
-					.from(corpus_snapshots)
-					.where(eq(corpus_snapshots.store_id, store_id))
-					.orderBy(desc(corpus_snapshots.created_at))
-					.limit(1);
-
-				const row = to_nullable(first(rows));
-				return row ? snapshot_row_to_meta(row) : null;
-			}, storage_error("metadata.get_latest"));
-
-			if (!lookup.ok) {
-				emit({ type: "error", error: lookup.error });
-				return lookup;
-			}
-			if (!lookup.value) {
-				return err({ kind: "not_found", store_id, version: "latest" });
-			}
-			return ok(lookup.value);
-		},
-
-		async *get_children(parent_store_id, parent_version): AsyncIterable<SnapshotMeta> {
-			const rows = await db
-				.select()
-				.from(corpus_snapshots)
-				.where(
-					sql`EXISTS (
-            SELECT 1 FROM json_each(${corpus_snapshots.parents}) 
-            WHERE json_extract(value, '$.store_id') = ${parent_store_id}
-              AND json_extract(value, '$.version') = ${parent_version}
-          )`,
-				);
-
-			for (const row of rows) {
-				yield snapshot_row_to_meta(row);
-			}
-		},
-
-		async find_by_hash(store_id, content_hash): Promise<SnapshotMeta | null> {
-			const lookup = await try_catch_async(
-				async () => {
-					const rows = await db
-						.select()
-						.from(corpus_snapshots)
-						.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.content_hash, content_hash)))
-						.limit(1);
-
-					const row = to_nullable(first(rows));
-					return row ? snapshot_row_to_meta(row) : null;
-				},
-				() => null,
-			);
-			return to_fallback(lookup, null);
-		},
-	};
+	const metadata: MetadataClient = create_drizzle_snapshot_metadata(db, emit);
 
 	const data: DataClient = {
 		async get(
@@ -404,53 +134,8 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 	};
 
-	const storage = create_cloudflare_storage(db);
+	const storage = create_drizzle_observations_storage(db);
 	const observations = create_observations_client(storage, metadata);
-
-	function meta_insert_stmt(meta: SnapshotMeta) {
-		const values = {
-			store_id: meta.store_id,
-			version: meta.version,
-			parents: JSON.stringify(meta.parents),
-			created_at: meta.created_at.toISOString(),
-			invoked_at: meta.invoked_at?.toISOString() ?? null,
-			content_hash: meta.content_hash,
-			content_type: meta.content_type,
-			size_bytes: meta.size_bytes,
-			data_key: meta.data_key,
-			tags: meta.tags ? JSON.stringify(meta.tags) : null,
-		};
-		return db
-			.insert(corpus_snapshots)
-			.values(values)
-			.onConflictDoUpdate({
-				target: [corpus_snapshots.store_id, corpus_snapshots.version],
-				set: {
-					parents: values.parents,
-					created_at: values.created_at,
-					invoked_at: values.invoked_at,
-					content_hash: values.content_hash,
-					content_type: values.content_type,
-					size_bytes: values.size_bytes,
-					data_key: values.data_key,
-					tags: values.tags,
-				},
-			});
-	}
-
-	function meta_delete_stmt(store_id: string, version: string) {
-		return db
-			.delete(corpus_snapshots)
-			.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)));
-	}
-
-	function obs_insert_stmt(row: typeof corpus_observations.$inferInsert) {
-		return db.insert(corpus_observations).values(row);
-	}
-
-	function obs_delete_stmt(id: string) {
-		return db.delete(corpus_observations).where(eq(corpus_observations.id, id));
-	}
 
 	/**
 	 * Apply a batch of ops atomically.
@@ -465,6 +150,12 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	 * all R2 writes succeeded, the R2 objects are also orphans. A follow-up
 	 * `corpus.gc()` cleans them up by listing R2 objects not referenced by
 	 * any live `data_key` in D1 — out of scope here, tracked in README.
+	 *
+	 * Statement builders (`meta_insert_stmt`, etc.) come from
+	 * `backend/drizzle-storage.ts` — the same ones `create_drizzle_snapshot_metadata`
+	 * and `create_drizzle_observations_storage` use, so a batched op and its
+	 * non-transactional equivalent can never drift. `db.batch()` itself stays
+	 * here: it's D1-specific and not part of the shared drizzle layer.
 	 *
 	 * Covered by the contract suite + tests/integration/cloudflare-backend.test.ts
 	 * running against in-memory platform fakes (tests/fakes/cloudflare.ts).
@@ -491,16 +182,16 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		for (const op of ops) {
 			switch (op.type) {
 				case "meta_put":
-					stmts.push(meta_insert_stmt(op.meta));
+					stmts.push(meta_insert_stmt(db, op.meta));
 					break;
 				case "meta_delete":
-					stmts.push(meta_delete_stmt(op.store_id, op.version));
+					stmts.push(meta_delete_stmt(db, op.store_id, op.version));
 					break;
 				case "observation_put":
-					stmts.push(obs_insert_stmt(op.row));
+					stmts.push(obs_insert_stmt(db, op.row));
 					break;
 				case "observation_delete":
-					stmts.push(obs_delete_stmt(op.id));
+					stmts.push(obs_delete_stmt(db, op.id));
 					break;
 				case "data_put":
 					break;

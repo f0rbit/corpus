@@ -3,7 +3,7 @@
  * @description In-memory storage backend for testing and development.
  */
 
-import type { Backend, BatchOp, CorpusError, Result, SnapshotMeta } from "../types.js";
+import type { Backend, BatchOp, CorpusError, MetadataClient, Result, SnapshotMeta } from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter } from "../utils.js";
@@ -135,7 +135,18 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		},
 	};
 
-	const metadata = create_metadata_client(metadata_storage, emit);
+	const metadata: MetadataClient = {
+		...create_metadata_client(metadata_storage, emit),
+		async *list_stores() {
+			const ids = new Set<string>();
+			for (const meta of meta_store.values()) {
+				ids.add(meta.store_id);
+			}
+			for (const id of [...ids].toSorted()) {
+				yield id;
+			}
+		},
+	};
 	const data = create_data_client(data_storage, emit);
 
 	/**

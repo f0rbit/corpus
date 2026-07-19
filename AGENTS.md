@@ -23,9 +23,10 @@ This is a **single-package** library (not a monorepo). All source lives at the r
 ├── codecs/               # Layer codecs: gzip.ts, encrypt.ts
 ├── backend/              # Backend implementations
 │   ├── base.ts           # MetadataStorage / DataStorage adapter interfaces
+│   ├── drizzle-storage.ts # Shared drizzle query layer (metadata + observations), generic over any async drizzle SQLite db — the single SQL surface backend/cloudflare.ts drives (and the planned HTTP remote backend will too)
 │   ├── memory.ts
 │   ├── file.ts           # Node fs (also used by tests for portable disk-backed runs)
-│   ├── cloudflare.ts     # D1 + R2
+│   ├── cloudflare.ts     # D1 + R2, built on drizzle-storage.ts; keeps R2 DataClient + db.batch()-based apply_batch local
 │   └── layered.ts        # Cache-through composition
 ├── observations/         # Typed annotation subsystem (separate but tightly integrated)
 │   ├── index.ts
@@ -183,6 +184,7 @@ Plans live in `.plans/`:
 - `corpus-testing-substrate.html` — **completed** (shipped in 0.7.0): property-based testing substrate, phases 1–5 (PRs #31, #36, #37, #38 + the 0.7.0 release PR). Kept as design reference; deferred items live in its `#out-of-scope`.
 - `streamed-reads.md` — completed: streaming reads + codec composition shipped. Kept as reference — the `compose()` encode-buffering gotcha below cites its §2.3.
 - `cross-store-atomic.md` — completed: `corpus.transaction(async tx => ...)` shipped across all backends. Kept as design reference.
+- `corpus-cli.html` — **in progress**: read-only `corpus` CLI + laptop-side remote backend (D1 HTTP + R2 S3) + core `copy()`, targeting 0.8.0. Phase 1 (shared drizzle spine + `list_stores`) shipped; remaining phases in flight.
 
 The active plan is the source of truth for in-flight design; consult it before changing `types.ts`, `corpus.ts`, or any backend.
 
@@ -193,6 +195,7 @@ The active plan is the source of truth for in-flight design; consult it before c
 - The `Corpus` type carries `create_pointer`, `resolve_pointer`, `is_superseded` as methods on the corpus instance, not just exports. Both code paths exist; the instance methods are the documented API.
 - `define_store` accepts an optional `data_key_fn(ctx)` to override the default `${store_id}/${content_hash}` data key. Custom layouts (e.g. partition by tag/date) go through this — don't reimplement key computation upstream.
 - Cloudflare backend uses `eq()` (not `like()`) for `store_id` filtering in `metadata.list()`. Don't regress this — see commit `02bee7f`.
+- `MetadataClient.list_stores` (`types.ts`) is **optional** (`list_stores?: () => AsyncIterable<string>`) — added non-breaking so custom backends aren't forced to implement enumeration. All built-in backends implement it (memory: `Set` over map values; file: delegates to the pre-existing `list_all_stores()` walker, preserving its `_*`/`.*` filter; drizzle shared layer: `selectDistinct`; layered: delegates to the bottom write layer), all sorted for determinism. Consumers that need enumeration (the CLI, `copy()`) must handle absence with an actionable error rather than treating it as empty. Contract-suite coverage self-skips per backend via `if (!backend.metadata.list_stores) return` — same pattern as the `apply_batch` transaction guards.
 - `peerDependencies` lists `zod ^3` and `typescript ^5`. Codecs that take a Zod schema should accept the schema generically (`z.ZodType<T>`), not pin to a specific Zod version's class.
 - Cross-store transactions on the Cloudflare backend can leave R2 orphan blobs when a transaction aborts after data writes but before D1 commit. This is intentional (data is content-addressed and idempotent; metadata is the source of truth). A follow-up `corpus.gc()` is tracked in the README.
 - `Codec<T>` has optional `encode_stream` / `decode_stream`. `text_codec` and `binary_codec` ship both; `json_codec` ships neither (Zod needs the full document). `compose(head, ...layers)` includes stream methods only when every layer has them — structural inference, no `StreamableCodec<T>` brand.
