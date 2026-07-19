@@ -23,6 +23,7 @@
 		"remote.ts",
 		"types.ts",
 		"corpus.ts",
+		"copy.ts",
 		"utils.ts",
 		"schema.ts",
 		"sst.ts",
