@@ -12,6 +12,7 @@ export type GlobalArgs = {
 	file?: string;
 	config?: string;
 	json: boolean;
+	quiet: boolean;
 	help: boolean;
 	command?: CommandName;
 	args?: Record<string, unknown>;
@@ -23,6 +24,7 @@ const GLOBAL_OPTIONS = {
 	file: { type: "string" as const, short: "f" },
 	config: { type: "string" as const, short: "c" },
 	json: { type: "boolean" as const, default: false },
+	quiet: { type: "boolean" as const, short: "q", default: false },
 	help: { type: "boolean" as const, short: "h", default: false },
 };
 
@@ -40,6 +42,7 @@ export function parse_global_args(argv: string[]): GlobalArgs {
 		file: values.file as string | undefined,
 		config: values.config as string | undefined,
 		json: (values.json as boolean) || false,
+		quiet: (values.quiet as boolean) || false,
 		help: (values.help as boolean) || false,
 		command: command_name,
 		positionals: positionals.slice(command_name ? 1 : 0),

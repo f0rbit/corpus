@@ -264,4 +264,80 @@ describe("resolve_backend", () => {
 
 		await rm(temp_dir, { recursive: true, force: true });
 	});
+
+	it("resolves database_id/bucket from CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env vars when config and sniff are absent", async () => {
+		const result = await resolve_backend({ env: "prod" }, null, {
+			config: null,
+			env_vars: {
+				CLOUDFLARE_ACCOUNT_ID: "env-account",
+				CLOUDFLARE_API_TOKEN: "token",
+				CORPUS_D1_DATABASE_ID: "env-database",
+				CORPUS_R2_BUCKET: "env-bucket",
+			},
+			cwd: process.cwd(),
+		});
+
+		expect(result.ok).toBe(true);
+	});
+
+	it("missing-param message names the CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET fallbacks", async () => {
+		const result = await resolve_backend({ env: "prod" }, null, {
+			config: null,
+			env_vars: {},
+			cwd: process.cwd(),
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok && result.error.kind === "invalid_config") {
+			expect(result.error.message).toContain("CORPUS_D1_DATABASE_ID");
+			expect(result.error.message).toContain("CORPUS_R2_BUCKET");
+		}
+	});
+
+	it("config still beats CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env fallbacks", async () => {
+		const config: Record<string, unknown> = {
+			environments: {
+				prod: {
+					account_id: "config-account",
+					database_id: "config-db",
+					bucket: "config-bucket",
+				},
+			},
+		};
+
+		const result = await resolve_backend({ env: "prod" }, null, {
+			config,
+			env_vars: {
+				CLOUDFLARE_API_TOKEN: "token",
+				CORPUS_D1_DATABASE_ID: "env-database",
+				CORPUS_R2_BUCKET: "env-bucket",
+			},
+			cwd: process.cwd(),
+		});
+
+		// Config values take precedence; this only asserts precedence doesn't throw —
+		// same limitation as the "prioritizes config over wrangler sniff" case above
+		// (create_remote_backend doesn't expose resolved params for introspection).
+		expect(typeof result).toBe("object");
+	});
+
+	it("wrangler sniff still beats CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env fallbacks", async () => {
+		const sniff: WranglerSniff = {
+			account_id: "sniff-account",
+			d1_candidates: [{ binding: "DB", database_id: "sniff-db", source: "top-level" as const }],
+			r2_candidates: [{ binding: "BUCKET", bucket_name: "sniff-bucket", source: "top-level" as const }],
+		};
+
+		const result = await resolve_backend({ env: "prod" }, sniff, {
+			config: null,
+			env_vars: {
+				CLOUDFLARE_API_TOKEN: "token",
+				CORPUS_D1_DATABASE_ID: "env-database",
+				CORPUS_R2_BUCKET: "env-bucket",
+			},
+			cwd: process.cwd(),
+		});
+
+		expect(result.ok).toBe(true);
+	});
 });

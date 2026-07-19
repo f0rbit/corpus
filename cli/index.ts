@@ -9,7 +9,16 @@ import type { CorpusError } from "../types.js";
 
 async function main(): Promise<void> {
 	const global_args = parse_global_args(process.argv.slice(2));
-	const output = create_console_output({ json_mode: global_args.json });
+	// Enable matrix computed once, here — output/spinner code never reads TTY
+	// state or env vars ambiently (f0rbit/no-ambient-effects + injectability).
+	const output = create_console_output({
+		json: global_args.json,
+		quiet: global_args.quiet,
+		stdout_is_tty: process.stdout.isTTY,
+		stderr_is_tty: process.stderr.isTTY,
+		no_color: process.env.NO_COLOR !== undefined,
+		ci: process.env.CI !== undefined,
+	});
 
 	if (global_args.help) {
 		render_usage(output, global_args.command);
@@ -93,6 +102,7 @@ function render_usage(output: Output, command_name?: string): void {
 	output.line("  --file, -f         File backend path");
 	output.line("  --config, -c       Config file path");
 	output.line("  --json              Output JSON");
+	output.line("  --quiet, -q         Suppress decorative notes and spinners");
 	output.line("  --help, -h          Show help");
 }
 
