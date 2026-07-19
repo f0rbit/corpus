@@ -1,4 +1,4 @@
-import type { Result, CorpusError } from "../../types.js";
+import type { Result, CorpusError, Backend } from "../../types.js";
 import type { Output } from "../output.js";
 import type { CommandSpec, CommandName } from "../args.js";
 
@@ -13,6 +13,7 @@ export type CommandContext = {
 	output: Output;
 	cwd: string;
 	env_vars: Record<string, string | undefined>;
+	_test_backend?: Backend;
 };
 
 export type Command = {
