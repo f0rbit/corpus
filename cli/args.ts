@@ -28,7 +28,7 @@ const GLOBAL_OPTIONS = {
 
 export function parse_global_args(argv: string[]): GlobalArgs {
 	const { values, positionals } = parseArgs({
-		argv,
+		args: argv,
 		options: GLOBAL_OPTIONS,
 		strict: false,
 	});
@@ -52,9 +52,10 @@ export function parse_command_args(
 ): { args: Record<string, unknown>; positionals: string[] } {
 	const options = spec.options ?? {};
 	const { values, positionals } = parseArgs({
-		argv,
+		args: argv,
 		options,
 		strict: true,
+		allowPositionals: true,
 	});
 
 	return { args: values, positionals };

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { join } from "path";
-import { sniff_wrangler } from "../../cli/wrangler.js";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
+import { sniff_wrangler, type WranglerSniff } from "../../cli/wrangler.js";
 import { load_cli_config } from "../../cli/load-config.js";
 import { resolve_backend } from "../../cli/resolve-backend.js";
 
@@ -49,10 +50,9 @@ describe("sniff_wrangler", () => {
 
 	it("returns null when no wrangler file exists", async () => {
 		// Create a temp dir with .git to prevent upward search from finding parent wrangler files
-		const temp_dir = `/tmp/no-wrangler-${Date.now()}`;
-		const fs = require("fs");
-		fs.mkdirSync(temp_dir, { recursive: true });
-		fs.mkdirSync(`${temp_dir}/.git`, { recursive: true });
+		const temp_dir = `/tmp/no-wrangler-${String(Date.now())}`;
+		await mkdir(temp_dir, { recursive: true });
+		await mkdir(`${temp_dir}/.git`, { recursive: true });
 
 		try {
 			const result = await sniff_wrangler(temp_dir);
@@ -61,7 +61,7 @@ describe("sniff_wrangler", () => {
 				expect(result.value).toBeNull();
 			}
 		} finally {
-			fs.rmSync(temp_dir, { recursive: true, force: true });
+			await rm(temp_dir, { recursive: true, force: true });
 		}
 	});
 });
@@ -88,7 +88,7 @@ describe("load_cli_config", () => {
 
 	it("returns null when no config file exists", async () => {
 		// Use explicit path to a non-existent directory that has no corpus.config
-		const temp_dir = "/tmp/nonexistent-corpus-test-" + Date.now();
+		const temp_dir = `/tmp/nonexistent-corpus-test-${String(Date.now())}`;
 		const result = await load_cli_config(join(temp_dir, "corpus.config.js"));
 		expect(result.ok).toBe(true);
 		if (result.ok) {
@@ -98,9 +98,8 @@ describe("load_cli_config", () => {
 
 	it("returns validation error for invalid config", async () => {
 		const temp_file = "/tmp/test-invalid-config.js";
-		const fs = require("fs");
 
-		fs.writeFileSync(
+		await writeFile(
 			temp_file,
 			`export default {
 			stores: "invalid"
@@ -113,15 +112,14 @@ describe("load_cli_config", () => {
 			expect(result.error.kind).toBe("validation_error");
 		}
 
-		fs.unlinkSync(temp_file);
+		await unlink(temp_file);
 	});
 });
 
 describe("resolve_backend", () => {
 	it("resolves file backend when selector has file", async () => {
 		const temp_dir = "/tmp/test-corpus-backend";
-		const fs = require("fs");
-		fs.mkdirSync(temp_dir, { recursive: true });
+		await mkdir(temp_dir, { recursive: true });
 
 		const result = await resolve_backend({ file: temp_dir }, null, {
 			config: null,
@@ -131,7 +129,7 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		fs.rmSync(temp_dir, { recursive: true, force: true });
+		await rm(temp_dir, { recursive: true, force: true });
 	});
 
 	it("returns error when required params are missing", async () => {
@@ -148,7 +146,7 @@ describe("resolve_backend", () => {
 	});
 
 	it("detects ambiguous D1 databases", async () => {
-		const sniff = {
+		const sniff: WranglerSniff = {
 			account_id: "test-account",
 			d1_candidates: [
 				{ binding: "DB1", database_id: "id1", source: "top-level" as const },
@@ -157,8 +155,8 @@ describe("resolve_backend", () => {
 			r2_candidates: [],
 		};
 
-		const result = await resolve_backend({ env: "prod" }, sniff as any, {
-			config: null as any,
+		const result = await resolve_backend({ env: "prod" }, sniff, {
+			config: null,
 			env_vars: { CLOUDFLARE_API_TOKEN: "token" },
 			cwd: process.cwd(),
 		});
@@ -170,7 +168,7 @@ describe("resolve_backend", () => {
 	});
 
 	it("detects ambiguous R2 buckets", async () => {
-		const sniff = {
+		const sniff: WranglerSniff = {
 			account_id: "test-account",
 			d1_candidates: [{ binding: "DB", database_id: "id1", source: "top-level" as const }],
 			r2_candidates: [
@@ -179,8 +177,8 @@ describe("resolve_backend", () => {
 			],
 		};
 
-		const result = await resolve_backend({ env: "prod" }, sniff as any, {
-			config: null as any,
+		const result = await resolve_backend({ env: "prod" }, sniff, {
+			config: null,
 			env_vars: { CLOUDFLARE_API_TOKEN: "token" },
 			cwd: process.cwd(),
 		});
@@ -222,8 +220,7 @@ describe("resolve_backend", () => {
 
 	it("resolves file backend from config", async () => {
 		const temp_dir = "/tmp/test-corpus-backend-2";
-		const fs = require("fs");
-		fs.mkdirSync(temp_dir, { recursive: true });
+		await mkdir(temp_dir, { recursive: true });
 
 		const config: Record<string, unknown> = {
 			environments: {
@@ -241,13 +238,12 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		fs.rmSync(temp_dir, { recursive: true, force: true });
+		await rm(temp_dir, { recursive: true, force: true });
 	});
 
 	it("uses default_env from config when env not specified", async () => {
 		const temp_dir = "/tmp/test-corpus-backend-3";
-		const fs = require("fs");
-		fs.mkdirSync(temp_dir, { recursive: true });
+		await mkdir(temp_dir, { recursive: true });
 
 		const config: Record<string, unknown> = {
 			default_env: "local",
@@ -266,6 +262,6 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		fs.rmSync(temp_dir, { recursive: true, force: true });
+		await rm(temp_dir, { recursive: true, force: true });
 	});
 });

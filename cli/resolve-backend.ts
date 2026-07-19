@@ -20,7 +20,7 @@ export async function resolve_backend(
 	// Handle file backend selector
 	if ("file" in selector) {
 		const { create_file_backend } = await import("../file.js");
-		const backend = await create_file_backend({ base_path: selector.file });
+		const backend = create_file_backend({ base_path: selector.file });
 		return ok(backend);
 	}
 
@@ -33,7 +33,7 @@ export async function resolve_backend(
 	// Handle file backend from config
 	if (env_config && "file" in env_config) {
 		const { create_file_backend } = await import("../file.js");
-		const backend = await create_file_backend({ base_path: env_config.file });
+		const backend = create_file_backend({ base_path: env_config.file });
 		return ok(backend);
 	}
 
@@ -45,7 +45,7 @@ export async function resolve_backend(
 	) {
 		return err({
 			kind: "invalid_config",
-			message: `ambiguous D1 database: found ${wrangler_sniff.d1_candidates.length} candidates (${wrangler_sniff.d1_candidates.map((c) => `${c.binding} (${c.source})`).join(", ")}). Set database_id in corpus.config.ts.`,
+			message: `ambiguous D1 database: found ${String(wrangler_sniff.d1_candidates.length)} candidates (${wrangler_sniff.d1_candidates.map((c) => `${c.binding} (${c.source})`).join(", ")}). Set database_id in corpus.config.ts.`,
 			cause: new Error("ambiguous database"),
 		});
 	}
@@ -57,7 +57,7 @@ export async function resolve_backend(
 	) {
 		return err({
 			kind: "invalid_config",
-			message: `ambiguous R2 bucket: found ${wrangler_sniff.r2_candidates.length} candidates (${wrangler_sniff.r2_candidates.map((c) => `${c.binding} (${c.source})`).join(", ")}). Set bucket in corpus.config.ts.`,
+			message: `ambiguous R2 bucket: found ${String(wrangler_sniff.r2_candidates.length)} candidates (${wrangler_sniff.r2_candidates.map((c) => `${c.binding} (${c.source})`).join(", ")}). Set bucket in corpus.config.ts.`,
 			cause: new Error("ambiguous bucket"),
 		});
 	}
@@ -132,6 +132,6 @@ export async function resolve_backend(
 		...(d1_base_url && { d1_base_url }),
 	};
 
-	const backend = await create_remote_backend(remote_config);
+	const backend = create_remote_backend(remote_config);
 	return ok(backend);
 }

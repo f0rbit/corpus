@@ -1,12 +1,13 @@
 import { type Result, err, ok } from "../types.js";
 import { try_catch_async } from "../result.js";
 import type { CorpusError } from "../types.js";
+import { find_upward } from "./fs-walk.js";
 import { z } from "zod";
 
 export type WranglerSniff = {
 	account_id?: string;
-	d1_candidates: Array<{ binding: string; database_id: string; source: "top-level" | string }>;
-	r2_candidates: Array<{ binding: string; bucket_name: string; source: "top-level" | string }>;
+	d1_candidates: Array<{ binding: string; database_id: string; source: string }>;
+	r2_candidates: Array<{ binding: string; bucket_name: string; source: string }>;
 };
 
 const d1_binding_schema = z.object({
@@ -69,22 +70,19 @@ function strip_jsonc(content: string): string {
 		} else if (content[i] === ",") {
 			// Check if this is a trailing comma (comma followed by whitespace and then } or ])
 			let j = i + 1;
-			const c = j < content.length ? content[j]! : "";
-			if (c && /\s/.test(c)) {
-				while (j < content.length && /\s/.test(content[j]!)) {
-					j++;
-				}
+			while (j < content.length && /\s/.test(content.charAt(j))) {
+				j++;
 			}
 			if (j < content.length && (content[j] === "}" || content[j] === "]")) {
 				// This is a trailing comma, skip it
 				i++;
 			} else {
 				// Not a trailing comma, keep it
-				result += content[i];
+				result += content.charAt(i);
 				i++;
 			}
 		} else {
-			result += content[i];
+			result += content.charAt(i);
 			i++;
 		}
 	}
@@ -94,19 +92,14 @@ function strip_jsonc(content: string): string {
 async function try_parse_wrangler(
 	content: string,
 	format: "toml" | "jsonc" | "json",
-): Promise<Result<Record<string, unknown>, CorpusError>> {
+): Promise<Result<unknown, CorpusError>> {
 	return try_catch_async(
-		async () => {
-			let parsed: unknown;
-
+		async (): Promise<unknown> => {
 			if (format === "toml") {
-				parsed = Bun.TOML.parse(content);
-			} else {
-				const cleaned = format === "jsonc" ? strip_jsonc(content) : content;
-				parsed = JSON.parse(cleaned);
+				return Bun.TOML.parse(content);
 			}
-
-			return parsed as Record<string, unknown>;
+			const cleaned = format === "jsonc" ? strip_jsonc(content) : content;
+			return JSON.parse(cleaned);
 		},
 		(error) => ({
 			kind: "validation_error" as const,
@@ -186,28 +179,6 @@ async function sniff_from_content(
 		d1_candidates,
 		r2_candidates,
 	});
-}
-
-async function find_upward(start_dir: string, filename: string): Promise<string | null> {
-	let current = start_dir;
-
-	while (true) {
-		const candidate = `${current}/${filename}`;
-		if (await Bun.file(candidate).exists()) {
-			return candidate;
-		}
-
-		const git_dir = `${current}/.git`;
-		if (await Bun.file(git_dir).exists()) {
-			return null;
-		}
-
-		const parent = current.split("/").slice(0, -1).join("/");
-		if (parent === current || parent === "") {
-			return null;
-		}
-		current = parent;
-	}
 }
 
 export async function sniff_wrangler(dir: string): Promise<Result<WranglerSniff | null, CorpusError>> {
