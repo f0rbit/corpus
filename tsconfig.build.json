@@ -36,7 +36,9 @@
 		"observations/*.ts",
 		"testing/*.ts",
 		"testing/laws/*.ts",
-		"testing/vending/*.ts"
+		"testing/vending/*.ts",
+		"cli/*.ts",
+		"cli/commands/*.ts"
 	],
 	"exclude": ["node_modules", "dist", "tests"]
 }
