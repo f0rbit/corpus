@@ -1,5 +1,7 @@
 export { create_corpus, create_store } from "./corpus.js";
 
+export { copy, type CopyOpts, type CopyProgressEvent, type CopySummary } from "./copy.js";
+
 export { create_memory_backend, type MemoryBackendOptions } from "./backend/memory.js";
 export { create_cloudflare_backend, type CloudflareBackendConfig } from "./backend/cloudflare.js";
 export { create_layered_backend, type LayeredBackendOptions } from "./backend/layered.js";
