@@ -219,8 +219,9 @@
     <main>
       <header>
         <h1>Plan: corpus CLI</h1>
-        <span class="badge todo">todo</span>
+        <span class="badge doing">doing</span>
         <p>A read-only <code>corpus</code> CLI (list stores, list versions, show metadata + observations, cat decoded data, lineage) plus <code>clone</code> (prod→file, file→file), built on two new library-core capabilities: a laptop-side <strong>remote backend</strong> (Cloudflare D1 HTTP + R2 S3 API implementing the existing <code>Backend</code> surface) and a generic <strong><code>copy(source, dest)</code></strong> with content-hash-skip incremental semantics. The CLI is a thin veneer shipped as a <code>bin</code> inside <code>@f0rbit/corpus</code> — zero new runtime dependencies (node:util <code>parseArgs</code>, <code>Bun.S3Client</code>, native fetch). Config discovery follows the drizzle-kit pattern: an optional <code>corpus.config.ts</code> in the consumer workspace supplies store definitions (required only for <code>cat</code> decoding), while <code>wrangler.toml</code>/<code>wrangler.jsonc</code> sniffing + env vars cover connection params so metadata commands work with NO config. Targets the unpublished 0.8.0.</p>
+        <p><strong>Amended 2026-07-19</strong> (phases 1–4 done, proofs preserved): phase 5 gains a sequential output-UX task (<a href="#task-5-0">task 5.0</a> — hand-rolled ANSI colour, stderr spinners, a global <code>--quiet</code> flag, stable <code>--json</code> shapes, zero new dependencies) that 5.1/5.2 build on, plus the <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> connection env vars. A new <a href="#phase-7">phase 7</a> validates the shipped CLI read-only against a real production consumer: <code>~/dev/chamber</code>'s Hansard transcripts + AI summaries on Cloudflare (D1/R2 written by corpus <strong>0.3.4</strong> — five minors behind), gated by a 0.3.4↔0.8.0 row-shape compatibility pre-check and a data-key aliasing audit before any clone.</p>
       </header>
 
       <section id="root-cause">
@@ -562,6 +563,26 @@
               <td><code>docs/src/content/docs/cli/*.mdx</code>, <code>docs/astro.config.mjs</code>, <code>README.md</code>, <code>AGENTS.md</code></td>
               <td>new/modify — CLI docs group, sidebar, README section, AGENTS.md updates</td>
             </tr>
+            <tr>
+              <td><code>cli/ansi.ts</code>, <code>cli/spinner.ts</code></td>
+              <td>new (amendment) — pure ANSI styling helpers + injectable-sink spinner; no console access in either</td>
+            </tr>
+            <tr>
+              <td><code>cli/output.ts</code>, <code>cli/args.ts</code>, <code>cli/index.ts</code>, <code>cli/resolve-backend.ts</code></td>
+              <td>modify (amendment) — output UX layer (colour/spinner/quiet), <code>--quiet</code> global flag, injectable TTY/env at construction, <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> env fallbacks</td>
+            </tr>
+            <tr>
+              <td><code>tests/unit/cli-output.test.ts</code>, <code>tests/unit/cli-config.test.ts</code></td>
+              <td>modify (amendment) — sink-injected colour/spinner/quiet coverage; env-var precedence coverage</td>
+            </tr>
+            <tr>
+              <td><code>tests/integration/compat-0-3-4.test.ts</code>, <code>tests/fixtures/compat/corpus-0.3.4/**</code></td>
+              <td>new (amendment) — pinned 0.3.4 schema fixtures + row-shape regression suite</td>
+            </tr>
+            <tr>
+              <td><code>~/dev/chamber</code></td>
+              <td>read-only — phase 7 validation target; NOTHING in the chamber repo is modified (its optional <code>corpus.config.ts</code> is an out-of-scope chamber-side task)</td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -583,12 +604,18 @@
           <li><strong>CLI structure:</strong> <code>bin: { "corpus": "./dist/cli/index.js" }</code> with a <code>#!/usr/bin/env bun</code> shebang (tsc preserves shebangs). Two-stage <code>node:util</code> parseArgs: first positional selects the command, remainder re-parsed against that command's option spec. All printing funnels through <code>cli/output.ts</code> (injectable sink for tests, <code>--json</code> mode) — the ONLY file with a <code>no-console</code> exception, added to the config exception maps with a why-comment (precedent: <code>testing/registry.ts</code>).</li>
           <li><strong>Command surface (v1):</strong> <code>corpus stores</code>, <code>corpus versions &lt;store&gt; [--tag ... --limit --before --after]</code>, <code>corpus show &lt;store&gt; &lt;version&gt; [--observations]</code>, <code>corpus cat &lt;store&gt; &lt;version&gt; [--raw]</code>, <code>corpus lineage &lt;store&gt; &lt;version&gt; [--depth]</code>, <code>corpus clone &lt;source&gt; &lt;dest&gt; [--store ... --tag ... --dry-run --concurrency]</code>. Backend selectors: <code>--env &lt;name&gt;</code> (config environment; implicit <code>remote</code> when wrangler + creds suffice) or <code>--file &lt;path&gt;</code>; clone source/dest accept an env name or a filesystem path. v1 clone destinations must be file backends.</li>
           <li><strong>Versioning:</strong> lands in the still-unpublished 0.8.0 line (0.7.0 testing substrate is also unpublished). Additive only — whether to publish 0.7.0 and 0.8.0 separately or together is the user's call and out of this plan.</li>
+          <li><strong>Output UX is a sequential task 5.0, not folded into 5.1/5.2</strong> (amendment). The UX layer touches the SHARED plumbing files (<code>cli/output.ts</code>, <code>cli/args.ts</code>, <code>cli/index.ts</code>) that phase 5's parallel worktree split depends on being frozen — folding it into 5.1/5.2 would put both parallel coders in the same files. 5.0 runs first as one <code>coder</code>; 5.1/5.2 stay parallel on disjoint command files against the enriched <code>Output</code> API.</li>
+          <li><strong>Decoration enable matrix</strong> (computed ONCE in <code>cli/index.ts</code> and passed into <code>create_console_output</code> as plain booleans — injectable for tests, no ambient reads inside output code): colour ⇔ <code>stdout_is_tty && !json && !NO_COLOR</code>; spinner ⇔ <code>stderr_is_tty && !json && !quiet && !CI && !NO_COLOR</code>; decorative notes suppressed by <code>--quiet</code> and <code>--json</code>. Spinner renders to <strong>stderr</strong> so stdout stays pipe-clean; box-drawing tables degrade to the existing plain aligned-column format whenever colour is off (piped stdout stays grep-friendly). Zero new dependencies — hand-rolled ANSI in pure <code>cli/ansi.ts</code>, spinner in <code>cli/spinner.ts</code> with an injected write sink; <code>cli/output.ts</code> remains the ONLY file with console/process access (its <code>no-console</code> exception-map entry is unchanged).</li>
+          <li><strong><code>--json</code> contract:</strong> every command emits exactly one JSON document on stdout per run — zero ANSI, zero spinner, no interleaved progress. Shapes are stable and documented (task 6.1's JSON output reference): snake_case keys mirroring library types, <code>Date</code>s as ISO-8601 strings. Changing a shape after 0.8.0 is a breaking change for consumers' scripts.</li>
+          <li><strong>Connection env vars <code>CORPUS_D1_DATABASE_ID</code> and <code>CORPUS_R2_BUCKET</code></strong> (amendment, task 5.0): lowest-precedence fallbacks in <code>resolve_backend</code> (config &gt; wrangler sniff &gt; env — same ladder <code>account_id</code> already uses via <code>CLOUDFLARE_ACCOUNT_ID</code>). Motivated by a real consumer: chamber's <code>wrangler.toml</code> carries SST placeholder ids, so sniffing fails by design there and the zero-config path needs a pure env route. Non-secret facts only; secrets stay env/flag-only as before.</li>
+          <li><strong>Config-less <code>cat</code> fallback</strong> (amendment, task 5.2): when no <code>corpus.config.ts</code> store definition matches, <code>cat</code> falls back to content-type-driven rendering for <code>text/*</code> (UTF-8 passthrough) and <code>application/json</code> (parse + pretty-print), preceded by a dim note that decoding used <code>content_type</code>, not a codec. Any other content type → actionable error naming <code>--raw</code> and <code>corpus.config.ts</code>. <code>content_type</code> on <code>SnapshotMeta</code> is already the stored truth, so this duplicates no store definition; it makes the CLI's data path useful with zero config for any consumer whose stores use the base text/json codecs (all 14 of chamber's do — no gzip/encrypt layers there).</li>
+          <li><strong>Chamber validation posture</strong> (phase 7): strictly read-only against chamber's cloud — read-scoped tokens, clone writes only to a scratch dir OUTSIDE both repos, nothing in <code>~/dev/chamber</code> is modified. Gated: 7.1's 0.3.4↔0.8.0 row-shape compat check runs before any live command; 7.4's data-key aliasing audit runs before any real clone, with an explicit promotion rule for the deferred file-backend aliasing fix if (and only if) the audit finds a real collision.</li>
         </ul>
       </section>
 
       <section id="phases">
         <h2>Phases</h2>
-        <svg viewBox="0 0 980 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task dependency graph" style="max-width: 100%; height: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+        <svg viewBox="0 0 1280 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task dependency graph" style="max-width: 100%; height: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
           <style>
             .box { fill: #0d1117; stroke: #58a6ff; rx: 6; }
             .lbl { fill: #c9d1d9; font: 12px monospace; }
@@ -622,17 +649,27 @@
           <text x="570" y="53" class="lbl">4.1 config</text>
           <rect x="560" y="114" width="86" height="30" class="box"></rect>
           <text x="570" y="133" class="lbl">4.2 skeleton</text>
-          <text x="690" y="24" class="ph">Phase 5 (par)</text>
-          <rect x="690" y="34" width="86" height="30" class="box"></rect>
-          <text x="700" y="53" class="lbl">5.1 read</text>
-          <rect x="690" y="114" width="96" height="30" class="box"></rect>
-          <text x="700" y="133" class="lbl">5.2 cat/clone</text>
-          <text x="830" y="24" class="ph">Phase 6 (par)</text>
-          <rect x="830" y="34" width="86" height="30" class="box"></rect>
-          <text x="840" y="53" class="lbl">6.1 docs</text>
-          <rect x="830" y="114" width="96" height="30" class="box"></rect>
-          <text x="840" y="133" class="lbl">6.2 readme</text>
-          <path d="M106,49 L128,49 L128,89 L160,49" class="edge" style="display:none"></path>
+          <text x="690" y="24" class="ph">Phase 5 (seq → par)</text>
+          <rect x="690" y="74" width="96" height="30" class="box"></rect>
+          <text x="700" y="93" class="lbl">5.0 out-ux</text>
+          <rect x="810" y="34" width="86" height="30" class="box"></rect>
+          <text x="820" y="53" class="lbl">5.1 read</text>
+          <rect x="810" y="114" width="96" height="30" class="box"></rect>
+          <text x="820" y="133" class="lbl">5.2 cat/clone</text>
+          <text x="950" y="24" class="ph">Phase 6 (par)</text>
+          <rect x="950" y="34" width="86" height="30" class="box"></rect>
+          <text x="960" y="53" class="lbl">6.1 docs</text>
+          <rect x="950" y="114" width="96" height="30" class="box"></rect>
+          <text x="960" y="133" class="lbl">6.2 readme</text>
+          <text x="1090" y="24" class="ph">Phase 7 (seq → par)</text>
+          <rect x="1090" y="34" width="106" height="26" class="box"></rect>
+          <text x="1098" y="51" class="lbl">7.1 compat</text>
+          <rect x="1090" y="76" width="106" height="26" class="box"></rect>
+          <text x="1098" y="93" class="lbl">7.2 live meta</text>
+          <rect x="1090" y="118" width="106" height="26" class="box"></rect>
+          <text x="1098" y="135" class="lbl">7.3 live cat</text>
+          <rect x="1090" y="160" width="106" height="26" class="box"></rect>
+          <text x="1098" y="177" class="lbl">7.4 audit+cl</text>
           <path d="M106,49 C130,49 135,89 160,89" class="edge"></path>
           <path d="M106,89 C130,89 135,49 160,49" class="edge"></path>
           <path d="M106,89 L160,129" class="edge"></path>
@@ -642,11 +679,18 @@
           <path d="M386,89 L430,89" class="edge"></path>
           <path d="M516,89 L560,49" class="edge"></path>
           <path d="M516,89 L560,129" class="edge"></path>
-          <path d="M646,49 L690,49" class="edge"></path>
-          <path d="M646,129 L690,129" class="edge"></path>
-          <path d="M646,49 L690,124" class="edge"></path>
-          <path d="M786,49 L830,49" class="edge"></path>
-          <path d="M786,129 L830,129" class="edge"></path>
+          <path d="M646,49 C670,49 670,89 690,89" class="edge"></path>
+          <path d="M646,129 C670,129 670,89 690,89" class="edge"></path>
+          <path d="M786,89 C800,89 800,49 810,49" class="edge"></path>
+          <path d="M786,89 C800,89 800,129 810,129" class="edge"></path>
+          <path d="M896,49 L950,49" class="edge"></path>
+          <path d="M906,129 L950,129" class="edge"></path>
+          <path d="M896,49 L950,124" class="edge"></path>
+          <path d="M1036,49 C1064,49 1064,47 1090,47" class="edge"></path>
+          <path d="M1046,129 C1070,129 1070,52 1090,50" class="edge"></path>
+          <path d="M1143,60 L1143,76" class="edge"></path>
+          <path d="M1143,102 L1143,118" class="edge"></path>
+          <path d="M1196,89 C1216,89 1216,173 1196,173" class="edge"></path>
         </svg>
         <p>Each phase ends with a verification coder (squash-integrate worktrees where parallel, typecheck, <code>bun test</code>, <code>bun run lint &amp;&amp; bun run fmt:check</code>, adversary checklists, proof slots, commit, PR) followed by pr-shepherd to merge. Parallel tasks run as <code>coder-fast</code> in worktrees and do NOT run build/test/lint themselves.</p>
 
@@ -1139,7 +1183,57 @@
 
         <section class="phase" id="phase-5">
           <h3>Phase 5: Commands</h3>
-          <p>Two parallel <code>coder-fast</code> tasks in worktrees; bodies land in the disjoint stub files created in 4.2.</p>
+          <p><strong>Task 5.0 first, sequential</strong> (one <code>coder</code>): the output-UX layer + <code>--quiet</code> flag + connection env vars all live in the SHARED plumbing files (<code>cli/output.ts</code>, <code>cli/args.ts</code>, <code>cli/index.ts</code>, <code>cli/resolve-backend.ts</code>), which must be frozen before the worktree split. Then tasks 5.1 and 5.2 run parallel (<code>coder-fast</code> in worktrees); their bodies land in the disjoint stub files created in 4.2 and consume the enriched <code>Output</code> API read-only.</p>
+
+          <article class="task" id="task-5-0">
+            <header>
+              <h3>Task 5.0: Output UX layer — colour, spinner, --quiet, json purity + connection env vars</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/ansi.ts</code> (new), <code>cli/spinner.ts</code> (new), <code>cli/output.ts</code>, <code>cli/args.ts</code>, <code>cli/index.ts</code>, <code>cli/resolve-backend.ts</code>, <code>tests/unit/cli-output.test.ts</code>, <code>tests/unit/cli-config.test.ts</code></dd>
+              <dt>Estimated LOC</dt>
+              <dd>~320 impl + ~200 tests</dd>
+              <dt>Dependencies</dt>
+              <dd>task-4-1, task-4-2</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (owns the shared plumbing files 5.1/5.2 depend on being frozen)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Current state (phase 4, done): <code>cli/output.ts</code> exports an <code>Output</code> type <code>{ line, table, json, error, bytes }</code> with <code>create_console_output({ json_mode })</code> (the ONLY file allowed console/process access — its <code>no-console</code> exception-map entry in <code>eslint.config.ts</code> is scoped to exactly this file; do not widen it) and <code>create_capture_output()</code> for tests; the table renderer is plain aligned columns; <code>format_error</code> is an exhaustive no-default switch over <code>CorpusError</code> (keep that property). <code>cli/args.ts</code> holds <code>GLOBAL_OPTIONS</code> (<code>--env -e</code>, <code>--file -f</code>, <code>--config -c</code>, <code>--json</code>, <code>--help -h</code>) and <code>GlobalArgs</code>. <code>cli/index.ts</code> wires parse → registry dispatch → exit codes 0/1/2. <code>cli/resolve-backend.ts</code> resolves connection params with precedence config &gt; wrangler sniff &gt; env; TODAY only <code>account_id</code> has an env fallback (<code>CLOUDFLARE_ACCOUNT_ID</code>) — <code>database_id</code> and <code>bucket</code> resolve ONLY from config or sniff, which strands consumers whose wrangler files carry placeholder ids (chamber's SST-managed <code>wrangler.toml</code> does; phase 7 needs the pure-env path). Zero new dependencies is a hard constraint: hand-rolled ANSI escapes, no chalk/ora. Lint: <code>f0rbit/no-ambient-effects</code> and the repo's injectability convention mean TTY/env detection must NOT be read inside output/spinner code — compute once in <code>cli/index.ts</code>, pass booleans in. Timer note: a running <code>setInterval</code> keeps the process alive; the spinner must <code>clearInterval</code> on stop and the CLI must exit cleanly. <code>bun test</code> only; tests must not require a real TTY.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <code>cli/ansi.ts</code> (pure, no console): <code>create_ansi(enabled: boolean)</code> returning <code>{ bold, dim, cyan, green, yellow, red, magenta }</code> — each <code>(s: string) =&gt; string</code>, identity functions when disabled — plus box-drawing constants (<code>─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴</code>) and tree-connector constants (<code>├─ └─ │</code>). (2) <code>cli/spinner.ts</code> (pure, injected sink): <code>create_spinner(opts: { write: (s: string) =&gt; void; enabled: boolean; frames?: string[]; interval_ms?: number })</code> → <code>{ start(label): void; update(label): void; stop(final?: string): void }</code>; braille frames <code>⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏</code>, ~80ms, <code>\r</code>-rewrite + line-clear on each tick; <code>enabled: false</code> → every method a no-op that writes nothing; <code>stop()</code> ALWAYS clears the interval and erases the spinner line. (3) <code>cli/output.ts</code>: new constructor signature <code>create_console_output(opts: OutputOpts)</code> where <code>OutputOpts = { json: boolean; quiet: boolean; stdout_is_tty: boolean; stderr_is_tty: boolean; no_color: boolean; ci: boolean; stdout_write?: (s: string | Uint8Array) =&gt; void; stderr_write?: (s: string) =&gt; void }</code> — the two write sinks default to real <code>process.stdout/stderr</code> bindings and are injectable for tests. Derive internally: <code>color = stdout_is_tty &amp;&amp; !json &amp;&amp; !no_color</code>; <code>spin = stderr_is_tty &amp;&amp; !json &amp;&amp; !quiet &amp;&amp; !ci &amp;&amp; !no_color</code>. Extend <code>Output</code> with <code>note(text: string): void</code> (dim decorative line; suppressed when <code>quiet</code> or <code>json</code>) and <code>spinner(label: string): SpinnerHandle</code> (wraps <code>create_spinner</code> over the stderr sink; returns no-op handle when disabled). Upgrade <code>table</code>: when colour is on, box-drawing borders (dim) + bold header row; when colour is off, EXACTLY the existing plain aligned-column output (byte-stable for pipes — existing tests must not need weakening). Add pure exported helper <code>render_tree(root: TreeNode): string[]</code> (<code>TreeNode = { label: string; children: TreeNode[] }</code>) emitting <code>├─/└─/│</code>-connected lines for task 5.1's lineage renderer. <code>create_capture_output()</code> gains matching <code>note</code>/<code>spinner</code> recording (spinner records start/update/stop calls). <code>json()</code>, <code>bytes()</code>, and json-mode <code>error()</code> stay ANSI-free unconditionally. (4) <code>cli/args.ts</code>: add <code>quiet: { type: "boolean", short: "q", default: false }</code> to <code>GLOBAL_OPTIONS</code> + <code>GlobalArgs</code>. (5) <code>cli/index.ts</code>: compute <code>OutputOpts</code> once from <code>process.stdout.isTTY</code>/<code>process.stderr.isTTY</code>/<code>process.env.NO_COLOR</code>/<code>process.env.CI</code> + parsed flags; thread through. (6) <code>cli/resolve-backend.ts</code>: add lowest-precedence env fallbacks — <code>database_id: ... || ctx.env_vars.CORPUS_D1_DATABASE_ID</code>, <code>bucket: ... || ctx.env_vars.CORPUS_R2_BUCKET</code> — and extend the missing-param messages to name them. (7) Tests: <code>tests/unit/cli-output.test.ts</code> — sink-injected assertions: colour on (forced <code>stdout_is_tty: true</code>) emits ANSI + box-drawing; colour off emits byte-identical plain tables; <code>NO_COLOR</code>/<code>CI</code>/<code>json</code>/<code>quiet</code> each kill the right decorations per the matrix; spinner writes frames ONLY to the stderr sink and erases on stop; disabled spinner writes nothing; <code>render_tree</code> snapshot; json mode emits exactly one parseable document with zero ESC (0x1b) bytes. <code>tests/unit/cli-config.test.ts</code> — <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> resolve when config + sniff are absent; config and sniff still beat them. Do NOT touch <code>cli/commands/*</code> (5.1/5.2 own those files).</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/unit/cli-output.test.ts tests/unit/cli-config.test.ts &amp;&amp; bun run lint &amp;&amp; bun cli/index.ts --help &amp;&amp; NO_COLOR=1 bun cli/index.ts --help</pre>
+              <p>Expected: all matrix tests green; help renders in both runs and the process exits 0 promptly (no dangling spinner interval); lint clean with the <code>no-console</code> exception still scoped to <code>cli/output.ts</code> only.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>ANSI escapes (0x1b) NEVER reach stdout when <code>json</code> is set or <code>stdout_is_tty</code> is false — asserted via injected sinks, and <code>bytes()</code> is unconditionally raw.</li>
+                  <li>Spinner output goes exclusively to the stderr sink; a run with spinner active still produces pipe-clean stdout (assert stdout sink has zero <code>\r</code> or ESC bytes).</li>
+                  <li><code>console.*</code>/<code>process.*</code> access remains confined to <code>cli/output.ts</code> — <code>cli/ansi.ts</code> and <code>cli/spinner.ts</code> are pure (grep the two new files); no lint exception map widening beyond what exists.</li>
+                  <li><code>stop()</code> clears the interval — a started-then-stopped spinner leaves no live timer (process exits without hanging; verify the <code>--help</code> smoke exits promptly).</li>
+                  <li>Colour-off table output is byte-identical to the pre-amendment plain format (existing capture-output expectations still pass unmodified).</li>
+                  <li><code>format_error</code> keeps its exhaustive no-default switch; new decoration code paths don't introduce <code>as</code> casts or <code>any</code>.</li>
+                  <li>Env-var precedence: config and wrangler sniff still beat <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> (tested both directions); the two new vars never carry secrets.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
 
           <article class="task" id="task-5-1">
             <header>
@@ -1150,9 +1244,9 @@
               <dt>Files</dt>
               <dd><code>cli/commands/stores.ts</code>, <code>cli/commands/versions.ts</code>, <code>cli/commands/show.ts</code>, <code>cli/commands/lineage.ts</code>, <code>tests/integration/cli-read.test.ts</code> (new)</dd>
               <dt>Estimated LOC</dt>
-              <dd>~300</dd>
+              <dd>~340</dd>
               <dt>Dependencies</dt>
-              <dd>task-4-1, task-4-2</dd>
+              <dd>task-4-1, task-4-2, task-5-0</dd>
               <dt>Parallelisable with</dt>
               <dd>task-5-2</dd>
               <dt>Mode</dt>
@@ -1160,11 +1254,11 @@
             </dl>
             <section data-kind="context">
               <h4>Context (self-contained)</h4>
-              <p>Repo <code>/Users/tom/dev/corpus</code>. Command shape (from 4.2): each file exports a <code>Command</code> with <code>run(ctx)</code> where ctx carries parsed args, a resolved-backend selector, an <code>Output</code>, cwd, env_vars; resolve the backend via <code>resolve_backend</code> (cli/resolve-backend.ts from 4.1). Backend surface: <code>metadata.list_stores?()</code>, <code>metadata.list(store, { limit, before, after, tags })</code>, <code>metadata.get(store, version)</code> → Result&lt;SnapshotMeta&gt;, <code>backend.observations?.query_meta({ source_store_id, source_version })</code> (AsyncIterable). <code>SnapshotMeta</code> fields: store_id, version, parents (ParentRef[] with store_id/version/role?), created_at (Date), invoked_at?, content_hash, content_type, size_bytes, data_key, tags?. All output through <code>ctx.output</code> (table/json modes are output.ts's concern — commands call <code>output.table(...)</code> / structured objects, never format strings by hand). Result discipline: <code>pipe()</code> chains from <code>./result.js</code>, every Result checked. Tests drive command <code>run()</code> directly with <code>create_capture_output()</code> + memory/file backends and (for one case) the phase-2 remote backend over fakes — no process spawning.</p>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Command shape (from 4.2): each file exports a <code>Command</code> with <code>run(ctx)</code> where ctx carries parsed args, a resolved-backend selector, an <code>Output</code>, cwd, env_vars; resolve the backend via <code>resolve_backend</code> (cli/resolve-backend.ts from 4.1). Backend surface: <code>metadata.list_stores?()</code>, <code>metadata.list(store, { limit, before, after, tags })</code>, <code>metadata.get(store, version)</code> → Result&lt;SnapshotMeta&gt;, <code>backend.observations?.query_meta({ source_store_id, source_version })</code> (AsyncIterable). <code>SnapshotMeta</code> fields: store_id, version, parents (ParentRef[] with store_id/version/role?), created_at (Date), invoked_at?, content_hash, content_type, size_bytes, data_key, tags?. All output through <code>ctx.output</code> (table/json modes are output.ts's concern — commands call <code>output.table(...)</code> / structured objects, never format strings by hand). Result discipline: <code>pipe()</code> chains from <code>./result.js</code>, every Result checked. Tests drive command <code>run()</code> directly with <code>create_capture_output()</code> + memory/file backends and (for one case) the phase-2 remote backend over fakes — no process spawning. <strong>Output UX (task 5.0, merged):</strong> <code>Output</code> now also carries <code>note(text)</code> (dim decorative line — auto-suppressed under <code>--quiet</code>/<code>--json</code>) and <code>spinner(label)</code> (stderr, auto-no-op when disabled); a pure <code>render_tree(root)</code> helper in <code>cli/output.ts</code> emits <code>├─/└─</code>-connected lines. Commands stay format-agnostic: colour/TTY/quiet policy is entirely output.ts's concern — command files must never construct ANSI escapes or read TTY/env state themselves. <code>--json</code> contract: exactly ONE JSON document per run, snake_case keys, Dates as ISO-8601 strings — the shapes below are stable and get documented in task 6.1.</p>
             </section>
             <section data-kind="what">
               <h4>What to do</h4>
-              <p><code>stores</code>: enumerate via <code>list_stores</code> (absent → the actionable invalid_config error); default columns: store id, version count + latest created_at behind <code>--counts</code> (extra list pass per store, only when flagged). <code>versions &lt;store&gt;</code>: flags <code>--tag</code> (repeatable → AND semantics, matching ListOpts.tags), <code>--limit</code> (number), <code>--before</code>/<code>--after</code> (ISO date, Zod-coerced with a clear parse error); columns: version, created_at ISO, size_bytes, content_hash first 12 chars, tags joined. <code>show &lt;store&gt; &lt;version&gt;</code>: full meta as label/value rows (parents as <code>store/version (role)</code> lines); with <code>--observations</code> and a backend that has observations wired, append observation metas (id, type, created_at, path/span); absent observations support → note line, not an error. <code>lineage &lt;store&gt; &lt;version&gt;</code>: walk <code>parents</code> recursively via <code>metadata.get</code> (breadth-first, <code>--depth</code> default 10), render an indented tree with cycle guard (seen-set on <code>store_id/version</code>); missing ancestors render as <code>(missing)</code> rather than failing the walk. Integration tests per command: happy path against memory backend (seeded via <code>create_corpus</code> + stores), not_found paths, tag/limit filtering, lineage over a 3-deep parent chain incl. a missing parent, one <code>stores</code> run against the remote backend over the phase-2 fakes, and json-mode snapshots via capture output.</p>
+              <p><code>stores</code>: enumerate via <code>list_stores</code> (absent → the actionable invalid_config error); default columns: store id, version count + latest created_at behind <code>--counts</code> (extra list pass per store, only when flagged). <code>versions &lt;store&gt;</code>: flags <code>--tag</code> (repeatable → AND semantics, matching ListOpts.tags), <code>--limit</code> (number), <code>--before</code>/<code>--after</code> (ISO date, Zod-coerced with a clear parse error); columns: version, created_at ISO, size_bytes, content_hash first 12 chars, tags joined. <code>show &lt;store&gt; &lt;version&gt;</code>: full meta as label/value rows (parents as <code>store/version (role)</code> lines); with <code>--observations</code> and a backend that has observations wired, append observation metas (id, type, created_at, path/span); absent observations support → note line, not an error. <code>lineage &lt;store&gt; &lt;version&gt;</code>: walk <code>parents</code> recursively via <code>metadata.get</code> (breadth-first, <code>--depth</code> default 10), render the ancestor graph via <code>render_tree</code> (box-drawing connectors, dim connector glyphs + bold root when colour is on) with cycle guard (seen-set on <code>store_id/version</code>); missing ancestors render as <code>(missing)</code> rather than failing the walk. Long-running remote listings (<code>stores --counts</code>, <code>versions</code> against a remote backend) wrap the backend call in <code>output.spinner(...)</code>, stopped before any result line prints. Stable <code>--json</code> shapes (one document each): <code>stores</code> → <code>{ stores: [{ id, version_count?, latest_created_at? }] }</code>; <code>versions</code> → <code>{ store, versions: [meta] }</code> (meta = <code>SnapshotMeta</code> with ISO dates); <code>show</code> → <code>{ meta, observations?: [obs_meta] }</code>; <code>lineage</code> → <code>{ root: { store, version }, nodes: [{ store, version, depth, parents, missing? }] }</code>. Integration tests per command: happy path against memory backend (seeded via <code>create_corpus</code> + stores), not_found paths, tag/limit filtering, lineage over a 3-deep parent chain incl. a missing parent, one <code>stores</code> run against the remote backend over the phase-2 fakes, json-mode snapshots via capture output, and quiet-mode runs asserting result lines survive while notes/spinners are suppressed.</p>
             </section>
             <section data-kind="verification">
               <h4>Verification</h4>
@@ -1181,6 +1275,8 @@
                   <li>No hand-rolled formatting in commands — all rendering through <code>Output</code> methods.</li>
                   <li><code>show</code> on a backend without observations + <code>--observations</code> → informative note, not an error result.</li>
                   <li>Every Result checked (<code>f0rbit/must-use-result</code> clean without test-dir relaxation, since these are cli/ files).</li>
+                  <li>No raw ANSI escapes hand-rolled in command files (grep <code>\x1b</code>/<code>\u001b</code> across the four files — styling only via the <code>Output</code>/<code>render_tree</code> API) and no TTY/env reads outside <code>cli/index.ts</code>.</li>
+                  <li>Each command's <code>--json</code> run emits exactly one JSON document matching the documented shape — no notes, spinner residue, or extra lines on stdout.</li>
                 </ul>
               </div>
             </section>
@@ -1199,9 +1295,9 @@
               <dt>Files</dt>
               <dd><code>cli/commands/cat.ts</code>, <code>cli/commands/clone.ts</code>, <code>tests/integration/cli-clone.test.ts</code> (new)</dd>
               <dt>Estimated LOC</dt>
-              <dd>~280</dd>
+              <dd>~330</dd>
               <dt>Dependencies</dt>
-              <dd>task-4-1, task-4-2, task-3-1</dd>
+              <dd>task-4-1, task-4-2, task-3-1, task-5-0</dd>
               <dt>Parallelisable with</dt>
               <dd>task-5-1</dd>
               <dt>Mode</dt>
@@ -1209,11 +1305,11 @@
             </dl>
             <section data-kind="context">
               <h4>Context (self-contained)</h4>
-              <p>Repo <code>/Users/tom/dev/corpus</code>. <code>cat</code> needs the consumer's codec: <code>load_cli_config</code> (cli/load-config.ts) yields <code>CorpusCliConfig</code> whose <code>stores</code> are real <code>StoreDefinition</code>s (id + codec with <code>decode(bytes): Promise&lt;T&gt;</code>). Raw stored bytes come from <code>backend.data.get(meta.data_key)</code> → handle with <code>bytes()</code>/<code>stream()</code>; meta from <code>backend.metadata.get(store, version)</code>. Note codecs may be composed (gzip layers) — <code>codec.decode</code> handles the whole stack; <code>--raw</code> means the literal stored bytes (post-encode, including wrapper layers). <code>clone</code> wraps library <code>copy(source, dest, opts)</code> (copy.ts, phase 3) — CopyOpts: stores/tags/dry_run/concurrency/on_progress; CopySummary has versions_copied/versions_skipped/data_objects_copied/data_objects_skipped/bytes_copied. Source/dest selectors: an env name (resolve via <code>resolve_backend</code>) or a filesystem path (contains <code>/</code>, starts with <code>.</code>, or matches an existing dir → <code>create_file_backend({ base_path })</code> from <code>./file.js</code>). v1 restriction: dest MUST resolve to a file backend — reject remote dests with an error naming the out-of-scope push feature. Progress: subscribe <code>on_progress</code> and render one line per store + a final summary via <code>Output</code> (respecting <code>--json</code>: only the final CopySummary as JSON). Known gotcha to surface in <code>clone</code>'s docstring: file-backend <code>data_path</code> sanitises <code>/</code>→<code>_</code>, so custom <code>data_key_fn</code> layouts can alias at a file destination (documented, not fixed here). Verified during phase 3 verification: <code>CopySummary.dry_run</code> reports accurate <code>versions_copied</code>/<code>versions_skipped</code> counts (the metadata-hit check still runs), but <code>data_objects_copied</code>/<code>data_objects_skipped</code>/<code>bytes_copied</code> stay 0 always — dry-run never touches <code>dest.data</code> at all, so it has no way to know which data objects would transfer vs. skip. <code>clone --dry-run</code>'s rendering MUST NOT print/imply a data-object or byte count (e.g. no "0 data objects would transfer" line) — that would misreport, since the true count is simply unknown in dry-run mode, not zero. Tests drive <code>run()</code> directly with capture output; the remote source uses the phase-2 fakes.</p>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. <code>cat</code> needs the consumer's codec: <code>load_cli_config</code> (cli/load-config.ts) yields <code>CorpusCliConfig</code> whose <code>stores</code> are real <code>StoreDefinition</code>s (id + codec with <code>decode(bytes): Promise&lt;T&gt;</code>). Raw stored bytes come from <code>backend.data.get(meta.data_key)</code> → handle with <code>bytes()</code>/<code>stream()</code>; meta from <code>backend.metadata.get(store, version)</code>. Note codecs may be composed (gzip layers) — <code>codec.decode</code> handles the whole stack; <code>--raw</code> means the literal stored bytes (post-encode, including wrapper layers). <code>clone</code> wraps library <code>copy(source, dest, opts)</code> (copy.ts, phase 3) — CopyOpts: stores/tags/dry_run/concurrency/on_progress; CopySummary has versions_copied/versions_skipped/data_objects_copied/data_objects_skipped/bytes_copied. Source/dest selectors: an env name (resolve via <code>resolve_backend</code>) or a filesystem path (contains <code>/</code>, starts with <code>.</code>, or matches an existing dir → <code>create_file_backend({ base_path })</code> from <code>./file.js</code>). v1 restriction: dest MUST resolve to a file backend — reject remote dests with an error naming the out-of-scope push feature. Progress: subscribe <code>on_progress</code> and render one line per store + a final summary via <code>Output</code> (respecting <code>--json</code>: only the final CopySummary as JSON). Known gotcha to surface in <code>clone</code>'s docstring: file-backend <code>data_path</code> sanitises <code>/</code>→<code>_</code>, so custom <code>data_key_fn</code> layouts can alias at a file destination (documented, not fixed here). Verified during phase 3 verification: <code>CopySummary.dry_run</code> reports accurate <code>versions_copied</code>/<code>versions_skipped</code> counts (the metadata-hit check still runs), but <code>data_objects_copied</code>/<code>data_objects_skipped</code>/<code>bytes_copied</code> stay 0 always — dry-run never touches <code>dest.data</code> at all, so it has no way to know which data objects would transfer vs. skip. <code>clone --dry-run</code>'s rendering MUST NOT print/imply a data-object or byte count (e.g. no "0 data objects would transfer" line) — that would misreport, since the true count is simply unknown in dry-run mode, not zero. Tests drive <code>run()</code> directly with capture output; the remote source uses the phase-2 fakes. <strong>Output UX (task 5.0, merged):</strong> <code>Output</code> now carries <code>note(text)</code> (dim decorative, suppressed under <code>--quiet</code>/<code>--json</code>) and <code>spinner(label)</code> (stderr, auto-no-op when disabled); command files never construct ANSI or read TTY/env state. <strong>Config-less <code>cat</code> fallback (architecture decision, this amendment):</strong> when no config store definition matches, <code>content_type</code> on the meta drives rendering — <code>text/*</code> → UTF-8 passthrough, <code>application/json</code> → parse + pretty-print, each preceded by <code>output.note("(no corpus.config.ts — rendered from content_type, not a codec)")</code>; any other content type → actionable error naming BOTH <code>--raw</code> and <code>corpus.config.ts</code>. The fallback never guesses at binary or layered (gzip/encrypt) content — those still require a config codec or <code>--raw</code>.</p>
             </section>
             <section data-kind="what">
               <h4>What to do</h4>
-              <p><code>cat &lt;store&gt; &lt;version&gt;</code>: <code>--raw</code> → stream stored bytes to <code>output.bytes</code> (no config needed); default → require config with a store matching the id (missing config or store → error naming <code>corpus.config.ts</code> and the store id), decode via the store's codec, print JSON values via <code>output.json</code>-style pretty text and strings verbatim; decode failure → <code>decode_error</code> rendered with the codec content_type. Support <code>latest</code> as version alias via <code>metadata.get_latest</code>. <code>clone &lt;source&gt; &lt;dest&gt;</code>: parse selectors per context; flags <code>--store</code> (repeatable), <code>--tag</code> (repeatable), <code>--dry-run</code>, <code>--concurrency</code> (default 4); build both backends, enforce file-dest restriction, run <code>copy()</code>, render progress + summary; non-ok copy → rendered error, exit 1. Tests (<code>tests/integration/cli-clone.test.ts</code>): clone file→file via command (fresh tmp dirs under <code>tests/.tmp/</code>, cleaned per-test — repo convention); clone remote-fakes→file with byte-equality spot check + second run all-skip; --dry-run leaves dest empty; --store filter; remote dest rejected; cat --raw on binary store round-trips bytes; cat decoded with a fixture config (json store, gzip-composed store); cat without config → actionable error.</p>
+              <p><code>cat &lt;store&gt; &lt;version&gt;</code>: <code>--raw</code> → stream stored bytes to <code>output.bytes</code> (no config needed; stop any active spinner BEFORE streaming so stderr control writes never interleave a binary pipe); default → config store match decodes via the store's codec; no config or no matching store → the content-type fallback from the context block (<code>text/*</code> UTF-8, <code>application/json</code> pretty-print, note line first; other content types → actionable error naming <code>--raw</code> and <code>corpus.config.ts</code>); decode failure → <code>decode_error</code> rendered with the codec content_type. Support <code>latest</code> as version alias via <code>metadata.get_latest</code>. <code>cat --json</code> shape (one document): <code>{ store, version, content_type, size_bytes, encoding: "utf8" | "base64", content }</code> — utf8 for text/json content, base64 otherwise. <code>clone &lt;source&gt; &lt;dest&gt;</code>: parse selectors per context; flags <code>--store</code> (repeatable), <code>--tag</code> (repeatable), <code>--dry-run</code>, <code>--concurrency</code> (default 4); build both backends, enforce file-dest restriction, run <code>copy()</code>; progress renders as a stderr spinner whose label updates from <code>on_progress</code> events (store name + running copied/skipped counts), one <code>note</code> line per completed store, then a final summary block via <code>line()</code> (summary lines survive <code>--quiet</code>; spinner and notes don't). <code>clone --json</code>: exactly one document — the <code>CopySummary</code> — at the end; no progress output at all. Non-ok copy → rendered error, exit 1. Tests (<code>tests/integration/cli-clone.test.ts</code>): clone file→file via command (fresh tmp dirs under <code>tests/.tmp/</code>, cleaned per-test — repo convention); clone remote-fakes→file with byte-equality spot check + second run all-skip; --dry-run leaves dest empty; --store filter; remote dest rejected; cat --raw on binary store round-trips bytes; cat decoded with a fixture config (json store, gzip-composed store); cat WITHOUT config on a <code>text/*</code> store → UTF-8 fallback + note; on an <code>application/json</code> store → pretty-printed fallback; on a binary store → actionable error naming <code>--raw</code>; quiet clone keeps summary lines only.</p>
             </section>
             <section data-kind="verification">
               <h4>Verification</h4>
@@ -1230,6 +1326,8 @@
                   <li>tmp dirs under <code>tests/.tmp/</code> cleaned per-test (repo convention; no leftovers after suite).</li>
                   <li>JSON mode emits exactly one JSON document (the summary) — no progress lines interleaved.</li>
                   <li><code>latest</code> alias resolves through <code>get_latest</code>, not a client-side sort.</li>
+                  <li><code>cat</code> fallback fires ONLY for <code>text/*</code> and <code>application/json</code> content types — never invents a decode for binary or unknown types, and always prints the provenance note first (asserted in capture output).</li>
+                  <li>No ANSI or spinner writes on stdout during <code>cat</code> (raw OR fallback) — piped output is byte-clean (assert zero ESC/<code>\r</code> bytes in the stdout capture).</li>
                 </ul>
               </div>
             </section>
@@ -1263,11 +1361,11 @@
             </dl>
             <section data-kind="context">
               <h4>Context (self-contained)</h4>
-              <p>Docs live in <code>docs/</code> (Astro Starlight, standalone package). Pages are MDX under <code>docs/src/content/docs/</code>; the sidebar is configured in <code>docs/astro.config.mjs</code> (add a "CLI" group — mirror the existing "Testing" group's structure). Package name in user-facing docs is <code>@f0rbit/corpus</code> (scoped). After MDX changes ALWAYS run <code>bun run docs:build</code> from the repo root — it regenerates llms.txt and catches broken links/frontmatter. Content sources of truth: command surface + flags from <code>cli/commands/*.ts</code>; config shape from <code>cli/config-schema.ts</code>; precedence rules (flags &gt; config &gt; wrangler sniff + env) from <code>cli/resolve-backend.ts</code>; clone semantics (hash-skip incremental, idempotent, data-before-metadata, v1 file-dest-only) from <code>copy.ts</code>. Token guidance to document: D1 read-scoped API token via <code>CLOUDFLARE_API_TOKEN</code>; R2 API token with <em>Object Read Only</em> scope, S3 creds derived as access key id = token id, secret = SHA-256 of token value; env vars <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>CORPUS_R2_ACCESS_KEY_ID</code>, <code>CORPUS_R2_SECRET_ACCESS_KEY</code>. Gotchas to include: data_path aliasing note for custom data_key_fn layouts at file destinations; clone copies snapshots only (no observations) in v1.</p>
+              <p>Docs live in <code>docs/</code> (Astro Starlight, standalone package). Pages are MDX under <code>docs/src/content/docs/</code>; the sidebar is configured in <code>docs/astro.config.mjs</code> (add a "CLI" group — mirror the existing "Testing" group's structure). Package name in user-facing docs is <code>@f0rbit/corpus</code> (scoped). After MDX changes ALWAYS run <code>bun run docs:build</code> from the repo root — it regenerates llms.txt and catches broken links/frontmatter. Content sources of truth: command surface + flags from <code>cli/commands/*.ts</code>; config shape from <code>cli/config-schema.ts</code>; precedence rules (flags &gt; config &gt; wrangler sniff + env) from <code>cli/resolve-backend.ts</code>; clone semantics (hash-skip incremental, idempotent, data-before-metadata, v1 file-dest-only) from <code>copy.ts</code>. Token guidance to document: D1 read-scoped API token via <code>CLOUDFLARE_API_TOKEN</code>; R2 API token with <em>Object Read Only</em> scope, S3 creds derived as access key id = token id, secret = SHA-256 of token value; env vars <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>CORPUS_R2_ACCESS_KEY_ID</code>, <code>CORPUS_R2_SECRET_ACCESS_KEY</code>, plus the connection fallbacks <code>CORPUS_D1_DATABASE_ID</code> and <code>CORPUS_R2_BUCKET</code> (added in task 5.0 — lowest precedence, for workspaces whose wrangler files carry placeholder ids, e.g. SST-managed ones). Output UX to document (task 5.0): coloured output on TTY by default; <code>--quiet</code> suppresses spinners/decorative notes but keeps result lines; <code>--json</code> emits exactly one stable machine-readable document (zero ANSI, zero spinner); <code>NO_COLOR</code> and <code>CI</code> respected; spinners render to stderr so stdout stays pipe-clean. The stable per-command <code>--json</code> shapes are specified in tasks 5.1/5.2 and their source of truth is <code>cli/commands/*.ts</code>. Also document <code>cat</code>'s config-less content-type fallback (<code>text/*</code> / <code>application/json</code> only, provenance note, binary needs <code>--raw</code> or a config codec). Gotchas to include: data_path aliasing note for custom data_key_fn layouts at file destinations; clone copies snapshots only (no observations) in v1.</p>
             </section>
             <section data-kind="what">
               <h4>What to do</h4>
-              <p><code>overview.mdx</code>: install (<code>bunx corpus</code> / package script), the six commands with one worked example each (bare wrangler workspace → <code>corpus stores</code> works with just env creds), exit codes, <code>--json</code> mode. <code>configuration.mdx</code>: <code>corpus.config.ts</code> with <code>define_config</code> (full example importing the consumer's real store definitions — emphasise single-source: same definitions the app uses), environments block, discovery precedence table, wrangler sniffing behaviour + ambiguity resolution, env var reference + token-scope recommendations (read-only posture). <code>clone.mdx</code>: semantics (incremental by content hash, idempotent re-runs, dry-run), directionality (prod→file, file→file; push deferred), interruption behaviour (orphan data healed on re-run), observations exclusion, the data_key_fn aliasing note. Add the sidebar group ordered after "Testing"; cross-link from <code>guides/cloudflare.mdx</code> ("inspecting production" pointer).</p>
+              <p><code>overview.mdx</code>: install (<code>bunx corpus</code> / package script), the six commands with one worked example each (bare wrangler workspace → <code>corpus stores</code> works with just env creds), exit codes, output behaviour (colour/TTY defaults, <code>--quiet</code>, <code>NO_COLOR</code>/<code>CI</code>, spinner-on-stderr piping note), and a "JSON output" reference section listing each command's stable <code>--json</code> shape. <code>configuration.mdx</code>: <code>corpus.config.ts</code> with <code>define_config</code> (full example importing the consumer's real store definitions — emphasise single-source: same definitions the app uses), environments block, discovery precedence table, wrangler sniffing behaviour + ambiguity resolution, env var reference + token-scope recommendations (read-only posture). <code>clone.mdx</code>: semantics (incremental by content hash, idempotent re-runs, dry-run), directionality (prod→file, file→file; push deferred), interruption behaviour (orphan data healed on re-run), observations exclusion, the data_key_fn aliasing note. Add the sidebar group ordered after "Testing"; cross-link from <code>guides/cloudflare.mdx</code> ("inspecting production" pointer).</p>
             </section>
             <section data-kind="verification">
               <h4>Verification</h4>
@@ -1283,6 +1381,7 @@
                   <li>Token docs recommend read-only scopes and never show a real-looking secret.</li>
                   <li><code>docs:build</code> run and green (it is the link checker).</li>
                   <li>Clone page documents idempotency AND the file-dest-only restriction — the two support questions this doc must preempt.</li>
+                  <li>All six commands' <code>--json</code> shapes documented and matching the shapes specified in tasks 5.1/5.2; <code>--quiet</code>/<code>NO_COLOR</code>/<code>CI</code> behaviour matches <code>cli/output.ts</code>'s actual enable matrix (no aspirational docs).</li>
                 </ul>
               </div>
             </section>
@@ -1339,11 +1438,211 @@
             </section>
           </article>
         </section>
+
+        <section class="phase" id="phase-7">
+          <h3>Phase 7: Chamber validation — real-world consumer proving run</h3>
+          <p>Validates the shipped CLI against <code>/Users/tom/dev/chamber</code> (bun monorepo, SST deploy) — a production corpus consumer storing Hansard transcripts + AI summaries in Cloudflare, whose D1/R2 data was written by <strong>corpus 0.3.4 from npm</strong> (five minors behind this repo's unpublished 0.8.0; its D1 tables were created by chamber's own drizzle migrations mirroring 0.3.4's schema). Ground truth from recon: 14 stores in <code>packages/core/src/corpus/stores.ts</code> (text/json/binary codecs only — no gzip/encrypt; every store has a custom <code>data_key_fn</code> emitting nested <code>/</code>-separated keys like <code>australia-house/summary/2024-11-21/v1</code>); 9 observation types; no version_set/pipeline_template usage; NO <code>corpus.config.ts</code> (store defs import <code>@chamber/schema</code> workspace aliases, loadable only inside chamber's workspace); chamber's <code>packages/api/wrangler.toml</code> carries SST placeholder ids so wrangler sniffing fails there BY DESIGN — the pure-env path from task 5.0 is the route. Stage <code>tom</code> ids (from <code>wrangler.migrations.toml</code>): D1 <code>a16cd14c-e0fe-4a1a-bba9-c3835eb6a800</code> (name <code>chamber-tom-chamberdbdatabase-fsvnosok</code>), R2 bucket <code>chamber-tom-chamberbucketbucket-mftdknux</code>; account id + <code>CLOUDFLARE_API_TOKEN</code> live in chamber's <code>.env</code>. <strong>Posture: strictly read-only against chamber's cloud</strong> — read-scoped tokens; clone writes only to a scratch dir outside both repos; NOTHING in the chamber repo is modified. <strong>User prerequisite (data path, tasks 7.3/7.4 real-run):</strong> no R2 S3 access keys exist yet — the user must mint an R2 API token with <em>Object Read Only</em> scope and export <code>CORPUS_R2_ACCESS_KEY_ID</code>/<code>CORPUS_R2_SECRET_ACCESS_KEY</code>; until then those tasks record metadata-side results and mark the data checks blocked (not failed). Execution order: 7.1 sequential gate → 7.2 sequential (first live contact) → 7.3 ∥ 7.4 (no repo-file contention — no worktrees needed; validation transcripts land in proof slots). Doc/UX nits discovered live are fixed by this phase's verification coder if one-line, otherwise appended to <code>#out-of-scope</code> — no replanning.</p>
+
+          <article class="task" id="task-7-1">
+            <header>
+              <h3>Task 7.1: 0.3.4 ↔ 0.8.0 schema + row-shape compatibility pre-check with pinned regression fixtures</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/fixtures/compat/corpus-0.3.4/**</code> (new — extracted schema modules from the published 0.3.4 tarball), <code>tests/integration/compat-0-3-4.test.ts</code> (new); <code>utils.ts</code>/<code>observations/storage.ts</code> ONLY if real drift is found</dd>
+              <dt>Estimated LOC</dt>
+              <dd>~40 fixture + ~180 test</dd>
+              <dt>Dependencies</dt>
+              <dd>phase-6 merged</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (gates 7.2–7.4: if 0.8.0 misparses 0.3.4 rows, live commands would misreport, not just fail)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Chamber's cloud data was written by corpus <strong>0.3.4</strong> (npm); its D1 tables were created by chamber-side drizzle migrations mirroring 0.3.4's schema: <code>corpus_snapshots</code> (store_id, version, parents, created_at, invoked_at, content_hash, content_type, size_bytes, data_key, tags; PK (store_id, version)) and <code>corpus_observations</code> (id PK, type, source_store_id, source_version, source_path, source_span_start, source_span_end, content, confidence, observed_at, created_at, derived_from). 0.8.0's row-reading truth: <code>raw_snapshot_meta_schema</code> + <code>parent_ref_schema</code> in <code>utils.ts</code>, consumed by <code>parse_snapshot_meta</code> (handles the parents/tags JSON-string branches) and the shared drizzle layer <code>backend/drizzle-storage.ts</code>; observations rows round-trip through <code>observations/storage.ts</code>. Existing test infrastructure to reuse: <code>tests/fakes/cloudflare.ts</code>'s <code>create_fake_d1</code>/<code>table_ddl</code> derive bun:sqlite DDL from drizzle table configs via <code>getTableConfig</code> — this works for ANY drizzle table object, including 0.3.4's. Fixture convention: fixture trees under <code>tests/fixtures/</code> are format-ignored (<code>.prettierignore</code>) and may be git-tracked; document provenance. Version-fixture SSOT principle: 0.3.4's published package IS the authority on 0.3.4's shape — extract its compiled <code>dist</code> schema modules verbatim rather than hand-transcribing DDL (no hand-written SQL, no transcription drift).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) Fetch the published tarball (<code>npm pack @f0rbit/corpus@0.3.4</code> in a temp dir), record its integrity hash, and vendor ONLY the schema modules (snapshots + observations schema files and their minimal imports) into <code>tests/fixtures/compat/corpus-0.3.4/</code> with a provenance README line (package version + tarball sha512). (2) Diff review (recorded in the proof, not just performed): 0.3.4 vs 0.8.0 for column set/types/PK of both tables, <code>raw_snapshot_meta_schema</code> expectations (parents/tags stored as JSON strings? timestamp representation — epoch ms vs ISO), version-string format, and observation row shape incl. <code>derived_from</code>. (3) Write <code>tests/integration/compat-0-3-4.test.ts</code>: build a bun:sqlite fake D1 whose DDL derives from the VENDORED 0.3.4 tables via the existing <code>table_ddl</code>; insert rows shaped exactly as 0.3.4 wrote them (including edge values: null <code>invoked_at</code>, empty + populated parents/tags, real chamber-style <code>data_key</code>s like <code>australia-house/summary/2024-11-21/v1</code>); read them back through 0.8.0's REAL stack (<code>create_drizzle_snapshot_metadata</code> over the drizzle d1 driver + <code>parse_snapshot_meta</code>; observations through <code>create_drizzle_observations_storage</code>); assert field-by-field fidelity (Dates by epoch ms). (4) If drift IS found: fix forward in 0.8.0's row parsing (widen <code>raw_snapshot_meta_schema</code>/observation parsing to accept both shapes) with the regression case pinned — do NOT touch <code>schema.ts</code>'s table definitions to match 0.3.4 (consumers own migrations; our tables are the 0.8.0 truth). If none: the pinned suite still guards future drift. Either way the test stays in the tree permanently.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>bun run typecheck &amp;&amp; bun test tests/integration/compat-0-3-4.test.ts &amp;&amp; bun test &amp;&amp; bun run lint</pre>
+              <p>Expected: compat suite green; full suite unaffected; proof records the diff verdict (drift found + fixed, or none) explicitly.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Fixture provenance recorded (exact version + tarball integrity hash) and the vendored modules are byte-verbatim from the tarball — no hand-edits.</li>
+                  <li>DDL still derives via <code>getTableConfig</code>/<code>table_ddl</code> from the vendored drizzle tables — zero hand-written SQL.</li>
+                  <li>Row fixtures cover the null/empty/populated matrix for <code>invoked_at</code>, <code>parents</code>, <code>tags</code> — not just the happy row.</li>
+                  <li>No production schema (<code>schema.ts</code>, <code>observations/schema.ts</code>) change to "make it pass"; any parsing widening is in the Zod boundary schemas with the 0.3.4 case pinned.</li>
+                  <li>Date comparisons by epoch ms (equivalence-rule convention), not object identity or ISO-string equality.</li>
+                  <li><code>git ls-files</code> confirms only intended fixture files were added (AGENTS.md fixture-tree rule).</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder (must include the explicit drift verdict).</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-7-2">
+            <header>
+              <h3>Task 7.2: Live metadata validation — stores / versions / show / lineage against chamber stage tom</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>none (validation only — transcripts + counts land in this proof slot; one-line doc fixes allowed via the phase verification coder)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>0 (runbook task)</dd>
+              <dt>Dependencies</dt>
+              <dd>task-7-1</dd>
+              <dt>Parallelisable with</dt>
+              <dd>none (first live contact; establishes the working env recipe 7.3/7.4 reuse)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>; target <code>/Users/tom/dev/chamber</code> (READ-ONLY — modify nothing there). Env recipe (metadata path needs NO R2 creds): <code>CLOUDFLARE_ACCOUNT_ID</code> = value of <code>CLOUDFLARE_DEFAULT_ACCOUNT_ID</code> in chamber's <code>.env</code>; <code>CLOUDFLARE_API_TOKEN</code> from the same <code>.env</code>; <code>CORPUS_D1_DATABASE_ID=a16cd14c-e0fe-4a1a-bba9-c3835eb6a800</code>; <code>CORPUS_R2_BUCKET=chamber-tom-chamberbucketbucket-mftdknux</code> (bucket must resolve even though metadata commands never touch R2 — <code>resolve_backend</code> requires it). Run the BUILT CLI (<code>bun run build</code> then <code>bun dist/cli/index.js ...</code>, or <code>bun cli/index.ts</code> from the corpus checkout). Expectations from recon: 14 stores with real Hansard data; summary stores carry parent links to transcript snapshots (lineage should walk them); 9 observation types exist. Chamber's <code>wrangler.toml</code> (in <code>packages/api/</code>) has SST placeholder ids — running from inside chamber tests graceful placeholder handling; running from a scratch dir tests the pure env path. Secrets hygiene: never paste the token into the transcript; redact if any error echoes env (task 2.1's adversary already guards this in code — verify it held).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>From a scratch dir (pure-env path), with the env recipe exported: (1) <code>corpus stores</code> — expect exactly the 14 store ids; (2) <code>corpus stores --counts --json</code> — record per-store version counts; (3) <code>corpus versions &lt;busiest-store&gt; --limit 5</code> (human) and <code>--json</code> (assert parseable, ISO dates); (4) <code>corpus show &lt;store&gt; &lt;version&gt; --observations</code> on a summary-store version — meta renders, observations list with types; (5) <code>corpus lineage &lt;summary-store&gt; &lt;version&gt;</code> — ancestor graph reaches the transcript parent, box-drawing renders sanely; (6) repeat (1) with <code>--quiet</code> (result lines only) and piped (<code>| cat</code> — plain table, no ANSI); (7) cd into <code>~/dev/chamber/packages/api</code> and run <code>corpus stores</code> with the SAME env — verify the placeholder wrangler file either yields a clean env-fallback resolution or an actionable error (record which; a crash/stack trace is a failure); (8) record wall-clock latency ballpark for stores/versions (D1 HTTP round-trips). Proof: command transcripts (token redacted), the 14 store ids, counts table, latency notes, and the placeholder-wrangler verdict.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>corpus stores --json | bun -e "const d = await new Response(Bun.stdin.stream()).json(); if (d.stores.length !== 14) throw new Error(String(d.stores.length)); console.log('14 stores OK')"</pre>
+              <p>Expected: 14 stores; every command exits 0; <code>--json</code> outputs parse; no stack traces anywhere (actionable errors only).</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Transcript contains zero secrets (grep the proof text for the token value before committing it).</li>
+                  <li>All commands run were read-only (the four read commands + <code>--json</code>/<code>--quiet</code> variants; no clone in this task).</li>
+                  <li>Placeholder-wrangler behaviour recorded explicitly (clean fallback OR actionable error — a crash fails the task).</li>
+                  <li>Piped output verified ANSI-free and spinner-free (stdout purity held against a real remote backend, not just fakes).</li>
+                  <li>Store count asserted (14), not eyeballed; version counts recorded for 7.4's audit cross-check.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder (transcripts, store list, counts, latency, placeholder verdict).</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-7-3">
+            <header>
+              <h3>Task 7.3: Live data-path validation — cat (raw + config-less fallback) against chamber content</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>none (validation only)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>0 (runbook task)</dd>
+              <dt>Dependencies</dt>
+              <dd>task-7-2; user prerequisite: R2 <em>Object Read Only</em> token minted → <code>CORPUS_R2_ACCESS_KEY_ID</code>/<code>CORPUS_R2_SECRET_ACCESS_KEY</code> exported</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-7-4 (shares the env recipe; no repo-file contention)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. Env recipe from task 7.2's proof, PLUS the R2 S3 creds (derived from an R2 API token: access key id = token id, secret = SHA-256 of token value — the user mints this; it is a documented prerequisite, not this task's work). Chamber has NO <code>corpus.config.ts</code> and its store defs are not loadable outside its workspace — so this task exercises exactly the two zero-config data paths task 5.2 shipped: <code>cat --raw</code> (literal stored bytes to stdout) and the config-less content-type fallback (<code>text/*</code> → UTF-8, <code>application/json</code> → pretty-print, provenance note first; chamber's 14 stores use text/json/binary base codecs only, no gzip/encrypt, so the fallback covers its text/json stores). <code>cat --json</code> shape: <code>{ store, version, content_type, size_bytes, encoding, content }</code>. <code>show</code> (metadata-only) gives <code>size_bytes</code> + <code>content_type</code> per version for picking targets. If the R2 creds do not exist at execution time: run what's runnable, mark the data checks <span class="badge blocked">blocked</span> in this task's badge with the prerequisite named in the proof, and do NOT fail the phase.</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) Pick via 7.2's data: one transcript version (text store) and one summary version (json store). (2) <code>corpus cat &lt;transcript-store&gt; &lt;version&gt; --raw | wc -c</code> — byte count equals the version's <code>size_bytes</code> from <code>show</code>; visually confirm UTF-8 Hansard text (head). (3) <code>corpus cat &lt;summary-store&gt; latest</code> — config-less fallback pretty-prints the AI summary JSON, provenance note appears on stderr-or-suppressed path per spec (note is decorative: confirm it does NOT appear under <code>--quiet</code> or <code>--json</code>). (4) <code>corpus cat &lt;summary-store&gt; latest --json</code> — single document, <code>encoding: "utf8"</code>, content matches (2)/(3). (5) Pipe purity: <code>corpus cat ... --raw | xxd | head</code> shows no ESC bytes prepended/appended; repeat with stderr redirected to a file to confirm spinner writes (if any) went there. (6) <code>latest</code> alias resolves (via <code>get_latest</code>) to the same version <code>versions --limit 1</code> reports. Proof: transcripts with byte counts, the content_type per store exercised, and the fallback-note behaviour matrix observed.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>test "$(corpus cat &lt;store&gt; &lt;version&gt; --raw | wc -c | tr -d ' ')" = "&lt;size_bytes-from-show&gt;" &amp;&amp; echo "byte-exact OK"</pre>
+              <p>Expected: byte-exact raw reads; fallback renders text + JSON stores; blocked-not-failed if R2 creds absent.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Byte-count equality asserted against <code>size_bytes</code> (not "looks right").</li>
+                  <li>Zero ESC/<code>\r</code> bytes in piped stdout for both raw and fallback paths (checked with <code>xxd</code>/grep, live).</li>
+                  <li>Fallback note appears in default TTY mode but NOT under <code>--quiet</code>/<code>--json</code> (the 5.0 matrix, verified live).</li>
+                  <li>No secrets in transcripts; R2 secret never echoed by any error path exercised.</li>
+                  <li>If blocked on the R2 prerequisite, the proof names exactly what the user must mint — no silent skip.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder.</div>
+            </section>
+          </article>
+
+          <article class="task" id="task-7-4">
+            <header>
+              <h3>Task 7.4: Data-key aliasing audit, then clone tom→file dry-run + real run + idempotency re-run</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>none in-repo (audit uses <code>--json</code> output + an ephemeral jq/bun one-liner; clone target is a scratch dir OUTSIDE both repos, e.g. <code>~/tmp/chamber-clone-&lt;date&gt;</code>)</dd>
+              <dt>Estimated LOC</dt>
+              <dd>0 committed (runbook task)</dd>
+              <dt>Dependencies</dt>
+              <dd>task-7-2 (audit needs only metadata); real clone additionally needs task-7-3's R2 creds prerequisite</dd>
+              <dt>Parallelisable with</dt>
+              <dd>task-7-3 (audit + dry-run portion; the real run waits for the same R2 prerequisite)</dd>
+              <dt>Mode</dt>
+              <dd>coder</dd>
+            </dl>
+            <section data-kind="context">
+              <h4>Context (self-contained)</h4>
+              <p>Repo <code>/Users/tom/dev/corpus</code>. All 14 chamber stores emit nested <code>/</code>-separated data keys via custom <code>data_key_fn</code>s (e.g. <code>australia-house/summary/2024-11-21/v1</code>). The file backend's <code>data_path</code> (<code>backend/file.ts:64</code>) sanitises <code>/</code>→<code>_</code> when mapping a data key to a <code>.bin</code> file name, so two DISTINCT keys can alias to the same file (<code>a/b</code> vs <code>a_b</code>) — silent data corruption at a file destination. The root fix is deferred (see <code>#out-of-scope</code>; it would break existing on-disk file-backend layouts). This task's audit is the gate: chamber's key segments are kebab-case slugs, ISO dates, and <code>vN</code> markers — <code>_</code> SHOULD not appear, but that must be verified empirically over ALL keys, not assumed. Clone semantics (phase 3, shipped): incremental by metadata-hit + <code>data.exists</code>, data-before-metadata ordering, verbatim <code>SnapshotMeta</code>, dry-run reports version counts but deliberately NO data-object/byte counts (unknown, not zero — task 5.2 renders accordingly). <code>clone --json</code> emits the final <code>CopySummary</code> only. Env recipe from 7.2 (+ R2 creds from 7.3's prerequisite for the real run).</p>
+            </section>
+            <section data-kind="what">
+              <h4>What to do</h4>
+              <p>(1) <strong>Audit (metadata-only, before ANY clone):</strong> for each of the 14 stores, <code>corpus versions &lt;store&gt; --json</code>; collect every <code>data_key</code>; apply the exact sanitisation (<code>key.replaceAll("/", "_")</code> — mirror <code>backend/file.ts:64</code>'s logic verbatim); group by sanitised name and report any group with &gt;1 distinct original key. Also grep the raw keys for literal <code>_</code> (the collision precondition). Record totals: stores, versions, distinct keys, collisions. (2) <strong>Gate:</strong> collisions = 0 → proceed. Collisions &gt; 0 → STOP; do not run the real clone; update this task to <span class="badge blocked">blocked</span>, promote the root aliasing fix out of <code>#out-of-scope</code> into a new task (plan edit + devpad), and record the colliding keys as the promotion evidence. (3) <code>corpus clone remote ~/tmp/chamber-clone-&lt;date&gt; --dry-run</code> — version counts reported, target dir NOT created/empty, no data-object/byte counts implied in the output (5.2's caveat, verified live). (4) Real run: <code>corpus clone remote ~/tmp/chamber-clone-&lt;date&gt;</code> — record the <code>CopySummary</code>; then validate the replica: <code>corpus stores --file ~/tmp/chamber-clone-&lt;date&gt;</code> lists the same 14 stores; version counts match 7.2's; <code>cat --raw</code> byte-equality for 2–3 spot versions (clone vs remote, <code>cmp</code>). (5) Idempotency: run the same clone again — summary shows 0 copied / all skipped. (6) Source-unchanged check: re-run <code>corpus stores --counts --json</code> against remote; identical to 7.2's recording. Proof: audit numbers, both summaries, spot-check <code>cmp</code> results, and the re-run all-skip summary.</p>
+            </section>
+            <section data-kind="verification">
+              <h4>Verification</h4>
+              <pre>corpus clone remote "$DEST" --json &amp;&amp; corpus clone remote "$DEST" --json | bun -e "const s = await new Response(Bun.stdin.stream()).json(); if (s.versions_copied !== 0) throw new Error('second run copied ' + s.versions_copied); console.log('idempotent OK')"</pre>
+              <p>Expected: audit reports 0 collisions across all 14 stores; dry-run writes nothing; real clone completes; second run copies 0; spot <code>cmp</code>s byte-identical; remote counts unchanged.</p>
+            </section>
+            <section data-kind="adversary">
+              <h4>Adversary checklist</h4>
+              <div class="adversary">
+                <ul>
+                  <li>Audit covers ALL versions of ALL 14 stores (totals recorded and cross-checked against 7.2's counts) — not a sample.</li>
+                  <li>The sanitisation applied in the audit mirrors <code>backend/file.ts:64</code> exactly (quote the line in the proof) — an audit against the wrong transform proves nothing.</li>
+                  <li>The collision gate is honoured: a non-zero audit result blocks the real clone and triggers the promotion rule — no "probably fine" override.</li>
+                  <li>Clone destination is outside both repos; chamber's repo and cloud state untouched (source counts identical before/after).</li>
+                  <li>Dry-run output implies no data-object/byte counts (5.2's dry-run caveat verified against real output).</li>
+                  <li>Second-run summary asserts <code>versions_copied === 0</code> programmatically, not by reading the terminal.</li>
+                </ul>
+              </div>
+            </section>
+            <section data-kind="proof">
+              <h4>Proof</h4>
+              <div class="empty-proof">To be filled by verification coder (audit totals + collision verdict, both CopySummaries, cmp results).</div>
+            </section>
+          </article>
+        </section>
       </section>
 
       <section id="breaking">
         <h2>Breaking changes</h2>
         <p>None. All library changes are additive: <code>list_stores</code> is optional on <code>MetadataClient</code>; the cloudflare backend refactor preserves its public API byte-for-byte (adversary-checked in task 1.1); <code>./remote</code> is a new entry point; <code>copy</code>/<code>define_config</code> are new exports; the <code>corpus</code> bin is new. No change to <code>VersionSetManifest</code> or any schema consumed by devpad/pipelines.</p>
+        <p>Amendment notes: the output-UX layer, <code>--quiet</code> flag, <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> env vars, and the <code>cat</code> content-type fallback are all additive (task 5.0 must keep colour-off table output byte-identical to the phase-4 format, adversary-checked). Phase 7 is read-only against chamber and commits only test fixtures. One conditional flag: if task 7.4's aliasing audit promotes the file-backend <code>data_path</code> fix, THAT change would be <strong>BREAKING for existing on-disk file-backend layouts</strong> (stored <code>.bin</code> names change) and will be called out explicitly at promotion time — it is NOT part of this plan as written.</p>
       </section>
 
       <section id="out-of-scope">
@@ -1356,16 +1655,17 @@
           <li><strong>Observations copy in clone</strong> — v1 copies snapshots (metadata + data) only. Observations viewing works (<code>show --observations</code>); replicating the observations table cross-backend is a follow-up to <code>copy()</code>.</li>
           <li><strong>Descendants in lineage</strong> — <code>get_children</code> exists but is a full scan on file/memory backends; v1 lineage walks ancestors only.</li>
           <li><strong>Cursor-based pagination for huge stores</strong> — <code>ListOpts.cursor</code> is declared but unimplemented across backends; CLI uses limit/before/after. Unblock separately if prod stores outgrow it.</li>
-          <li><strong>file-backend <code>data_path</code> aliasing fix</strong> (<code>/</code>→<code>_</code> collision for custom data_key layouts) — already tracked in <code>.plans/corpus-testing-substrate.html</code> out-of-scope; clone docs note it.</li>
+          <li><strong>file-backend <code>data_path</code> aliasing fix</strong> (<code>/</code>→<code>_</code> collision for custom data_key layouts) — already tracked in <code>.plans/corpus-testing-substrate.html</code> out-of-scope; clone docs note it. <strong>Amendment: now audit-gated, not just deferred.</strong> Task 7.4 empirically audits ALL of chamber's data keys (the first real consumer with <code>/</code>-keyed custom layouts to hit a file destination) before any real clone. Promotion rule: zero collisions → stays deferred with the audit as evidence; any collision → the fix is promoted into scope immediately (real-clone blocked until it lands). Recommended fix shape if promoted, in order: (1) cheap same-process collision GUARD in the file backend's data put (in-memory sanitised→original map, error on conflicting distinct keys — non-breaking, ~20 LOC, protects every future consumer); (2) the real layout fix (collision-free escaping or nested directories mirroring key segments) — BREAKING for existing on-disk layouts, needs a migration note, so it ships deliberately, not as a drive-by.</li>
           <li><strong>file-backend <code>metadata.put</code> concurrent read-modify-write race</strong> — <code>backend/file.ts</code>'s <code>metadata_storage.put</code> reads the whole store's <code>_meta.json</code>, mutates one entry, writes the whole map back, unsynchronized; two concurrent <code>put</code> calls against the same store can silently drop one write. Task 3.1's <code>copy()</code> hits this directly (version-level work is <code>parallel_map</code>-bounded) and works around it locally with a per-store FIFO serial queue around <code>dest.metadata.put</code> only (see <code>copy.ts</code>'s <code>make_serial_queue</code> doc comment) — the data transfer stays fully concurrent. The workaround is scoped to <code>copy()</code>; the backend itself is still unsafe for any other caller issuing concurrent same-store <code>metadata.put</code>s. Root fix (in-process per-store mutex or file-level CAS in <code>backend/file.ts</code>) tracked as devpad task <code>task_a298632c-29d6-4f79-bcbc-97ad31bad95f</code> in the corpus project — not fixed in this plan.</li>
           <li><strong><code>apply_batch</code> for the remote backend</strong> — would require D1 HTTP transactional batch semantics; revisit if remote transactions become a real workload.</li>
-          <li><strong>Watch/tail mode, shell completions, colored output</strong> — polish deferred until the surface stabilises.</li>
+          <li><strong>Watch/tail mode, shell completions</strong> — polish deferred until the surface stabilises. (Coloured output + spinners were promoted INTO scope by the 2026-07-19 amendment — task 5.0 — by user request; they are no longer deferred.)</li>
+          <li><strong>Chamber-side <code>corpus.config.ts</code></strong> — a config in <code>~/dev/chamber</code> importing its real store definitions (via <code>@chamber/schema</code> workspace aliases, loadable under bun from chamber's workspace) would give <code>cat</code> full codec + schema-validated decoding there. Clearly marked as a CHAMBER-repo task, not corpus work; deliberately deferred because the config-less content-type fallback (task 5.2) already covers all 14 chamber stores' text/json content for validation purposes, and cross-repo edits are outside this plan's write scope.</li>
         </ul>
       </section>
 
       <section id="agents-md-updates">
         <h2>AGENTS.md updates</h2>
-        <p>The phase-6 verification coder writes these into <code>/Users/tom/dev/corpus/AGENTS.md</code> (Layout, Conventions, and Gotchas sections as appropriate); earlier verification coders write the entries for their own phase's facts as they land.</p>
+        <p>The final phase's verification coder (phase 7 after the amendment) writes these into <code>/Users/tom/dev/corpus/AGENTS.md</code> (Layout, Conventions, and Gotchas sections as appropriate); earlier verification coders write the entries for their own phase's facts as they land.</p>
         <ul>
           <li>New layout entries: <code>backend/drizzle-storage.ts</code> (shared drizzle metadata/observations layer — the single SQL surface for BOTH <code>backend/cloudflare.ts</code> and <code>backend/remote.ts</code>; schema changes flow through it), <code>backend/remote{,-d1,-r2}.ts</code> + root <code>remote.ts</code> shim (bun-only <code>@f0rbit/corpus/remote</code> entry — never re-export from the main barrel), <code>copy.ts</code>, <code>cli/</code>.</li>
           <li><code>MetadataClient.list_stores</code> is OPTIONAL — consumers (copy(), CLI) must handle absence with an actionable <code>invalid_config</code> error; contract suite has a self-skipping block for it (same pattern as the <code>apply_batch</code> transaction guards).</li>
@@ -1376,6 +1676,11 @@
           <li><code>corpus.config.ts</code> discovery: precedence flags &gt; config &gt; wrangler sniff + env vars; secrets only ever from env/flags. <code>define_config</code> + <code>CorpusCliConfig</code> are exported from the main barrel via the PURE module <code>cli/config-schema.ts</code> — keep fs/dynamic-import code out of anything the barrel reaches.</li>
           <li>New fakes: <code>tests/fakes/d1-http.ts</code> (Bun.serve REST shim over <code>create_fake_d1</code> — reuses the bun:sqlite fake + <code>table_ddl</code>, port 0, CF envelope incl. 200-with-success:false SQL errors) and <code>tests/fakes/s3.ts</code> (Map-backed S3 server, auth ignored). Both must be <code>stop()</code>ed in cleanup.</li>
           <li>Emitted <code>.d.ts</code> for remote modules must not reference the <code>Bun</code> global — public types are structural (same pattern as <code>backend/cloudflare.ts</code>'s D1/R2 types).</li>
+          <li>CLI output UX (task 5.0): decoration policy lives ENTIRELY in <code>cli/output.ts</code> — colour ⇔ stdout TTY ∧ ¬json ∧ ¬NO_COLOR; spinner (stderr only) ⇔ stderr TTY ∧ ¬json ∧ ¬quiet ∧ ¬CI ∧ ¬NO_COLOR; colour-off tables are byte-identical to the plain format. <code>cli/ansi.ts</code> and <code>cli/spinner.ts</code> are PURE (injected sinks/flags — no console, process, or env reads); TTY/env detection happens once in <code>cli/index.ts</code>. Command files never hand-roll ANSI. Tests force the flags via <code>OutputOpts</code> + injected write sinks — no real TTY needed, no mocking.</li>
+          <li><code>--json</code> is a stability contract: one document per run, snake_case keys, ISO dates, shapes documented in docs/cli — changing a shape post-0.8.0 is breaking for consumers' scripts.</li>
+          <li>Connection env vars <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> are lowest-precedence fallbacks (config &gt; wrangler sniff &gt; env) for workspaces with placeholder wrangler ids (SST-managed, e.g. chamber). Non-secret facts only.</li>
+          <li><code>cat</code>'s config-less fallback renders <code>text/*</code>/<code>application/json</code> from <code>content_type</code> with a provenance note — it must never guess at binary or layered (gzip/encrypt) content; those need a config codec or <code>--raw</code>.</li>
+          <li>0.3.4 compat: <code>tests/fixtures/compat/corpus-0.3.4/</code> vendors the published 0.3.4 schema modules (provenance-hashed) and <code>tests/integration/compat-0-3-4.test.ts</code> pins 0.3.4-shaped rows through 0.8.0's row parsing — old-version row-shape fixtures are vendored from the published tarball, never hand-transcribed.</li>
         </ul>
       </section>
     </main>
