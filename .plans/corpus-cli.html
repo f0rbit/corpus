@@ -1366,7 +1366,7 @@
           <article class="task" id="task-6-1">
             <header>
               <h3>Task 6.1: Starlight docs — CLI group (overview, configuration, clone)</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1408,14 +1408,33 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <div class="proof">
+                <p>Landed on the integration branch <code>corpus-cli/phase-6</code> as squash commit <code>4a328bc</code> (parallel <code>coder-fast</code> worktree <code>corpus-cli/6-1-docs</code> at <code>716410d</code>), then hand-corrected by this verification pass on top (see follow-up commit) after a line-by-line fact-check of every flag, env var, and <code>--json</code> shape against <code>cli/args.ts</code>, <code>cli/commands/*.ts</code>, <code>cli/resolve-backend.ts</code>, <code>cli/wrangler.ts</code>, <code>cli/fs-walk.ts</code>, <code>cli/output.ts</code>, <code>cli/index.ts</code>, and <code>backend/remote-r2.ts</code>.</p>
+                <p><strong>Discrepancies found and fixed (this verification pass):</strong></p>
+                <ul>
+                  <li><strong>Known discrepancy (assigned):</strong> <code>overview.mdx</code>'s Installation section told readers to run <code>bunx corpus --help</code> — the unscoped <code>corpus</code> npm package is a DIFFERENT, unrelated package; the bin only resolves via the scoped specifier. Fixed to <code>bunx @f0rbit/corpus --help</code> (plus the <code>bun add -d</code> + direct-<code>corpus</code>-invocation alternative) with an explicit <code>&lt;Aside type="caution"&gt;</code> warning against the unscoped form.</li>
+                  <li><code>versions --after</code>/<code>--before</code> examples used bare dates (<code>2025-01-01</code>) — verified live against <code>cli/commands/versions.ts</code>'s <code>z.string().datetime()</code> schema (confirmed via a throwaway <code>bun -e</code> Zod check) that a date-only string is REJECTED; the CLI requires a full ISO-8601 datetime with time + <code>Z</code>/offset. Fixed examples to <code>2025-01-01T00:00:00Z</code> and added a callout.</li>
+                  <li><code>configuration.mdx</code>'s Bun SHA-256 snippet called <code>console.log(await crypto.subtle.digest(...))</code>, which logs an <code>ArrayBuffer</code> object, not a usable hex string — the snippet as written would not produce a value usable for <code>CORPUS_R2_SECRET_ACCESS_KEY</code>. Replaced with <code>new Bun.CryptoHasher('sha256').update(...).digest('hex')</code>, verified to print a correct hex digest via <code>bun -e</code>.</li>
+                  <li>The wrangler-ambiguity error example implied candidates are merged across multiple wrangler files (showing sources as "(wrangler.toml)"/"(wrangler.jsonc)") and showed database IDs as the candidate label. Read <code>cli/wrangler.ts</code>: <code>sniff_wrangler</code> reads exactly ONE file (toml → jsonc → json, first match wins, never merged), and each candidate's <code>source</code> is "top-level" or an <code>env.&lt;name&gt;</code> block WITHIN that file, labelled by <code>binding</code> name — not the database ID or the source filename. Rewrote the example and added a clarifying sentence.</li>
+                  <li>The environments-block example marked <code>account_id</code>/<code>database_id</code>/<code>bucket</code> as bare "Required" — <code>cli/config-schema.ts</code>'s <code>remote_environment_schema</code> makes all three <code>.optional()</code>; <code>resolve-backend.ts</code> falls each through to wrangler sniffing and then env vars. Reworded to describe the actual fallback chain instead of a flat requirement.</li>
+                  <li>The <code>stores</code> block's codec description ("used by <code>corpus cat</code> when no codec is found in the live app config") implied a nonexistent secondary config source — <code>cat.ts</code> only ever reads <code>config.stores</code> from <code>corpus.config.ts</code>, no other codec source exists. Reworded and cross-linked to <code>cat</code>'s real fallback (content-type-based, <code>text/*</code>/<code>application/json</code> only).</li>
+                  <li>"Coloured output" section claimed table colour is disabled by <code>--quiet</code> or in CI. Read <code>cli/output.ts</code>: table colour is gated ONLY by <code>stdout_is_tty &amp;&amp; !json &amp;&amp; !no_color</code> — <code>--quiet</code> has zero effect on table colour, and the <code>CI</code> env var only gates the progress spinner (<code>spinner_enabled</code>), not table rendering. Rewrote the section to describe the two independent gates accurately.</li>
+                  <li><code>stores --json</code>'s example always showed <code>version_count</code>/<code>latest_created_at</code> — these are only present when <code>--counts</code> is passed (confirmed in <code>stores.ts</code>'s conditional spread). Added a clarifying line.</li>
+                  <li><code>lineage --json</code>'s example didn't show the <code>missing: true</code> field <code>lineage.ts</code> emits for unreachable ancestor nodes. Added a one-line note.</li>
+                  <li><code>versions --json</code>'s example didn't note that <code>invoked_at</code>/<code>tags</code> are conditionally present (per <code>meta.ts</code>'s <code>serialize_meta</code>). Added a one-line note.</li>
+                  <li><code>README.md</code>'s doc link pointed at <code>https://corpus.f0rbit.dev/cli/</code> — no such domain is configured anywhere (no CNAME, no custom-domain step in <code>.github/workflows/docs.yml</code>'s <code>actions/deploy-pages</code> job); <code>docs/astro.config.mjs</code>'s real <code>site</code>/<code>base</code> resolve to <code>https://f0rbit.github.io/corpus</code>. Fixed the link to <code>https://f0rbit.github.io/corpus/cli/overview</code>.</li>
+                </ul>
+                <p>R2 S3 credential-derivation prose (access key = R2 token ID, secret = SHA-256 of the token value) was independently verified against <code>backend/remote-r2.ts</code>'s <code>R2S3Config</code> doc comment and matches exactly — no fix needed there.</p>
+                <p>Gates: <code>bun run typecheck</code> clean; <code>bun test</code> 946/946 pass (46 files); <code>bun run lint</code> zero errors outside the pre-existing locked foreign worktree <code>.claude/worktrees/agent-a0f1a274e5ac8cea7</code> (verified by filtering the 21 error-level diagnostics by path — all 21 resolve inside that worktree, confirmed via <code>AGENTS.md</code>'s documented gotcha that <code>bun run lint</code> scans the whole tree including live agent worktrees); <code>bun run fmt:check</code> clean; <code>bun run build</code> clean emit; <code>bun run docs:build</code> green — all three CLI pages built (<code>/cli/overview/</code>, <code>/cli/configuration/</code>, <code>/cli/clone/</code>), sidebar group present, <code>llms.txt</code>/<code>llms-full.txt</code> regenerated to reflect the corrected content.</p>
+                <p>Adversary checklist: every documented flag/command cross-checked 1:1 against <code>cli/args.ts</code>'s <code>CommandSpec</code>s in <code>cli/commands/{stores,versions,show,cat,lineage,clone}.ts</code> — PASS (no drift beyond the items fixed above). Scoped <code>@f0rbit/corpus</code> used throughout after the installation-section fix — PASS. Token docs recommend read-only D1 scope and R2 "Object Read Only" scope, no real-looking secrets (all placeholders like <code>abc123...</code>/<code>your-token</code>) — PASS. <code>docs:build</code> green — PASS. Clone page documents both idempotency (Core semantics § Incremental transfer) and the file-dest-only v1 restriction (Directionality and scope) — PASS. All six commands' <code>--json</code> shapes now verified field-for-field against <code>cli/meta.ts</code>/<code>copy.ts</code>/the command handlers, and <code>--quiet</code>/<code>NO_COLOR</code>/<code>CI</code> behaviour now matches <code>cli/output.ts</code>'s actual enable matrix exactly (previously aspirational/wrong on the <code>--quiet</code> + CI color claim; fixed) — PASS.</p>
+              </div>
             </section>
           </article>
 
           <article class="task" id="task-6-2">
             <header>
               <h3>Task 6.2: README section + version bump to 0.8.0</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1455,7 +1474,17 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <div class="proof">
+                <p>Landed on the integration branch <code>corpus-cli/phase-6</code> as squash commit <code>8c71d3b</code> (parallel <code>coder-fast</code> worktree <code>corpus-cli/6-2-release</code> at <code>4e74554</code>), then corrected by this verification pass (see follow-up commit): <code>package.json</code> version already read <code>0.8.0</code> correctly and the README's install/usage examples already used the scoped <code>@f0rbit/corpus</code> specifier throughout — no fix needed there.</p>
+                <p><strong>Two real bugs found and fixed in the README's "clone example" (task 3d's explicit charge — verify the README's clone example env vars work as documented):</strong></p>
+                <ul>
+                  <li>The example set only <code>CLOUDFLARE_API_TOKEN</code>, <code>CORPUS_D1_DATABASE_ID</code>, <code>CORPUS_R2_BUCKET</code> — it OMITTED <code>CLOUDFLARE_ACCOUNT_ID</code>. Traced through <code>cli/resolve-backend.ts</code>: <code>account_id</code> is unconditionally required (<code>missing.push("account_id (via CLOUDFLARE_ACCOUNT_ID env or config)")</code>) — the documented command would have failed immediately with <code>cannot resolve remote backend: missing account_id...</code>. Added <code>CLOUDFLARE_ACCOUNT_ID</code>.</li>
+                  <li>The example also omitted <code>CORPUS_R2_ACCESS_KEY_ID</code>/<code>CORPUS_R2_SECRET_ACCESS_KEY</code>. These aren't in <code>resolve_backend</code>'s hard-required list (they default to empty strings), but <code>clone</code> actually transfers snapshot DATA (not just metadata) — <code>copy.ts</code>'s data transfer path calls into <code>backend/remote-r2.ts</code>'s <code>Bun.S3Client</code>, which would receive empty credentials and fail auth on the first real blob read. The sibling <code>docs/src/content/docs/cli/clone.mdx</code> example (written correctly in task 6.1) already lists all 6 vars — brought the README in line with it.</li>
+                </ul>
+                <p>Also fixed the doc-site link in the same section (<code>https://corpus.f0rbit.dev/cli/</code> → <code>https://f0rbit.github.io/corpus/cli/overview</code>, the real GitHub Pages URL derived from <code>docs/astro.config.mjs</code>'s <code>site</code>/<code>base</code> — see task 6.1's proof for the full trace) and added a one-line caution against the unscoped <code>bunx corpus</code> invocation, matching the fix in <code>overview.mdx</code>.</p>
+                <p>Gates: <code>bun run typecheck</code> clean; <code>bun test</code> 946/946 pass; <code>bun run fmt:check</code> clean (full gate suite, shared with task 6.1, detailed in its proof).</p>
+                <p>Adversary checklist: no publish-related scripts/CI added — PASS (only <code>package.json</code>'s <code>version</code> field and README prose touched). Scoped package name used in all new/corrected README content — PASS. Command table's six rows and flag names (<code>--counts</code>, <code>--limit</code>/<code>--before</code>/<code>--after</code>/<code>--tag</code>, <code>--raw</code>/<code>--json</code>) cross-checked against the real command specs — PASS, matches exactly. Existing <code>## todo</code> entries untouched (diffed the section before/after — byte-identical) — PASS.</p>
+              </div>
             </section>
           </article>
         </section>

@@ -9,16 +9,23 @@ The `@f0rbit/corpus` package ships a read-only CLI for inspecting and cloning ve
 
 ## Installation
 
-The CLI is bundled with the library. Install via your package manager:
+The CLI is bundled with the `@f0rbit/corpus` package — there's no separate CLI package.
+
+Run it directly, without installing, via the **scoped** package specifier:
 
 ```bash
-bun add @f0rbit/corpus
+bunx @f0rbit/corpus --help
 ```
 
-Run it directly:
+<Aside type="caution">
+`bunx corpus` (unscoped) resolves a **different**, unrelated npm package. Always use the scoped form: `bunx @f0rbit/corpus`.
+</Aside>
+
+Or install it as a dev dependency and invoke the `corpus` bin directly:
 
 ```bash
-bunx corpus --help
+bun add -d @f0rbit/corpus
+corpus --help
 ```
 
 Or define a package script:
@@ -82,6 +89,8 @@ comments
 }
 ```
 
+`version_count` and `latest_created_at` are only present when `--counts` is passed; without it, each entry is just `{ "id": "..." }`.
+
 ### versions
 
 List versions in a store with optional filtering.
@@ -90,10 +99,14 @@ List versions in a store with optional filtering.
 corpus versions <store>                    # All versions
 corpus versions <store> --limit 10         # First 10 versions
 corpus versions <store> --tag published    # Versions with tag "published"
-corpus versions <store> --after 2025-01-01 # Versions created after date (ISO-8601)
-corpus versions <store> --before 2025-07-01 # Versions created before date
+corpus versions <store> --after 2025-01-01T00:00:00Z  # Versions created after date
+corpus versions <store> --before 2025-07-01T00:00:00Z # Versions created before date
 corpus versions <store> --json              # Machine-readable
 ```
+
+<Aside type="tip">
+`--after` and `--before` require a **full** ISO-8601 datetime (date + time + `Z` or offset, e.g. `2025-01-01T00:00:00Z`). A bare date like `2025-01-01` is rejected with an "invalid date" error.
+</Aside>
 
 **--json output shape:**
 
@@ -115,6 +128,8 @@ corpus versions <store> --json              # Machine-readable
   ]
 }
 ```
+
+`invoked_at` and `tags` are only present when the snapshot carries them.
 
 ### show
 
@@ -218,6 +233,8 @@ Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are de
 }
 ```
 
+A node for an ancestor that couldn't be loaded additionally carries `"missing": true` (with `parents: []`).
+
 ### clone
 
 Copy snapshots from a source backend to a file backend, incrementally skipping versions and blobs already present.
@@ -260,7 +277,9 @@ In dry-run mode, `data_objects_copied`, `data_objects_skipped`, and `bytes_copie
 
 ### Coloured output
 
-Tables are coloured when writing to a TTY (interactive terminal) unless `--quiet` or `--json` is set. Colour is automatically disabled in CI environments (`CI` env var detected) or when `NO_COLOR` is set.
+Tables are coloured when stdout is a TTY (interactive terminal), unless `--json` is set or `NO_COLOR` is set. `--quiet` does **not** affect table colour — it only suppresses spinners and notes (see below).
+
+The progress spinner is gated separately: it only runs when stderr is a TTY, and is disabled under `--json`, `--quiet`, `NO_COLOR`, or when the `CI` env var is detected.
 
 ### Quiet mode
 

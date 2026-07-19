@@ -48,6 +48,8 @@ bunx @f0rbit/corpus lineage <store> <version>  # parent graph
 bunx @f0rbit/corpus clone <src> <dest>  # copy snapshots
 ```
 
+`bunx corpus` (unscoped) resolves a **different** npm package — always use the scoped `@f0rbit/corpus` specifier, or `bun add -d @f0rbit/corpus` and invoke the installed `corpus` bin directly.
+
 ### commands
 
 | Command    | Purpose                                                                                            |
@@ -62,14 +64,17 @@ bunx @f0rbit/corpus clone <src> <dest>  # copy snapshots
 ### clone example
 
 ```bash
+export CLOUDFLARE_ACCOUNT_ID="<account-id>"
 export CLOUDFLARE_API_TOKEN="<token>"
 export CORPUS_D1_DATABASE_ID="<db-id>"
 export CORPUS_R2_BUCKET="<bucket>"
+export CORPUS_R2_ACCESS_KEY_ID="<r2-token-id>"
+export CORPUS_R2_SECRET_ACCESS_KEY="<sha256-of-r2-token-secret>"
 
 bunx @f0rbit/corpus clone remote ~/corpus-backup
 ```
 
-The remote backend works with Cloudflare D1 and R2 via HTTP APIs (no Worker required on read-only paths). See the [CLI documentation](https://corpus.f0rbit.dev/cli/) for full config discovery, backend resolution, codec setup, and schema-validated content retrieval.
+The remote backend works with Cloudflare D1 and R2 via HTTP APIs (no Worker required on read-only paths). See the [CLI documentation](https://f0rbit.github.io/corpus/cli/overview) for full config discovery, backend resolution, codec setup, and schema-validated content retrieval.
 
 **Mutating commands** (put, delete, tag editing) are deferred—v1 is read-only with safe token postures (read-scoped credentials).
 

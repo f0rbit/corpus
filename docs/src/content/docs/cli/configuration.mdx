@@ -52,7 +52,7 @@ export default define_config({
 
 ### Stores block
 
-The `stores` array lists store definitions. If present, only these stores are considered valid by the CLI (for validation). **Each store must have an `id`** that matches your production store definition. The optional `codec` field is a codec object with a `decode` method, used by `corpus cat` when no codec is found in the live app config.
+The `stores` array lists store definitions. If present, only these stores are considered valid by the CLI (for validation). **Each store must have an `id`** that matches your production store definition. The optional `codec` field is a codec object with a `decode` method, used by `corpus cat` to decode that store's snapshot data (see [`cat`](/corpus/cli/overview#cat) — without a matching entry here, `cat` falls back to a content-type-based rendering of `text/*` and `application/json` only).
 
 <Aside type="tip">
 For true single-source-of-truth, import your store definitions from your application instead of duplicating them:
@@ -75,13 +75,15 @@ Name your environments and define connection parameters:
 **Remote (Cloudflare D1 + R2):**
 ```typescript
 remote: {
-  account_id: 'your-cf-account-id',        // Required
-  database_id: 'your-d1-database-id',      // Required
-  bucket: 'your-r2-bucket-name',           // Required
+  account_id: 'your-cf-account-id',        // Falls back to CLOUDFLARE_ACCOUNT_ID / wrangler sniff if omitted
+  database_id: 'your-d1-database-id',      // Falls back to wrangler sniff / CORPUS_D1_DATABASE_ID if omitted
+  bucket: 'your-r2-bucket-name',           // Falls back to wrangler sniff / CORPUS_R2_BUCKET if omitted
   d1_base_url?: 'https://api.cloudflare.com/...',  // Optional: D1 API base (default)
   r2_endpoint?: 'https://your-r2.example.com',     // Optional: R2 custom endpoint
 }
 ```
+
+All fields here are individually optional in the schema — resolution falls through to wrangler sniffing and then environment variables per the precedence table above. A run only fails if `account_id`, `database_id`, `bucket`, or the `CLOUDFLARE_API_TOKEN` env var can't be resolved from *any* source.
 
 **File (local file system):**
 ```typescript
@@ -148,18 +150,18 @@ import crypto from 'crypto'
 console.log(crypto.createHash('sha256').update('your-secret-string').digest('hex'))
 
 # Bun
-console.log(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('your-secret-string')))
+console.log(new Bun.CryptoHasher('sha256').update('your-secret-string').digest('hex'))
 ```
 
 ## Wrangler sniffing
 
 If no `corpus.config.ts` is present, the CLI searches upward for `wrangler.toml` or `wrangler.jsonc` and extracts D1 and R2 binding information. This is automatic and requires no additional config.
 
-If multiple D1 databases or R2 buckets are found, the CLI returns an error naming each candidate and the config field that resolves the ambiguity:
+Sniffing reads a single `wrangler` file — `wrangler.toml`, then `wrangler.jsonc`, then `wrangler.json`, first match wins (it does not merge candidates across multiple files). Within that file, both the top-level bindings and every `[env.<name>]` block are collected as candidates. If multiple D1 databases or R2 buckets are found, the CLI returns an error naming each candidate's binding name and source block, plus the config field that resolves the ambiguity:
 
 ```
-error: ambiguous D1 database: found 3 candidates 
-  (db_prod (wrangler.toml), db_staging (wrangler.toml), db_test (wrangler.jsonc)).
+error: ambiguous D1 database: found 3 candidates
+  (DB (top-level), DB (staging), DB (production)).
 Set database_id in corpus.config.ts.
 ```
 

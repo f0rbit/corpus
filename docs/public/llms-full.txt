@@ -1,10 +1,10 @@
-# @f0rbit/corpus v0.7.0 - Full Documentation
+# @f0rbit/corpus v0.8.0 - Full Documentation
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
 This document contains the compact reference, every documentation page, and the full public source code for LLM consumption.
 
-# @f0rbit/corpus v0.7.0
+# @f0rbit/corpus v0.8.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -4725,7 +4725,7 @@ export default define_config({
 
 ### Stores block
 
-The `stores` array lists store definitions. If present, only these stores are considered valid by the CLI (for validation). **Each store must have an `id`** that matches your production store definition. The optional `codec` field is a codec object with a `decode` method, used by `corpus cat` when no codec is found in the live app config.
+The `stores` array lists store definitions. If present, only these stores are considered valid by the CLI (for validation). **Each store must have an `id`** that matches your production store definition. The optional `codec` field is a codec object with a `decode` method, used by `corpus cat` to decode that store's snapshot data (see [`cat`](/corpus/cli/overview#cat) — without a matching entry here, `cat` falls back to a content-type-based rendering of `text/*` and `application/json` only).
 
 <Aside type="tip">
 For true single-source-of-truth, import your store definitions from your application instead of duplicating them:
@@ -4748,13 +4748,15 @@ Name your environments and define connection parameters:
 **Remote (Cloudflare D1 + R2):**
 ```typescript
 remote: {
-  account_id: 'your-cf-account-id',        // Required
-  database_id: 'your-d1-database-id',      // Required
-  bucket: 'your-r2-bucket-name',           // Required
+  account_id: 'your-cf-account-id',        // Falls back to CLOUDFLARE_ACCOUNT_ID / wrangler sniff if omitted
+  database_id: 'your-d1-database-id',      // Falls back to wrangler sniff / CORPUS_D1_DATABASE_ID if omitted
+  bucket: 'your-r2-bucket-name',           // Falls back to wrangler sniff / CORPUS_R2_BUCKET if omitted
   d1_base_url?: 'https://api.cloudflare.com/...',  // Optional: D1 API base (default)
   r2_endpoint?: 'https://your-r2.example.com',     // Optional: R2 custom endpoint
 }
 ```
+
+All fields here are individually optional in the schema — resolution falls through to wrangler sniffing and then environment variables per the precedence table above. A run only fails if `account_id`, `database_id`, `bucket`, or the `CLOUDFLARE_API_TOKEN` env var can't be resolved from *any* source.
 
 **File (local file system):**
 ```typescript
@@ -4821,18 +4823,18 @@ import crypto from 'crypto'
 console.log(crypto.createHash('sha256').update('your-secret-string').digest('hex'))
 
 # Bun
-console.log(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('your-secret-string')))
+console.log(new Bun.CryptoHasher('sha256').update('your-secret-string').digest('hex'))
 ```
 
 ## Wrangler sniffing
 
 If no `corpus.config.ts` is present, the CLI searches upward for `wrangler.toml` or `wrangler.jsonc` and extracts D1 and R2 binding information. This is automatic and requires no additional config.
 
-If multiple D1 databases or R2 buckets are found, the CLI returns an error naming each candidate and the config field that resolves the ambiguity:
+Sniffing reads a single `wrangler` file — `wrangler.toml`, then `wrangler.jsonc`, then `wrangler.json`, first match wins (it does not merge candidates across multiple files). Within that file, both the top-level bindings and every `[env.<name>]` block are collected as candidates. If multiple D1 databases or R2 buckets are found, the CLI returns an error naming each candidate's binding name and source block, plus the config field that resolves the ambiguity:
 
 ```
-error: ambiguous D1 database: found 3 candidates 
-  (db_prod (wrangler.toml), db_staging (wrangler.toml), db_test (wrangler.jsonc)).
+error: ambiguous D1 database: found 3 candidates
+  (DB (top-level), DB (staging), DB (production)).
 Set database_id in corpus.config.ts.
 ```
 
@@ -4910,16 +4912,23 @@ The `@f0rbit/corpus` package ships a read-only CLI for inspecting and cloning ve
 
 ## Installation
 
-The CLI is bundled with the library. Install via your package manager:
+The CLI is bundled with the `@f0rbit/corpus` package — there's no separate CLI package.
+
+Run it directly, without installing, via the **scoped** package specifier:
 
 ```bash
-bun add @f0rbit/corpus
+bunx @f0rbit/corpus --help
 ```
 
-Run it directly:
+<Aside type="caution">
+`bunx corpus` (unscoped) resolves a **different**, unrelated npm package. Always use the scoped form: `bunx @f0rbit/corpus`.
+</Aside>
+
+Or install it as a dev dependency and invoke the `corpus` bin directly:
 
 ```bash
-bunx corpus --help
+bun add -d @f0rbit/corpus
+corpus --help
 ```
 
 Or define a package script:
@@ -4983,6 +4992,8 @@ comments
 }
 ```
 
+`version_count` and `latest_created_at` are only present when `--counts` is passed; without it, each entry is just `{ "id": "..." }`.
+
 ### versions
 
 List versions in a store with optional filtering.
@@ -4991,10 +5002,14 @@ List versions in a store with optional filtering.
 corpus versions <store>                    # All versions
 corpus versions <store> --limit 10         # First 10 versions
 corpus versions <store> --tag published    # Versions with tag "published"
-corpus versions <store> --after 2025-01-01 # Versions created after date (ISO-8601)
-corpus versions <store> --before 2025-07-01 # Versions created before date
+corpus versions <store> --after 2025-01-01T00:00:00Z  # Versions created after date
+corpus versions <store> --before 2025-07-01T00:00:00Z # Versions created before date
 corpus versions <store> --json              # Machine-readable
 ```
+
+<Aside type="tip">
+`--after` and `--before` require a **full** ISO-8601 datetime (date + time + `Z` or offset, e.g. `2025-01-01T00:00:00Z`). A bare date like `2025-01-01` is rejected with an "invalid date" error.
+</Aside>
 
 **--json output shape:**
 
@@ -5016,6 +5031,8 @@ corpus versions <store> --json              # Machine-readable
   ]
 }
 ```
+
+`invoked_at` and `tags` are only present when the snapshot carries them.
 
 ### show
 
@@ -5119,6 +5136,8 @@ Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are de
 }
 ```
 
+A node for an ancestor that couldn't be loaded additionally carries `"missing": true` (with `parents: []`).
+
 ### clone
 
 Copy snapshots from a source backend to a file backend, incrementally skipping versions and blobs already present.
@@ -5161,7 +5180,9 @@ In dry-run mode, `data_objects_copied`, `data_objects_skipped`, and `bytes_copie
 
 ### Coloured output
 
-Tables are coloured when writing to a TTY (interactive terminal) unless `--quiet` or `--json` is set. Colour is automatically disabled in CI environments (`CI` env var detected) or when `NO_COLOR` is set.
+Tables are coloured when stdout is a TTY (interactive terminal), unless `--json` is set or `NO_COLOR` is set. `--quiet` does **not** affect table colour — it only suppresses spinners and notes (see below).
+
+The progress spinner is gated separately: it only runs when stderr is a TTY, and is disabled under `--json`, `--quiet`, `NO_COLOR`, or when the `CI` env var is detected.
 
 ### Quiet mode
 
