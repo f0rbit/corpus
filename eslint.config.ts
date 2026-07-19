@@ -118,6 +118,15 @@ export default define_lint_config({
 			rules: { "no-console": "off" },
 		},
 		{
+			// cli/output.ts is the single output funnel for all CLI printing (the one
+			// place console.log and process.stdout.write appear in the CLI tree) — all
+			// other cli/ files route through Output methods defined here. This exception
+			// is scoped tightly to this one file; CLI command implementations in
+			// cli/commands/*.ts retain the no-console ban.
+			files: ["cli/output.ts"],
+			rules: { "no-console": "off" },
+		},
+		{
 			// test code: fakes and assertions may throw/try/use classes; Result discipline
 			// off. only-throw-error: tests deliberately throw strings/objects to exercise
 			// format_error/try_catch mapping. await-thenable + no-confusing-void-expression:

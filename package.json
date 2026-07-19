@@ -19,6 +19,9 @@
 		"type": "git",
 		"url": "git+https://github.com/f0rbit/corpus.git"
 	},
+	"bin": {
+		"corpus": "./dist/cli/index.js"
+	},
 	"files": [
 		"dist"
 	],

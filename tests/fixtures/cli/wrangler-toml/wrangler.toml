@@ -1,0 +1,16 @@
+account_id = "test-account-123"
+
+[[d1_databases]]
+binding = "DB"
+database_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "test-bucket"
+
+[env.staging]
+account_id = "staging-account-456"
+
+[[env.staging.d1_databases]]
+binding = "STAGING_DB"
+database_id = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
