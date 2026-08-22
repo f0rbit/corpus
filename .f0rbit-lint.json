@@ -1,8 +1,6 @@
 {
 	"version": 1,
-	"languages": [
-		"typescript"
-	],
+	"languages": ["typescript"],
 	"managed_files": [
 		{
 			"file": ".oxfmtrc.json",
