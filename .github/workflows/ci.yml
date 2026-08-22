@@ -29,7 +29,7 @@ jobs:
         run: bun run typecheck
 
       - name: Run tests
-        run: bun test --coverage
+        run: bun test
 
       - name: Lint
         run: bun run lint && bun run fmt:check
