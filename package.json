@@ -74,6 +74,7 @@
 		"build:llm": "node scripts/generate-llm-docs.js",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
+		"gate": "bunx f0rbit-lint check && bun run typecheck && bun test && bun run lint && bun run fmt:check && bun run build",
 		"prepublishOnly": "npm run build",
 		"docs:dev": "cd docs && bun run dev",
 		"docs:build": "npm run build:llm && cd docs && bun run build",
