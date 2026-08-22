@@ -22,11 +22,14 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Lint config drift check
+        run: bunx f0rbit-lint check
+
       - name: Type check
         run: bun run typecheck
 
       - name: Run tests
-        run: bun test
+        run: bun test --coverage
 
       - name: Lint
         run: bun run lint && bun run fmt:check

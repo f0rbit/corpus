@@ -2,3 +2,7 @@
 # @f0rbit/lint's umbrella model needs transitive bins (oxlint, oxfmt, eslint)
 # surfaced in node_modules/.bin — bun's isolated linker breaks that.
 linker = "hoisted"
+
+[test]
+# org-wide 80% coverage floor, enforced by `bun test --coverage` in CI
+coverageThreshold = 0.8

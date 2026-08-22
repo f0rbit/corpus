@@ -10,7 +10,7 @@
         "fast-check": "^4.7.0",
       },
       "devDependencies": {
-        "@f0rbit/lint": "0.3.0",
+        "@f0rbit/lint": "0.4.0",
         "@types/bun": "latest",
       },
       "peerDependencies": {
@@ -40,15 +40,17 @@
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.7.2", "", { "dependencies": { "@eslint/core": "^1.2.1", "levn": "^0.4.1" } }, "sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A=="],
 
-    "@f0rbit/eslint-config": ["@f0rbit/eslint-config@0.3.0", "", { "dependencies": { "@f0rbit/eslint-plugin": "0.3.0", "@f0rbit/oxlint-config": "0.3.0", "eslint-plugin-functional": "10.0.0", "eslint-plugin-import-x": "4.17.1", "eslint-plugin-oxlint": "1.72.0", "eslint-plugin-sonarjs": "4.1.0", "zod": "4.4.3" }, "peerDependencies": { "eslint": "^10.0.0", "typescript": ">=4.8.4 <6.1.0", "typescript-eslint": "^8.62.0" } }, "sha512-J6mT1Qwi5601hmpOm/iN0pXY7S6CmgCBnwG81NECMigVg2dUF4rc5g447YjXpD0zJ0ClNGGSbztPLuFPiMSXqg=="],
+    "@f0rbit/eslint-config": ["@f0rbit/eslint-config@0.4.0", "", { "dependencies": { "@f0rbit/eslint-plugin": "0.4.0", "@f0rbit/oxlint-config": "0.4.0", "eslint-plugin-functional": "10.0.0", "eslint-plugin-import-x": "4.17.1", "eslint-plugin-oxlint": "1.72.0", "eslint-plugin-sonarjs": "4.1.0", "zod": "4.4.3" }, "peerDependencies": { "eslint": "^10.0.0", "typescript": ">=4.8.4 <6.1.0", "typescript-eslint": "^8.62.0" } }, "sha512-WjHWnmMYgTfpvzTDK7H/DZMIcNRSW8cksGYllGrR1/Kf1HmCBLh7nNr4+1VZr9VQGyhsWrNxX8NLFV+fNvb6yw=="],
 
-    "@f0rbit/eslint-plugin": ["@f0rbit/eslint-plugin@0.3.0", "", { "dependencies": { "@typescript-eslint/utils": "8.62.1" }, "peerDependencies": { "eslint": "^10.0.0", "typescript": ">=4.8.4 <6.1.0" } }, "sha512-OVJXKFjB+7vYn3C1vRLIZ3WlWfgMJ23jWF/GKfpfL/Yi3B41PynShpiUMCP8WBzZEwFhUHVdv6xQVjPV34TWDA=="],
+    "@f0rbit/eslint-plugin": ["@f0rbit/eslint-plugin@0.4.0", "", { "dependencies": { "@typescript-eslint/utils": "8.62.1" }, "peerDependencies": { "eslint": "^10.0.0", "typescript": ">=4.8.4 <6.1.0" } }, "sha512-29qLsFqhux5OqUKsVpbW6qbIs5F7NBMZEsK3c9YhHt3n2AGpSqOMERsO2nq6IOfeSVVDVUEWfn2/3GZbtxH8QA=="],
 
-    "@f0rbit/lint": ["@f0rbit/lint@0.3.0", "", { "dependencies": { "@f0rbit/eslint-config": "0.3.0", "@f0rbit/eslint-plugin": "0.3.0", "@f0rbit/oxfmt-config": "0.3.0", "@f0rbit/oxlint-config": "0.3.0", "eslint": "10.6.0", "jiti": "2.7.0", "oxfmt": "0.57.0", "oxlint": "1.72.0", "typescript-eslint": "8.62.1", "zod": "4.4.3" }, "peerDependencies": { "typescript": ">=4.8.4 <6.1.0" }, "bin": { "f0rbit-lint": "src/bin.ts" } }, "sha512-tRuK3qT0aIfC21BJd1r20rh3aLW1UTfcBrtacqZ217EBNTLst0XA0bwlTTcE5DjKyGUtlh0oiNomZ4SFPe3xDA=="],
+    "@f0rbit/lint": ["@f0rbit/lint@0.4.0", "", { "dependencies": { "@f0rbit/eslint-config": "0.4.0", "@f0rbit/eslint-plugin": "0.4.0", "@f0rbit/oxfmt-config": "0.4.0", "@f0rbit/oxlint-config": "0.4.0", "@f0rbit/shellcheck-config": "0.4.0", "eslint": "10.6.0", "jiti": "2.7.0", "oxfmt": "0.57.0", "oxlint": "1.72.0", "typescript-eslint": "8.62.1", "zod": "4.4.3" }, "peerDependencies": { "typescript": ">=4.8.4 <6.1.0" }, "bin": { "f0rbit-lint": "src/bin/index.ts" } }, "sha512-Op0mPXtgS7nYitEQytqScKs8vuKZ3WnAlX/ga7CYX7KHAvUeFfht2LI8srGz21Rr17r+3G/yB21xBmFF44Mr7w=="],
 
-    "@f0rbit/oxfmt-config": ["@f0rbit/oxfmt-config@0.3.0", "", {}, "sha512-GBD20eHcIp3ru7TFLxcRvUAQHUVfuDRCFtO/0CXLw5HD0VHA7wMq5GCmwMgzIXv2+uT4VtoNRMzjFeu8GnbRcw=="],
+    "@f0rbit/oxfmt-config": ["@f0rbit/oxfmt-config@0.4.0", "", {}, "sha512-I/3qCI5vtXyuxZFIDfEBaoRwduxIBRReVDjA0+TJd9VNpaX0wgQiK84nSCN2JnLz7h8A/C4iD9fhDtG6v90oOw=="],
 
-    "@f0rbit/oxlint-config": ["@f0rbit/oxlint-config@0.3.0", "", {}, "sha512-oTXR8thLwM81LbIJF1VU2QEcspwW8GKky5EBSH9Br/NVYOZQyvIAFrktNw40qoexmdd1IcMF83W+Fc/yxAVaFA=="],
+    "@f0rbit/oxlint-config": ["@f0rbit/oxlint-config@0.4.0", "", {}, "sha512-0Qy9U/Fh4kI3Tp6M9pEySqPli4w7Nl8OlQw4wb+Sg8/IzRyZZVe2qZ3kYD2el8OjvFYmOpenhfVYDmZLp2SGzQ=="],
+
+    "@f0rbit/shellcheck-config": ["@f0rbit/shellcheck-config@0.4.0", "", {}, "sha512-fUb4n0umrzUgWb8T5y6LEY8Lav3oWTJQshl0eVGukHySMHAlYhWk9sPYgMeX2ya9D/Ruj+FO4MQ2xODw3r1YBg=="],
 
     "@humanfs/core": ["@humanfs/core@0.19.2", "", { "dependencies": { "@humanfs/types": "^0.15.0" } }, "sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA=="],
 
