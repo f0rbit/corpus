@@ -89,7 +89,7 @@
 		"fast-check": "^4.7.0"
 	},
 	"devDependencies": {
-		"@f0rbit/lint": "0.3.0",
+		"@f0rbit/lint": "0.4.0",
 		"@types/bun": "latest"
 	},
 	"peerDependencies": {

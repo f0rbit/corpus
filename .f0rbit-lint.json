@@ -1,0 +1,21 @@
+{
+	"version": 1,
+	"languages": ["typescript"],
+	"managed_files": [
+		{
+			"file": ".oxfmtrc.json",
+			"canonical_source": "@f0rbit/oxfmt-config/oxfmtrc.json",
+			"mode": "byte-copy"
+		},
+		{
+			"file": ".oxlintrc.json",
+			"mode": "must-contain",
+			"contains": "@f0rbit/oxlint-config/oxlintrc.json"
+		},
+		{
+			"file": "bunfig.toml",
+			"mode": "must-contain",
+			"contains": "coverageThreshold = 0.8"
+		}
+	]
+}
