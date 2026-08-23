@@ -7,6 +7,7 @@
       "dependencies": {
         "@astrojs/solid-js": "^5.1.3",
         "@astrojs/starlight": "^0.32.0",
+        "@f0rbit/pulse-client": "^0.0.1",
         "@f0rbit/ui": "^0.1.7",
         "astro": "^5.1.0",
         "sharp": "^0.33.5",
@@ -139,6 +140,8 @@
     "@expressive-code/plugin-shiki": ["@expressive-code/plugin-shiki@0.40.2", "", { "dependencies": { "@expressive-code/core": "^0.40.2", "shiki": "^1.26.1" } }, "sha512-t2HMR5BO6GdDW1c1ISBTk66xO503e/Z8ecZdNcr6E4NpUfvY+MRje+LtrcvbBqMwWBBO8RpVKcam/Uy+1GxwKQ=="],
 
     "@expressive-code/plugin-text-markers": ["@expressive-code/plugin-text-markers@0.40.2", "", { "dependencies": { "@expressive-code/core": "^0.40.2" } }, "sha512-/XoLjD67K9nfM4TgDlXAExzMJp6ewFKxNpfUw4F7q5Ecy+IU3/9zQQG/O70Zy+RxYTwKGw2MA9kd7yelsxnSmw=="],
+
+    "@f0rbit/pulse-client": ["@f0rbit/pulse-client@0.0.1", "", { "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-3cjOgezFwYXSkw1ub0jUqM9hvDf1sKMj9Lk7cChqKn2W6kIqaBsPVtIaJ+K2L1E5LSvJZDs20U5GUnN9yAB13g=="],
 
     "@f0rbit/ui": ["@f0rbit/ui@0.1.7", "", { "peerDependencies": { "solid-js": "^1.8.0" } }, "sha512-c97jxootTktWIxM6u2A/jKY243tEbdR3kiqBIZQDCFt4mqwP6VXTb3am0M7zVad/ZvsFJXehXiA/A73czE8ssA=="],
 
