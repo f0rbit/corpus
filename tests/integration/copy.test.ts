@@ -4,12 +4,11 @@
  * S3 fakes (same fakes as tests/integration/remote-backend.test.ts).
  *
  * Seeded data keys stay in the default `${store_id}/${content_hash}` shape.
- * The file backend's `data_path` (backend/file.ts:64) sanitises `/` → `_`
- * when mapping a data_key to a file name, so an exotic custom `data_key_fn`
- * layout COULD alias two distinct source keys onto one destination file —
- * `copy()` preserves `data_key` verbatim (see copy.ts module doc), so this
- * is a property of the destination backend, not of `copy()` itself. Not
- * exercised here on purpose; the default layout never collides.
+ * The file backend sanitises `/` → `_` when mapping a data_key to a file
+ * name, so an exotic custom `data_key_fn` layout could alias two distinct
+ * source keys; the backend rejects the second put (tests/integration/
+ * file-concurrency.test.ts) and `copy()` surfaces that error. Not exercised
+ * here on purpose; the default layout never collides.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";

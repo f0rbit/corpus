@@ -84,11 +84,8 @@ If you're building a package with types you want to test via property-based test
 
 ## todo
 
-- [ ] add gzip compression codec wrapper for large json blobs
-- [ ] add encryption codec wrapper for sensitive data at rest
 - [ ] implement ttl/expiration support with auto-cleanup
 - [ ] add batch operations (put_many, get_many) for bulk imports
-- [ ] create drizzle migration files for d1 schema setup
 - [ ] add diff(v1, v2) function for comparing json snapshots
 - [ ] implement data compaction (merge old versions)
 - [ ] add rate limiting awareness for cloudflare api limits

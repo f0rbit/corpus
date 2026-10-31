@@ -99,7 +99,7 @@ By default, `clone` transfers up to 4 versions in parallel per store:
 corpus clone source dest --concurrency 8
 ```
 
-Concurrency applies only to version-level transfers (data + metadata per version). Metadata writes are serialized per store to work around the file backend's unsynchronized read-modify-write on the metadata file—this is an implementation detail, not a limit on data throughput.
+Concurrency applies only to version-level transfers (data + metadata per version).
 
 Increase concurrency for faster transfers, but be mindful of:
 - Remote backend rate limits (D1, R2)
@@ -120,7 +120,7 @@ data_key "australia-house/summary/2024-11-21/v1" → filename "australia-house_s
 data_key "australia_house/summary/2024-11-21/v1" → filename "australia_house_summary_2024-11-21_v1.bin"
 ```
 
-Two **distinct** source data keys can alias to the same destination file, silently overwriting one another. This is a known limitation with file destinations, not a bug.
+Two **distinct** source data keys would alias to the same destination file. The file backend detects this within a process and fails the second write with a `storage_error` naming both keys, rather than overwriting. The guard is in-process only: it cannot see files written by a previous run, so an earlier clone into the same directory can still be overwritten.
 
 **Mitigation:**
 - Use the default data key layout (`${store_id}/${content_hash}`) — it never collides (single `/`, hex characters only)
