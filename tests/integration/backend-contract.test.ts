@@ -247,6 +247,46 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(versions).toContain("v1");
 					expect(versions).toContain("v3");
 				});
+
+				it("applies tag filters before limit", async () => {
+					for (const n of Array.from({ length: 10 }, (_, i) => i + 1)) {
+						await backend.metadata.put(
+							make_meta("test-store", `v${String(n)}`, {
+								created_at: new Date(Date.UTC(2024, 0, n)),
+								...(n % 3 === 0 ? { tags: ["third"] } : {}),
+							}),
+						);
+					}
+
+					const versions: string[] = [];
+					for await (const meta of backend.metadata.list("test-store", { tags: ["third"], limit: 2 })) {
+						versions.push(meta.version);
+					}
+
+					expect(versions).toEqual(["v9", "v6"]);
+				});
+
+				it("applies tag, date and limit filters together", async () => {
+					for (const n of Array.from({ length: 10 }, (_, i) => i + 1)) {
+						await backend.metadata.put(
+							make_meta("test-store", `v${String(n)}`, {
+								created_at: new Date(Date.UTC(2024, 0, n)),
+								...(n % 3 === 0 ? { tags: ["third"] } : {}),
+							}),
+						);
+					}
+
+					const versions: string[] = [];
+					for await (const meta of backend.metadata.list("test-store", {
+						tags: ["third"],
+						before: new Date(Date.UTC(2024, 0, 9)),
+						limit: 1,
+					})) {
+						versions.push(meta.version);
+					}
+
+					expect(versions).toEqual(["v6"]);
+				});
 			});
 
 			describe("get_latest", () => {

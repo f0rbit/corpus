@@ -164,6 +164,12 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				conditions.push(gt(corpus_snapshots.created_at, opts.after.toISOString()));
 			}
 
+			// Every filter must run in SQL: LIMIT applies before any JS-side filter,
+			// so a post-query tag check would under-return (or return nothing).
+			for (const tag of opts?.tags ?? []) {
+				conditions.push(sql`EXISTS (SELECT 1 FROM json_each(${corpus_snapshots.tags}) WHERE value = ${tag})`);
+			}
+
 			let query = db
 				.select()
 				.from(corpus_snapshots)
@@ -183,13 +189,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			let count = 0;
 
 			for (const row of rows.value) {
-				const meta = snapshot_row_to_meta(row);
-
-				if (opts?.tags?.length && !opts.tags.every((t) => meta.tags?.includes(t))) {
-					continue;
-				}
-
-				yield meta;
+				yield snapshot_row_to_meta(row);
 				count++;
 			}
 
