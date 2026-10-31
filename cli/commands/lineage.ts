@@ -57,7 +57,7 @@ export const lineage_command: Command = {
 			if (!wrangler_result.ok) return wrangler_result;
 			const wrangler = wrangler_result.value;
 
-			const config_result = await load_cli_config(ctx.cwd);
+			const config_result = await load_cli_config(ctx.backend_selector.config);
 			if (!config_result.ok) return config_result;
 			const config = config_result.value;
 
@@ -116,7 +116,11 @@ export const lineage_command: Command = {
 					store: node.store,
 					version: node.version,
 					depth: node.depth,
-					parents: node.parents,
+					parents: node.parents.map(({ store_id: store, version: ver, role }) => ({
+						store,
+						version: ver,
+						...(role !== undefined ? { role } : {}),
+					})),
 					...(node.missing ? { missing: true } : {}),
 				})),
 			});

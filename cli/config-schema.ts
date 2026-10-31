@@ -17,7 +17,7 @@ const file_environment_schema = z.object({
 	file: z.string(),
 });
 
-const environment_config_schema = z.union([remote_environment_schema, file_environment_schema]);
+const environment_config_schema = z.union([file_environment_schema, remote_environment_schema]);
 
 export const corpus_cli_config_schema = z
 	.object({

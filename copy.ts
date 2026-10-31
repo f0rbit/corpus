@@ -17,9 +17,10 @@
  * data_key, parents, and tags are untouched. A clone is a replica, not a
  * re-ingest. One consequence: a custom `data_key_fn` layout lands at the
  * destination with the SOURCE's keys, which is where the file backend's
- * `data_path` sanitisation (`/` → `_`, see `backend/file.ts`) can alias two
- * distinct source keys onto one destination file. Not addressed here — the
- * default `${store_id}/${content_hash}` layout never collides.
+ * `/` → `_` file-name mapping (see `backend/file.ts`) can alias two distinct
+ * source keys onto one destination file; the file backend rejects the second
+ * put with a `storage_error` rather than overwriting. The default
+ * `${store_id}/${content_hash}` layout never collides.
  *
  * Workers-safe: this module imports only `./types.js`, `./result.js`, and
  * `./concurrency.js` — no Node built-ins, no backend implementations — so
@@ -111,33 +112,7 @@ type VersionOutcome = { copied: boolean };
 /** Per-call singleflight transfer of one data blob, deduplicated by `data_key`. */
 type DataTransferrer = (data_key: string, size_bytes: number) => Promise<Result<void, CorpusError>>;
 
-/** Runs enqueued async ops one at a time, in call order. */
-type SerialQueue = <T>(fn: () => Promise<T>) => Promise<T>;
-
 const noop_progress = (_event: CopyProgressEvent): void => {};
-
-/**
- * Builds a FIFO serializer. `dest.metadata.put` is NOT guaranteed atomic
- * under concurrent calls for different versions of the same store — the
- * file backend, for one, does an unsynchronized read-`_meta.json`-modify-
- * write per call (`backend/file.ts`), so two concurrent puts against the
- * same store can both read the same on-disk snapshot and the second write
- * silently drops the first. `copy()` bounds VERSION-level work (data
- * transfer + metadata write) with `parallel_map`, so without this the race
- * is directly reachable — and was caught by this task's own dedup
- * integration test. Serializing only the metadata write (cheap; the data
- * transfer stays fully concurrent up to `opts.concurrency`) sidesteps the
- * hazard for any backend with this shape of read-modify-write, not just the
- * file backend, without touching backend implementations.
- */
-function make_serial_queue(): SerialQueue {
-	let tail: Promise<unknown> = Promise.resolve();
-	return <T>(fn: () => Promise<T>): Promise<T> => {
-		const scheduled = tail.then(fn, fn);
-		tail = scheduled;
-		return scheduled;
-	};
-}
 
 async function resolve_store_ids(source: Backend, opts: CopyOpts): Promise<Result<string[], CorpusError>> {
 	if (opts.stores) return ok(opts.stores);
@@ -212,7 +187,6 @@ async function copy_version(
 	dry_run: boolean,
 	on_progress: (event: CopyProgressEvent) => void,
 	transfer_data: DataTransferrer,
-	put_meta_serial: SerialQueue,
 ): Promise<Result<VersionOutcome, CorpusError>> {
 	const existing = await dest.metadata.get(meta.store_id, meta.version);
 	if (existing.ok) {
@@ -226,7 +200,7 @@ async function copy_version(
 	}
 
 	return pipe(transfer_data(meta.data_key, meta.size_bytes))
-		.flat_map((): Promise<Result<void, CorpusError>> => put_meta_serial(() => dest.metadata.put(meta)))
+		.flat_map(() => dest.metadata.put(meta))
 		.tap(() => {
 			on_progress({ type: "version_copied", store_id: meta.store_id, version: meta.version });
 		})
@@ -304,13 +278,12 @@ export async function copy(
 		let store_versions_copied = 0;
 		let store_versions_skipped = 0;
 		let aborted: CorpusError | undefined;
-		const put_meta_serial = make_serial_queue();
 
 		await parallel_map(
 			metas,
 			async (meta) => {
 				if (aborted) return;
-				const result = await copy_version(meta, dest, dry_run, emit, transfer_data, put_meta_serial);
+				const result = await copy_version(meta, dest, dry_run, emit, transfer_data);
 				if (!result.ok) {
 					aborted = result.error;
 					return;

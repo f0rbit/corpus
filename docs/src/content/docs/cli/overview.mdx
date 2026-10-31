@@ -43,8 +43,16 @@ Then invoke as `bun run corpus <command>`.
 ## Exit codes
 
 - **0** — Command completed successfully
-- **1** — Command encountered an error (configuration, storage, or data error)
+- **1** — Command encountered an error (configuration, storage, or data error). Backend listing failures (bad token, wrong database id, network errors) are errors, never an empty result.
 - **2** — Usage error (missing required argument, invalid flag)
+
+Errors print `error: <message>` on stderr; storage errors append the innermost cause (`— caused by: D1 HTTP error 401: Unauthorized`). Under `--json` the error is instead one document on stdout (still exit 1):
+
+```json
+{ "error": { "kind": "storage_error", "message": "Storage error during metadata.list: ... — caused by: D1 HTTP error 401: Unauthorized" } }
+```
+
+`kind` is the `CorpusError` kind (`"error"` for usage-level messages); `message` carries no `error:` prefix.
 
 ## Commands
 
@@ -167,6 +175,8 @@ corpus show <store> <version> --json       # Machine-readable format
 }
 ```
 
+`<version>` may be `latest` (resolved like `cat`). With `--observations`, `observations` is always present (an empty array when there are none); without it the key is omitted. A store with no versions at all fails with `error: store "<store>" not found (no versions)` and exit 1.
+
 ### cat
 
 Output snapshot data. Supports three render paths:
@@ -226,7 +236,7 @@ Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are de
       "version": "v2",
       "depth": 0,
       "parents": [
-        { "store_id": "transcripts", "version": "v10", "role": "source" }
+        { "store": "transcripts", "version": "v10", "role": "source" }
       ]
     }
   ]
@@ -270,7 +280,7 @@ corpus clone <source> <dest> --json             # Machine-readable summary
 ```
 
 <Aside type="caution">
-In dry-run mode, `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` are always 0 — these counts are not tracked during a dry run (unknown, not "zero"). The summary still includes an accurate `versions_copied` and `versions_skipped` count. See [Clone Semantics](/corpus/cli/clone) for full details.
+In dry-run mode (`"dry_run": true`), `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` are `null` — these counts are not tracked during a dry run (unknown, not "zero"). The summary still includes an accurate `versions_copied` and `versions_skipped` count. See [Clone Semantics](/corpus/cli/clone) for full details.
 </Aside>
 
 ## Output formatting

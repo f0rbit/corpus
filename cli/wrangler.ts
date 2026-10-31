@@ -5,6 +5,8 @@ import { find_upward } from "./fs-walk.js";
 import { z } from "zod";
 
 export type WranglerSniff = {
+	/** Path of the wrangler config the candidates came from (for error messages). */
+	path?: string;
 	account_id?: string;
 	d1_candidates: Array<{ binding: string; database_id: string; source: string }>;
 	r2_candidates: Array<{ binding: string; bucket_name: string; source: string }>;
@@ -197,5 +199,7 @@ export async function sniff_wrangler(dir: string): Promise<Result<WranglerSniff 
 	const content_result = await read_file(wrangler_path);
 	if (!content_result.ok) return content_result;
 
-	return sniff_from_content(content_result.value, format);
+	const sniffed = await sniff_from_content(content_result.value, format);
+	if (!sniffed.ok) return sniffed;
+	return ok({ ...sniffed.value, path: wrangler_path });
 }

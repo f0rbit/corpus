@@ -5,7 +5,7 @@ description: Configure backend connections, environments, and optional codec def
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-The CLI discovers connection parameters in order of precedence: explicit flags → config file → wrangler sniffing → environment variables. For metadata-only commands (`stores`, `versions`, `show`, `lineage`), you can work with just environment variables. Only `cat` with codec-based decoding and `clone` require a config file.
+The CLI discovers connection parameters in order of precedence: explicit flags → config file → `CORPUS_D1_DATABASE_ID` / `CORPUS_R2_BUCKET` environment variables → wrangler sniffing. For metadata-only commands (`stores`, `versions`, `show`, `lineage`), you can work with just environment variables. Only `cat` with codec-based decoding and `clone` require a config file.
 
 ## Discovery precedence
 
@@ -13,12 +13,14 @@ The CLI discovers connection parameters in order of precedence: explicit flags �
 |-------|--------|-----------|-------|
 | 1 | CLI flags | `--env`, `--file`, `--config` | Explicit overrides |
 | 2 | `corpus.config.ts` | `environments` block | Checked-in per-workspace config |
-| 3 | `wrangler.toml`/`.jsonc` | D1 & R2 bindings | Upward search stops at `.git` |
-| 4 | Environment variables | Fallback connection params | `CORPUS_D1_DATABASE_ID`, `CORPUS_R2_BUCKET` |
+| 3 | Environment variables | Connection params | `CORPUS_D1_DATABASE_ID`, `CORPUS_R2_BUCKET` |
+| 4 | `wrangler.toml`/`.jsonc` | D1 & R2 bindings | Upward search stops at `.git` |
 
 For Cloudflare D1 and R2 connection details:
 
-**Highest precedence wins.** If `corpus.config.ts` defines an environment with a `database_id`, that value is used even if `wrangler.toml` lists candidates. The fallback env vars (`CORPUS_D1_DATABASE_ID`, `CORPUS_R2_BUCKET`) only activate if wrangler sniffing finds nothing—useful for workspaces with SST-managed or IaC-templated placeholder IDs.
+**Highest precedence wins.** If `corpus.config.ts` defines an environment with a `database_id`, that value is used even if `wrangler.toml` lists candidates; `CORPUS_D1_DATABASE_ID` / `CORPUS_R2_BUCKET` in turn beat anything sniffed from wrangler.
+
+A wrangler `database_id` that isn't a UUID (e.g. an SST/IaC placeholder like `placeholder-will-be-set-by-sst`) is **not** a usable candidate. If nothing higher-precedence supplies a database id, the CLI fails with an error naming the wrangler file and the fix: set `CORPUS_D1_DATABASE_ID` or `database_id` in `corpus.config.ts`.
 
 ## corpus.config.ts
 
@@ -109,8 +111,8 @@ The CLI reads the following environment variables as a fallback source:
 |----------|---------|---------|
 | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID | `abc123...` |
 | `CLOUDFLARE_API_TOKEN` | Bearer token for D1/R2 access | `yJhbGc...` |
-| `CORPUS_D1_DATABASE_ID` | D1 database ID (lowest precedence) | `12345678-abcd-...` |
-| `CORPUS_R2_BUCKET` | R2 bucket name (lowest precedence) | `my-bucket` |
+| `CORPUS_D1_DATABASE_ID` | D1 database ID (beats wrangler sniffing) | `12345678-abcd-...` |
+| `CORPUS_R2_BUCKET` | R2 bucket name (beats wrangler sniffing) | `my-bucket` |
 | `CORPUS_R2_ACCESS_KEY_ID` | R2 API token ID (S3 access key) | `abc123...` |
 | `CORPUS_R2_SECRET_ACCESS_KEY` | R2 API token secret (S3 secret) | `yJhbGc...` |
 

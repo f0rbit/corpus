@@ -83,21 +83,13 @@ export function create_console_output(opts: OutputOpts): Output {
 			stdout_write(`${JSON.stringify(value, null, 2)}\n`);
 		},
 		error(err: CorpusError | string): void {
-			const msg = typeof err === "string" ? err : format_error(err);
 			if (opts.json) {
-				stdout_write(
-					`${JSON.stringify(
-						{
-							error: typeof err === "string" ? err : err.kind,
-							message: msg,
-						},
-						null,
-						2,
-					)}\n`,
-				);
-			} else {
-				stderr_write(`${msg}\n`);
+				const doc =
+					typeof err === "string" ? { kind: "error", message: err } : { kind: err.kind, message: describe_error(err) };
+				stdout_write(`${JSON.stringify({ error: doc }, null, 2)}\n`);
+				return;
 			}
+			stderr_write(`${typeof err === "string" ? err : format_error(err)}\n`);
 		},
 		bytes(data: Uint8Array): void {
 			stdout_write(data);
@@ -112,6 +104,19 @@ export function create_console_output(opts: OutputOpts): Output {
 			return { update: spin.update, stop: spin.stop };
 		},
 	};
+}
+
+// Last-resort sink for errors thrown outside the Result path. One line by
+// default; stack only under CORPUS_DEBUG=1 (flag injected, not read here).
+export function write_fatal(error: unknown, debug: boolean, write?: (chunk: string) => void): void {
+	const sink =
+		write ??
+		((chunk: string): void => {
+			process.stderr.write(chunk);
+		});
+	const message = error instanceof Error ? error.message : String(error);
+	sink(`corpus: ${message}\n`);
+	if (debug && error instanceof Error && error.stack) sink(`${error.stack}\n`);
 }
 
 export function create_capture_output(): CaptureOutput {
@@ -166,13 +171,12 @@ function compute_widths(rows: Record<string, string>[], columns: string[]): Map<
 	return widths;
 }
 
-// Byte-identical to the pre-amendment plain aligned-column format — piped
-// stdout (colour off) must not change shape.
+// Plain aligned columns; only trailing padding is trimmed per line.
 function render_plain_table(rows: Record<string, string>[], columns: string[], widths: Map<string, number>): string[] {
 	const header = columns.map((col) => col.padEnd(widths.get(col) ?? 0)).join("  ");
 	const divider = columns.map((col) => "-".repeat(widths.get(col) ?? 0)).join("  ");
 	const body = rows.map((row) => columns.map((col) => (row[col] ?? "").padEnd(widths.get(col) ?? 0)).join("  "));
-	return [header, divider, ...body];
+	return [header, divider, ...body].map((line) => line.trimEnd());
 }
 
 function plain_text(text: string): string {
@@ -228,31 +232,57 @@ function render_tree_children(nodes: TreeNode[], prefix: string, lines: string[]
 	}
 }
 
-function format_error(err: CorpusError): string {
+const MAX_CAUSE_LENGTH = 200;
+
+// First line only, bounded: drizzle's "Failed query" messages append the full
+// SQL and params after a newline.
+function brief(message: string): string {
+	const first_line = message.split("\n")[0] ?? message;
+	return first_line.length > MAX_CAUSE_LENGTH ? `${first_line.slice(0, MAX_CAUSE_LENGTH)}...` : first_line;
+}
+
+function innermost(error: Error): Error {
+	return error.cause instanceof Error ? innermost(error.cause) : error;
+}
+
+// The wrapper message plus the innermost cause when it adds information
+// (drizzle wraps the real failure, e.g. an HTTP 401, in a "Failed query").
+function with_cause(error: Error): string {
+	const root = innermost(error);
+	return root === error ? brief(error.message) : `${brief(error.message)} — caused by: ${brief(root.message)}`;
+}
+
+// Bare, prefix-free message — the `message` of the --json error document.
+function describe_error(err: CorpusError): string {
 	switch (err.kind) {
 		case "not_found":
-			return `error: Version ${err.version} not found in store ${err.store_id}${err.message ? ` (${err.message})` : ""}`;
+			if (err.version === "") return `store "${err.store_id}" not found${err.message ? ` (${err.message})` : ""}`;
+			return `Version ${err.version} not found in store ${err.store_id}${err.message ? ` (${err.message})` : ""}`;
 		case "already_exists":
-			return `error: Version ${err.version} already exists in store ${err.store_id}`;
+			return `Version ${err.version} already exists in store ${err.store_id}`;
 		case "storage_error":
-			return `error: Storage error during ${err.operation}: ${err.cause.message}`;
+			return `Storage error during ${err.operation}: ${with_cause(err.cause)}`;
 		case "decode_error":
-			return `error: Failed to decode data: ${err.cause.message}`;
+			return `Failed to decode data: ${with_cause(err.cause)}`;
 		case "encode_error":
-			return `error: Failed to encode data: ${err.cause.message}`;
+			return `Failed to encode data: ${with_cause(err.cause)}`;
 		case "hash_mismatch":
-			return `error: Content hash mismatch (expected ${err.expected}, got ${err.actual})`;
+			return `Content hash mismatch (expected ${err.expected}, got ${err.actual})`;
 		case "invalid_config":
-			return `error: ${err.message}`;
+			return err.message;
 		case "validation_error":
-			return `error: Validation failed: ${err.message}`;
+			return `Validation failed: ${err.message}`;
 		case "observation_not_found":
-			return `error: Observation ${err.id} not found`;
+			return `Observation ${err.id} not found`;
 		case "transaction_aborted":
-			return `error: Transaction aborted (${err.reason})${err.cause ? `: ${err.cause.message}` : ""}`;
+			return `Transaction aborted (${err.reason})${err.cause ? `: ${with_cause(err.cause)}` : ""}`;
 		case "partial_commit":
-			return `error: Partial commit (${String(err.ops_completed)} succeeded, ${String(err.ops_failed)} failed): ${err.cause.message}`;
+			return `Partial commit (${String(err.ops_completed)} succeeded, ${String(err.ops_failed)} failed): ${with_cause(err.cause)}`;
 		case "concurrent_modification":
-			return `error: Concurrent modification detected in version ${err.version} of store ${err.store_id}`;
+			return `Concurrent modification detected in version ${err.version} of store ${err.store_id}`;
 	}
+}
+
+function format_error(err: CorpusError): string {
+	return `error: ${describe_error(err)}`;
 }

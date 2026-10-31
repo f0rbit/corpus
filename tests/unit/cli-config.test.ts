@@ -3,7 +3,7 @@ import { join } from "path";
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { sniff_wrangler, type WranglerSniff } from "../../cli/wrangler.js";
 import { load_cli_config } from "../../cli/load-config.js";
-import { resolve_backend } from "../../cli/resolve-backend.js";
+import { resolve_backend, resolve_connection_ids } from "../../cli/resolve-backend.js";
 
 const fixture_base = join(import.meta.dir, "../fixtures/cli");
 
@@ -321,7 +321,7 @@ describe("resolve_backend", () => {
 		expect(typeof result).toBe("object");
 	});
 
-	it("wrangler sniff still beats CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env fallbacks", async () => {
+	it("CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env vars beat a wrangler sniff", async () => {
 		const sniff: WranglerSniff = {
 			account_id: "sniff-account",
 			d1_candidates: [{ binding: "DB", database_id: "sniff-db", source: "top-level" as const }],
@@ -339,5 +339,59 @@ describe("resolve_backend", () => {
 		});
 
 		expect(result.ok).toBe(true);
+	});
+});
+
+describe("resolve_connection_ids precedence", () => {
+	const uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+	const sniff: WranglerSniff = {
+		path: "/ws/wrangler.toml",
+		d1_candidates: [{ binding: "DB", database_id: uuid, source: "top-level" }],
+		r2_candidates: [{ binding: "BUCKET", bucket_name: "sniff-bucket", source: "top-level" }],
+	};
+	const placeholder: WranglerSniff = {
+		path: "/ws/wrangler.toml",
+		d1_candidates: [{ binding: "DB", database_id: "placeholder-will-be-set-by-sst", source: "top-level" }],
+		r2_candidates: [{ binding: "BUCKET", bucket_name: "chamber-corpus", source: "top-level" }],
+	};
+	const env_vars = { CORPUS_D1_DATABASE_ID: "env-db", CORPUS_R2_BUCKET: "env-bucket" };
+
+	it("config environments entry beats env vars and sniff", () => {
+		const result = resolve_connection_ids({ database_id: "config-db", bucket: "config-bucket" }, sniff, env_vars);
+		expect(result).toEqual({ ok: true, value: { database_id: "config-db", bucket: "config-bucket" } });
+	});
+
+	it("env vars beat a valid wrangler sniff", () => {
+		const result = resolve_connection_ids(undefined, sniff, env_vars);
+		expect(result).toEqual({ ok: true, value: { database_id: "env-db", bucket: "env-bucket" } });
+	});
+
+	it("wrangler sniff is the last resort", () => {
+		const result = resolve_connection_ids(undefined, sniff, {});
+		expect(result).toEqual({ ok: true, value: { database_id: uuid, bucket: "sniff-bucket" } });
+	});
+
+	it("env var beats a placeholder database_id", () => {
+		const result = resolve_connection_ids(undefined, placeholder, env_vars);
+		expect(result).toEqual({ ok: true, value: { database_id: "env-db", bucket: "env-bucket" } });
+	});
+
+	it("a placeholder database_id with no other source is invalid_config naming the file and the fix", () => {
+		const result = resolve_connection_ids(undefined, placeholder, {});
+		expect(result.ok).toBe(false);
+		if (result.ok || result.error.kind !== "invalid_config") return;
+		expect(result.error.message).toContain("placeholder-will-be-set-by-sst");
+		expect(result.error.message).toContain("/ws/wrangler.toml");
+		expect(result.error.message).toContain("CORPUS_D1_DATABASE_ID");
+		expect(result.error.message).toContain("corpus.config.ts");
+	});
+
+	it("a non-UUID sniffed id is skipped in favour of a later UUID candidate", () => {
+		const mixed: WranglerSniff = {
+			...sniff,
+			d1_candidates: [{ binding: "OLD", database_id: "placeholder", source: "top-level" }, ...sniff.d1_candidates],
+		};
+		const result = resolve_connection_ids(undefined, mixed, {});
+		expect(result.ok && result.value.database_id).toBe(uuid);
 	});
 });

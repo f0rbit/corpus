@@ -5,6 +5,7 @@ import { try_catch_async } from "../../result.js";
 import { load_cli_config } from "../load-config.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { resolve_backend } from "../resolve-backend.js";
+import { resolve_meta } from "../lookup.js";
 
 type CatEncoding = "utf8" | "base64";
 
@@ -42,9 +43,6 @@ export const cat_command: Command = {
 			});
 		}
 
-		// Resolve version alias
-		const actual_version = version === "latest" ? undefined : version;
-
 		// Load config and wrangler
 		const config_result = await load_cli_config(ctx.backend_selector.config);
 		if (!config_result.ok) return config_result;
@@ -63,9 +61,7 @@ export const cat_command: Command = {
 		const backend = backend_result.value;
 
 		// Get metadata
-		const meta_result = actual_version
-			? await backend.metadata.get(store_id, actual_version)
-			: await backend.metadata.get_latest(store_id);
+		const meta_result = await resolve_meta(backend, store_id, version);
 
 		if (!meta_result.ok) return meta_result;
 

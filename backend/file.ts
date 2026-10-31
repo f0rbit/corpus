@@ -3,7 +3,16 @@
  * @description File-system storage backend for local persistence.
  */
 
-import type { Backend, BatchOp, CorpusError, MetadataClient, Result, SnapshotMeta, EventHandler } from "../types.js";
+import type {
+	Backend,
+	BatchOp,
+	CorpusError,
+	DataClient,
+	MetadataClient,
+	Result,
+	SnapshotMeta,
+	EventHandler,
+} from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter, parse_snapshot_meta, raw_snapshot_meta_schema } from "../utils.js";
@@ -27,6 +36,53 @@ export type FileBackendConfig = {
 	on_event?: EventHandler;
 };
 
+/** Maps a data key to its on-disk file name; `/` → `_` (lossy: distinct keys can alias). */
+function sanitise_data_key(data_key: string): string {
+	return `${data_key.replace(/\//g, "_")}.bin`;
+}
+
+function collision_error(key: string, other: string): Error {
+	return new Error(`data keys "${other}" and "${key}" collide on the file backend's "/" -> "_" mapping`);
+}
+
+/** Returns the already-claimed DIFFERENT key sharing `key`'s sanitised file name, if any. */
+function find_collision(key: string, claimed: ReadonlyMap<string, string>): string | undefined {
+	const owner = claimed.get(sanitise_data_key(key));
+	return owner !== undefined && owner !== key ? owner : undefined;
+}
+
+type Release = () => void;
+
+const meta_lock = (store_id: string): string => `meta:${store_id}`;
+
+/**
+ * FIFO async mutex keyed by string. `acquire` takes every key in sorted order
+ * (deadlock-free for multi-key holders) and returns one release function.
+ */
+function create_keyed_lock(): (keys: string[]) => Promise<Release> {
+	const tails = new Map<string, Promise<void>>();
+
+	async function acquire_one(key: string): Promise<Release> {
+		const prev = tails.get(key) ?? Promise.resolve();
+		const { promise: held, resolve: open } = Promise.withResolvers<undefined>();
+		const tail = prev.then(() => held).then(() => {});
+		tails.set(key, tail);
+		await prev;
+		return () => {
+			if (tails.get(key) === tail) tails.delete(key);
+			open(undefined);
+		};
+	}
+
+	return async (keys) => {
+		const releases: Release[] = [];
+		for (const key of [...new Set(keys)].toSorted()) releases.push(await acquire_one(key));
+		return () => {
+			for (const release of releases) release();
+		};
+	};
+}
+
 /**
  * Creates a file-system storage backend for local persistence.
  * @category Backends
@@ -41,6 +97,19 @@ export type FileBackendConfig = {
  *   <store_id>/_meta.json     # Metadata for each store
  *   _data/<store_id>_<hash>.bin  # Binary data files
  * ```
+ *
+ * Concurrency: metadata and observation read-modify-write cycles, and
+ * `apply_batch` commits, are serialised by in-process per-store (and
+ * observations) locks, so concurrent calls on one backend instance never lose
+ * entries. Locking is in-process only — there is NO cross-process file
+ * locking; two processes (or two backend instances) on one directory can
+ * still race.
+ *
+ * Data keys map to files via `/` → `_`, so distinct keys (`a/b`, `a_b`) can
+ * alias. This backend refuses, with a `storage_error`, a `data.put` (or
+ * `apply_batch` `data_put`) whose file name was already claimed by a different
+ * key. The guard is in-process only: it does not detect collisions with files
+ * written by a previous process.
  *
  * @param config - Configuration with `base_path` (root directory) and optional `on_event` handler
  * @returns A Backend instance using file-system storage
@@ -66,8 +135,18 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		return join(base_path, store_id, "_meta.json");
 	}
 
+	const acquire = create_keyed_lock();
+	const OBS_LOCK = "obs";
+
+	async function locked<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+		const release = await acquire(keys);
+		return fn().finally(release);
+	}
+
+	const claimed_names = new Map<string, string>();
+
 	function data_path(data_key: string): string {
-		return join(base_path, "_data", `${data_key.replace(/\//g, "_")}.bin`);
+		return join(base_path, "_data", sanitise_data_key(data_key));
 	}
 
 	async function read_store_meta(store_id: string): Promise<Map<string, SnapshotMeta>> {
@@ -114,17 +193,19 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			return store_meta.get(version) ?? null;
 		},
 
-		async put(meta) {
-			const store_meta = await read_store_meta(meta.store_id);
-			store_meta.set(meta.version, meta);
-			await write_store_meta(meta.store_id, store_meta);
-		},
+		put: (meta) =>
+			locked([meta_lock(meta.store_id)], async () => {
+				const store_meta = await read_store_meta(meta.store_id);
+				store_meta.set(meta.version, meta);
+				await write_store_meta(meta.store_id, store_meta);
+			}),
 
-		async delete(store_id, version) {
-			const store_meta = await read_store_meta(store_id);
-			store_meta.delete(version);
-			await write_store_meta(store_id, store_meta);
-		},
+		delete: (store_id, version) =>
+			locked([meta_lock(store_id)], async () => {
+				const store_meta = await read_store_meta(store_id);
+				store_meta.delete(version);
+				await write_store_meta(store_id, store_meta);
+			}),
 
 		async *list(store_id) {
 			if (store_id) {
@@ -198,7 +279,24 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			}
 		},
 	};
-	const data = create_data_client(data_storage, emit);
+	const base_data = create_data_client(data_storage, emit);
+	const data: DataClient = {
+		...base_data,
+		async put(data_key, input) {
+			const owner = find_collision(data_key, claimed_names);
+			if (owner !== undefined) {
+				return err({ kind: "storage_error", cause: collision_error(data_key, owner), operation: "data.put" });
+			}
+			// Claim before the write so concurrent aliasing puts can't both pass the check;
+			// release on failure so a failed write doesn't poison the name.
+			const name = sanitise_data_key(data_key);
+			const newly_claimed = !claimed_names.has(name);
+			claimed_names.set(name, data_key);
+			const result = await base_data.put(data_key, input);
+			if (!result.ok && newly_claimed) claimed_names.delete(name);
+			return result;
+		},
+	};
 
 	const file_path = join(base_path, "_observations.json");
 
@@ -218,24 +316,26 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 
 	const storage = create_observations_storage({
 		get_all: read_observations,
-		set_all: write_observations,
+		set_all: (rows) => locked([OBS_LOCK], () => write_observations(rows)),
 		get_one: async (id) => {
 			const rows = await read_observations();
 			return rows.find((r) => r.id === id) ?? null;
 		},
-		add_one: async (row) => {
-			const rows = await read_observations();
-			rows.push(row);
-			await write_observations(rows);
-		},
-		remove_one: async (id) => {
-			const rows = await read_observations();
-			const idx = rows.findIndex((r) => r.id === id);
-			if (idx === -1) return false;
-			rows.splice(idx, 1);
-			await write_observations(rows);
-			return true;
-		},
+		add_one: (row) =>
+			locked([OBS_LOCK], async () => {
+				const rows = await read_observations();
+				rows.push(row);
+				await write_observations(rows);
+			}),
+		remove_one: (id) =>
+			locked([OBS_LOCK], async () => {
+				const rows = await read_observations();
+				const idx = rows.findIndex((r) => r.id === id);
+				if (idx === -1) return false;
+				rows.splice(idx, 1);
+				await write_observations(rows);
+				return true;
+			}),
 	});
 	const observations = create_observations_client(storage, metadata);
 
@@ -259,8 +359,32 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 	 *
 	 * Best-effort durability — Bun's fs API does not expose `fsync`, so we
 	 * rely on kernel-level guarantees only.
+	 *
+	 * The per-store (and observations) locks for every affected target are
+	 * held for the whole call, so a concurrent non-transactional put on an
+	 * affected store cannot be clobbered by the commit renames. A `data_put`
+	 * whose file name collides with a different, already-claimed data key
+	 * aborts the batch before any rename (`transaction_aborted`, staging dir
+	 * removed); names are claimed only once staging has succeeded.
 	 */
-	async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+	function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+		const keys = ops.flatMap((op) => {
+			switch (op.type) {
+				case "meta_put":
+					return [meta_lock(op.meta.store_id)];
+				case "meta_delete":
+					return [meta_lock(op.store_id)];
+				case "observation_put":
+				case "observation_delete":
+					return [OBS_LOCK];
+				case "data_put":
+					return [];
+			}
+		});
+		return locked(keys, () => apply_batch_locked(ops));
+	}
+
+	async function apply_batch_locked(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
 		const tx_id = crypto.randomUUID();
 		const tx_dir = join(base_path, `${TX_DIR_PREFIX}${tx_id}`);
 		const staged_meta_dir = join(tx_dir, "meta");
@@ -274,6 +398,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			// only once (one staged write per affected store, not per op).
 			const meta_changes = new Map<string, { puts: SnapshotMeta[]; deletes: string[] }>();
 			const data_writes: { staged: string; live: string }[] = [];
+			const pending_claims = new Map<string, string>();
 			let touches_observations = false;
 			const obs_puts: ObservationRow[] = [];
 			const obs_deletes: string[] = [];
@@ -297,8 +422,18 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 						meta_bucket(op.store_id).deletes.push(op.version);
 						break;
 					case "data_put": {
+						const owner = find_collision(op.data_key, claimed_names) ?? find_collision(op.data_key, pending_claims);
+						if (owner !== undefined) {
+							await rm(tx_dir, { recursive: true, force: true });
+							return err({
+								kind: "transaction_aborted",
+								reason: "apply_batch_failed",
+								cause: collision_error(op.data_key, owner),
+							});
+						}
+						pending_claims.set(sanitise_data_key(op.data_key), op.data_key);
 						const live = data_path(op.data_key);
-						const staged = join(staged_data_dir, `${op.data_key.replace(/\//g, "_")}.bin`);
+						const staged = join(staged_data_dir, sanitise_data_key(op.data_key));
 						await mkdir(dirname(staged), { recursive: true });
 						await Bun.write(staged, op.bytes);
 						data_writes.push({ staged, live });
@@ -347,6 +482,8 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 				...meta_writes,
 				...(obs_write ? [obs_write] : []),
 			];
+
+			pending_claims.forEach((key, name) => claimed_names.set(name, key));
 
 			let committed = 0;
 			for (const { staged, live } of renames) {
