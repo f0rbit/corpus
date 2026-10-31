@@ -1545,7 +1545,7 @@
           <article class="task" id="task-7-2">
             <header>
               <h3>Task 7.2: Live metadata validation — stores / versions / show / lineage against chamber stage tom</h3>
-              <span class="badge blocked" title="read paths + row shapes pass; 3 bugs fail adversary items: silent storage errors in list paths, placeholder wrangler id beats env, --tag+--limit under-returns">blocked — 3 CLI/backend bugs found (silent list errors, placeholder wrangler id wins, --tag+--limit); fix then re-run steps 7 + error paths</span>
+              <span class="badge done" title="all adversary items pass after the fixes in a7591cc/0b1e07d; re-run live 2026-10-31">done — re-validated live after fixes</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1684,7 +1684,15 @@ AZ402A6E  2026-05-17T07:30:35.451Z  86667       04ee5e9c7011  chamber:senate, �
                   <li>Store count asserted: 9, asserted programmatically; the 14 premise is corrected.</li>
                   <li>Version counts recorded for 7.4: PASS (278, matches).</li>
                 </ul>
-                <p>Re-run steps 7 and the bad-token/bad-db cases after bugs 1–3 are fixed.</p>
+                <p><strong>Re-run after the fixes</strong> (commits <code>0b1e07d</code>, <code>a7591cc</code>; read-only, captures in files, programmatic secret grep: 0 token / 0 token-prefix / 0 account-id hits):</p>
+                <ul>
+                  <li>a. From <code>chamber/packages/api</code> (SST placeholder wrangler.toml), env <code>CORPUS_D1_DATABASE_ID</code> now wins: <code>stores --counts --json</code> gives <strong>9 stores / 278 versions</strong>, exit 0. PASS.</li>
+                  <li>b. Bad token: <code>stores</code>, <code>versions hansard-summary</code> and <code>clone remote ~/tmp/x --dry-run</code> all exit 1 with <code>error: Storage error during metadata.list…: Failed query … — caused by: D1 HTTP error 401: Unauthorized</code>. PASS (clone previously would have reported a successful empty copy).</li>
+                  <li>c. Random database UUID: exit 1, <code>… caused by: D1 HTTP error 404: Not Found</code>. PASS.</li>
+                  <li>d. <code>versions hansard-summary --tag chamber:house --limit 3 --json</code> returns exactly 3. PASS.</li>
+                  <li>e. <code>show hansard-summary latest</code> resolves (exit 0); <code>versions no-such-store</code> exits 1 with <code>store "no-such-store" not found (no versions)</code>. PASS.</li>
+                  <li>f. Secret grep over all captures: 0 hits. PASS.</li>
+                </ul>
               </div>
             </section>
           </article>
