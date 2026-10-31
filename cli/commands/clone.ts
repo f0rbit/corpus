@@ -16,6 +16,13 @@ async function resolve_selector(
 	env_vars: Record<string, string | undefined>,
 	cwd: string,
 ): Promise<Result<Backend, CorpusError>> {
+	// Explicit global --env wins over the positional (documented override).
+	if (backend_selector.env !== undefined) {
+		const wrangler_result = await sniff_wrangler(cwd);
+		if (!wrangler_result.ok) return wrangler_result;
+		return resolve_backend({ env: backend_selector.env }, wrangler_result.value, { config, env_vars, cwd });
+	}
+
 	// Check if it's a file path (contains /, starts with ., or is an existing dir)
 	if (selector.includes("/") || selector.startsWith(".")) {
 		const { create_file_backend } = await import("../../file.js");
@@ -93,7 +100,7 @@ export const clone_command: Command = {
 		// Resolve dest backend
 		const dest_result = await resolve_selector(
 			dest_selector,
-			ctx.backend_selector,
+			{ ...ctx.backend_selector, env: undefined },
 			config_result.value,
 			ctx.env_vars,
 			ctx.cwd,
@@ -136,12 +143,13 @@ export const clone_command: Command = {
 			if (!spinner) return;
 			if (event.type === "store_start") {
 				current_store = event.store_id;
-				spinner.update(`${current_store}: 0 copied / 0 skipped`);
+				spinner.update(`${current_store}: 0 ${dry_run ? "would copy" : "copied"} / 0 skipped`);
 			} else if (event.type === "version_copied" || event.type === "version_skipped") {
 				// Update spinner label with running count
 				spinner.update(`${current_store}: versions`);
 			} else if (event.type === "store_done") {
-				const msg = `${event.store_id}: +${String(event.versions_copied)} copied, ${String(event.versions_skipped)} skipped`;
+				const verb = dry_run ? "would copy" : "copied";
+				const msg = `${event.store_id}: +${String(event.versions_copied)} ${verb}, ${String(event.versions_skipped)} skipped`;
 				ctx.output.note(msg);
 			}
 		};
@@ -162,19 +170,24 @@ export const clone_command: Command = {
 		const summary = copy_result.value;
 
 		if (json_mode) {
-			ctx.output.json(summary);
+			// dry_run never touches dest.data: the data counts are unknown, not 0.
+			ctx.output.json(
+				summary.dry_run
+					? { ...summary, data_objects_copied: null, data_objects_skipped: null, bytes_copied: null }
+					: summary,
+			);
 			return ok(undefined);
 		}
 
 		// dry_run never touches dest.data, so data_objects_*/bytes_copied are
-		// always 0 — showing them would misreport "0 transferred" as fact when
-		// it's really "not tracked in dry-run mode". Omit those columns instead.
+		// unknown — omit those columns rather than print a misleading 0.
+		const copied_column = summary.dry_run ? "versions_would_copy" : "versions_copied";
 		const summary_row: Record<string, string> = {
 			stores: String(summary.stores.length),
-			versions_copied: String(summary.versions_copied),
+			[copied_column]: String(summary.versions_copied),
 			versions_skipped: String(summary.versions_skipped),
 		};
-		const columns = ["stores", "versions_copied", "versions_skipped"];
+		const columns = ["stores", copied_column, "versions_skipped"];
 		if (!summary.dry_run) {
 			summary_row.data_objects = String(summary.data_objects_copied + summary.data_objects_skipped);
 			summary_row.bytes = String(summary.bytes_copied);

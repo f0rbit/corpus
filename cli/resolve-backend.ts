@@ -4,7 +4,7 @@ import type { CorpusError } from "../types.js";
 import type { CorpusCliConfig } from "./config-schema.js";
 import type { WranglerSniff } from "./wrangler.js";
 
-export type BackendSelector = { env?: string } | { file: string };
+export type BackendSelector = { env?: string; file?: string };
 
 export type ResolveBackendContext = {
 	config: CorpusCliConfig | null;
@@ -18,7 +18,7 @@ export async function resolve_backend(
 	ctx: ResolveBackendContext,
 ): Promise<Result<Backend, CorpusError>> {
 	// Handle file backend selector
-	if ("file" in selector) {
+	if (selector.file !== undefined) {
 		const { create_file_backend } = await import("../file.js");
 		const backend = create_file_backend({ base_path: selector.file });
 		return ok(backend);

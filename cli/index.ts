@@ -3,7 +3,7 @@
 import type { Output } from "./output.js";
 import { parse_global_args, parse_command_args } from "./args.js";
 import { get_command, get_all_commands } from "./commands/index.js";
-import { create_console_output } from "./output.js";
+import { create_console_output, write_fatal } from "./output.js";
 import { try_catch_async } from "../result.js";
 import type { CorpusError } from "../types.js";
 
@@ -60,9 +60,9 @@ async function main(): Promise<void> {
 		args,
 		positionals,
 		backend_selector: {
-			env: global_args.env,
-			file: global_args.file,
-			config: global_args.config,
+			...(global_args.env !== undefined && { env: global_args.env }),
+			...(global_args.file !== undefined && { file: global_args.file }),
+			...(global_args.config !== undefined && { config: global_args.config }),
 		},
 		output,
 		cwd: process.cwd(),
@@ -107,6 +107,9 @@ function render_usage(output: Output, command_name?: string): void {
 	output.line("  --help, -h          Show help");
 }
 
-main().catch(() => {
+const debug = process.env.CORPUS_DEBUG === "1";
+
+main().catch((error: unknown) => {
+	write_fatal(error, debug);
 	process.exit(1);
 });

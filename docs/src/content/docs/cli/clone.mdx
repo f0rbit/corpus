@@ -79,7 +79,7 @@ corpus clone source dest --dry-run
 **Dry-run behavior:**
 - Checks if each version exists at the destination (so `versions_copied` / `versions_skipped` reflect what a real run would do)
 - **Does not touch the destination's data layer**—no data is read, written, or checked
-- Outputs `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` as 0 (unknown, not "zero")
+- With `--json`, emits `dry_run: true` and reports `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` as `null` (unknown, not "zero"); the table omits those columns and labels the version count `versions_would_copy`
 - Run time may be fast or slow depending on source metadata latency
 
 Use dry-run to:
@@ -180,13 +180,20 @@ corpus clone remote ~/clone --concurrency 16
 
 ```bash
 $ corpus clone remote ~/clone --dry-run
-stores  versions_copied  versions_skipped
-──────────────────────────────────────────
-users   15               5
-posts   8                12
+stores  versions_would_copy  versions_skipped
+──────────────────────────────────────────────
+2       23                   17
 ```
 
-In a real run, 23 versions would be copied (15 + 8) and 17 skipped.
+In a real run, 23 versions would be copied and 17 skipped.
+
+### Override the source environment
+
+An explicit global `--env` takes precedence over the positional source (the destination is unaffected):
+
+```bash
+corpus clone remote ./backup --env staging   # source is the "staging" environment
+```
 
 ## Next steps
 

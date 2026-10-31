@@ -270,7 +270,7 @@ corpus clone <source> <dest> --json             # Machine-readable summary
 ```
 
 <Aside type="caution">
-In dry-run mode, `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` are always 0 — these counts are not tracked during a dry run (unknown, not "zero"). The summary still includes an accurate `versions_copied` and `versions_skipped` count. See [Clone Semantics](/corpus/cli/clone) for full details.
+In dry-run mode (`"dry_run": true`), `data_objects_copied`, `data_objects_skipped`, and `bytes_copied` are `null` — these counts are not tracked during a dry run (unknown, not "zero"). The summary still includes an accurate `versions_copied` and `versions_skipped` count. See [Clone Semantics](/corpus/cli/clone) for full details.
 </Aside>
 
 ## Output formatting

@@ -114,6 +114,19 @@ export function create_console_output(opts: OutputOpts): Output {
 	};
 }
 
+// Last-resort sink for errors thrown outside the Result path. One line by
+// default; stack only under CORPUS_DEBUG=1 (flag injected, not read here).
+export function write_fatal(error: unknown, debug: boolean, write?: (chunk: string) => void): void {
+	const sink =
+		write ??
+		((chunk: string): void => {
+			process.stderr.write(chunk);
+		});
+	const message = error instanceof Error ? error.message : String(error);
+	sink(`corpus: ${message}\n`);
+	if (debug && error instanceof Error && error.stack) sink(`${error.stack}\n`);
+}
+
 export function create_capture_output(): CaptureOutput {
 	const calls: CapturedCall[] = [];
 

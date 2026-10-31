@@ -23,7 +23,7 @@ export const stores_command: Command = {
 			}
 			const wrangler = wrangler_result.value;
 
-			const config_result = await load_cli_config(ctx.cwd);
+			const config_result = await load_cli_config(ctx.backend_selector.config);
 			if (!config_result.ok) {
 				return config_result;
 			}
