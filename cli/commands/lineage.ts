@@ -116,7 +116,11 @@ export const lineage_command: Command = {
 					store: node.store,
 					version: node.version,
 					depth: node.depth,
-					parents: node.parents,
+					parents: node.parents.map(({ store_id: store, version: ver, role }) => ({
+						store,
+						version: ver,
+						...(role !== undefined ? { role } : {}),
+					})),
 					...(node.missing ? { missing: true } : {}),
 				})),
 			});

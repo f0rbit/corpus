@@ -155,13 +155,13 @@ describe("cli output", () => {
 		];
 		const columns = ["id", "name"];
 
-		it("colour off renders byte-identical plain aligned columns", () => {
+		it("colour off renders plain aligned columns with trailing padding trimmed", () => {
 			const { stdout, opts } = capture_sinks();
 			const output = create_console_output(base_opts({ stdout_is_tty: false, ...opts }));
 
 			output.table(rows, columns);
 
-			expect(stdout.join("")).toBe("id  name \n--  -----\n1   Alice\n2   Bob  \n");
+			expect(stdout.join("")).toBe("id  name\n--  -----\n1   Alice\n2   Bob\n");
 		});
 
 		it("stdout_is_tty true but NO_COLOR set still renders plain (no ESC bytes)", () => {
@@ -171,7 +171,7 @@ describe("cli output", () => {
 			output.table(rows, columns);
 
 			const rendered = stdout.join("");
-			expect(rendered).toBe("id  name \n--  -----\n1   Alice\n2   Bob  \n");
+			expect(rendered).toBe("id  name\n--  -----\n1   Alice\n2   Bob\n");
 			expect(rendered.includes(ESC)).toBe(false);
 		});
 
@@ -253,8 +253,30 @@ describe("cli output", () => {
 			expect(stderr).toEqual([]);
 			expect(stdout.length).toBe(1);
 			expect(stdout[0]).toBe(
-				`${JSON.stringify({ error: "observation_not_found", message: "error: Observation obs1 not found" }, null, 2)}\n`,
+				`${JSON.stringify({ error: { kind: "observation_not_found", message: "Observation obs1 not found" } }, null, 2)}\n`,
 			);
+		});
+
+		it("storage errors render the innermost cause after the wrapper message", () => {
+			const { stderr, opts } = capture_sinks();
+			const output = create_console_output(base_opts(opts));
+			const cause = new Error("D1 HTTP error 401: Unauthorized");
+			const wrapper = new Error("Failed query: select 1\nparams: x", { cause });
+
+			output.error({ kind: "storage_error", operation: "metadata.list", cause: wrapper });
+
+			expect(stderr.join("")).toBe(
+				"error: Storage error during metadata.list: Failed query: select 1 — caused by: D1 HTTP error 401: Unauthorized\n",
+			);
+		});
+
+		it("a store-level not_found (empty version) names the store", () => {
+			const { stderr, opts } = capture_sinks();
+			const output = create_console_output(base_opts(opts));
+
+			output.error({ kind: "not_found", store_id: "nope", version: "", message: "no versions" });
+
+			expect(stderr.join("")).toBe('error: store "nope" not found (no versions)\n');
 		});
 	});
 

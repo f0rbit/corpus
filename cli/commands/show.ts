@@ -6,6 +6,7 @@ import { resolve_backend } from "../resolve-backend.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { load_cli_config } from "../load-config.js";
 import { serialize_meta } from "../meta.js";
+import { resolve_meta } from "../lookup.js";
 
 export const show_command: Command = {
 	name: "show",
@@ -49,7 +50,7 @@ export const show_command: Command = {
 			backend = backend_result.value;
 		}
 
-		const meta_result = await backend.metadata.get(store_id, version);
+		const meta_result = await resolve_meta(backend, store_id, version);
 		if (!meta_result.ok) return meta_result;
 		const meta = meta_result.value;
 
@@ -60,7 +61,7 @@ export const show_command: Command = {
 		if (observations_client) {
 			for await (const obs_meta of observations_client.query_meta({
 				source_store: store_id,
-				source_version: version,
+				source_version: meta.version,
 			})) {
 				obs_metas.push(obs_meta);
 			}
@@ -68,7 +69,7 @@ export const show_command: Command = {
 
 		if (ctx.json) {
 			const doc: Record<string, unknown> = { meta: serialize_meta(meta) };
-			if (obs_metas.length > 0) {
+			if (observations_client) {
 				doc.observations = obs_metas.map((obs) => ({
 					id: obs.id,
 					type: obs.type,

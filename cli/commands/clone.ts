@@ -8,6 +8,7 @@ import { load_cli_config } from "../load-config.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { resolve_backend } from "../resolve-backend.js";
 import type { CorpusCliConfig } from "../config-schema.js";
+import { errors_since, recorded_count } from "../backend-errors.js";
 
 async function resolve_selector(
 	selector: string,
@@ -154,6 +155,10 @@ export const clone_command: Command = {
 			}
 		};
 
+		// copy() iterates listings internally; a failed listing just ends the
+		// iterator, so check the source's error sink before reporting success.
+		const errors_before = recorded_count(source);
+
 		// Run copy
 		const copy_result = await copy(source, dest, {
 			stores: stores.length > 0 ? stores : undefined,
@@ -166,6 +171,9 @@ export const clone_command: Command = {
 		spinner?.stop();
 
 		if (!copy_result.ok) return copy_result;
+
+		const source_failure = errors_since(source, errors_before);
+		if (source_failure) return err(source_failure);
 
 		const summary = copy_result.value;
 

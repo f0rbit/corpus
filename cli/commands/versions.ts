@@ -1,5 +1,6 @@
 import type { Command, CommandContext } from "./index.js";
-import type { Result, CorpusError, SnapshotMeta } from "../../types.js";
+import type { Result, CorpusError } from "../../types.js";
+import { list_versions } from "../lookup.js";
 import { ok, err } from "../../types.js";
 import { resolve_backend } from "../resolve-backend.js";
 import { sniff_wrangler } from "../wrangler.js";
@@ -98,17 +99,17 @@ export const versions_command: Command = {
 
 		const spin = ctx.output.spinner("Loading versions...");
 
-		const metas: SnapshotMeta[] = [];
-		for await (const meta of backend.metadata.list(store_id, {
+		const listed = await list_versions(backend, store_id, {
 			limit,
 			before: before_date,
 			after: after_date,
 			tags: tags.length > 0 ? tags : undefined,
-		})) {
-			metas.push(meta);
-		}
+		});
 
 		spin.stop();
+
+		if (!listed.ok) return listed;
+		const metas = listed.value;
 
 		if (ctx.json) {
 			ctx.output.json({ store: store_id, versions: metas.map(serialize_meta) });

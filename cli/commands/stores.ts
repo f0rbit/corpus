@@ -4,6 +4,7 @@ import { ok, err } from "../../types.js";
 import { resolve_backend } from "../resolve-backend.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { load_cli_config } from "../load-config.js";
+import { collect_list } from "../backend-errors.js";
 
 export const stores_command: Command = {
 	name: "stores",
@@ -57,24 +58,26 @@ export const stores_command: Command = {
 			latest_created_at?: Date;
 		}> = [];
 
-		for await (const store_id of backend.metadata.list_stores()) {
-			stores_list.push({ id: store_id });
+		const ids = await collect_list(backend, backend.metadata.list_stores());
+		if (!ids.ok) {
+			spin.stop();
+			return ids;
 		}
+		stores_list.push(...ids.value.map((id) => ({ id })));
 
 		if (ctx.args.counts) {
 			for (const store of stores_list) {
-				let version_count = 0;
-				let latest_created_at: Date | undefined;
-
-				for await (const meta of backend.metadata.list(store.id)) {
-					version_count += 1;
-					if (!latest_created_at || meta.created_at > latest_created_at) {
-						latest_created_at = meta.created_at;
-					}
+				const metas = await collect_list(backend, backend.metadata.list(store.id));
+				if (!metas.ok) {
+					spin.stop();
+					return metas;
 				}
 
-				store.version_count = version_count;
-				store.latest_created_at = latest_created_at;
+				store.version_count = metas.value.length;
+				store.latest_created_at = metas.value.reduce<Date | undefined>(
+					(latest, meta) => (!latest || meta.created_at > latest ? meta.created_at : latest),
+					undefined,
+				);
 			}
 		}
 

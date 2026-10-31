@@ -43,7 +43,14 @@ export type FakeD1HttpServer = {
 	sqlite: Database;
 };
 
-export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
+export type FakeD1HttpOptions = {
+	/** When set, only this Bearer token is accepted (anything else gets a 401). */
+	api_token?: string;
+	/** When set, only this database id exists (any other id gets a 404). */
+	database_id?: string;
+};
+
+export function create_fake_d1_http(tables: SQLiteTable[], options: FakeD1HttpOptions = {}): FakeD1HttpServer {
 	const fake_d1 = create_fake_d1(tables);
 
 	const server = Bun.serve({
@@ -53,7 +60,7 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 			const path = url.pathname;
 
 			// Match the pattern /accounts/{account}/d1/database/{db}/raw
-			const raw_match = /^\/accounts\/[^/]+\/d1\/database\/[^/]+\/raw$/.test(path);
+			const raw_match = /^\/accounts\/[^/]+\/d1\/database\/([^/]+)\/raw$/.exec(path);
 			if (!raw_match) {
 				return new Response("Not Found", { status: 404 });
 			}
@@ -66,6 +73,12 @@ export function create_fake_d1_http(tables: SQLiteTable[]): FakeD1HttpServer {
 			const auth_header = request.headers.get("Authorization");
 			if (!auth_header || !auth_header.startsWith("Bearer ")) {
 				return new Response("Unauthorized", { status: 401 });
+			}
+			if (options.api_token !== undefined && auth_header !== `Bearer ${options.api_token}`) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+			if (options.database_id !== undefined && raw_match[1] !== options.database_id) {
+				return new Response("Not Found", { status: 404 });
 			}
 
 			try {
