@@ -1545,7 +1545,7 @@
           <article class="task" id="task-7-2">
             <header>
               <h3>Task 7.2: Live metadata validation — stores / versions / show / lineage against chamber stage tom</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge blocked" title="read paths + row shapes pass; 3 bugs fail adversary items: silent storage errors in list paths, placeholder wrangler id beats env, --tag+--limit under-returns">blocked — 3 CLI/backend bugs found (silent list errors, placeholder wrangler id wins, --tag+--limit); fix then re-run steps 7 + error paths</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1586,7 +1586,106 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder (transcripts, store list, counts, latency, placeholder verdict).</div>
+              <div class="proof">
+                <p>Run 2026-10-31 at <code>6e45f67</code> (branch <code>fix/file-backend-concurrency-and-aliasing</code>, with the selector-key entrypoint fix in place) using the real entrypoint, <code>bun /Users/tom/dev/corpus/cli/index.ts …</code>. Pure-env path ran from the scratch dir <code>~/tmp/corpus-7-2</code>. Env: <code>CLOUDFLARE_ACCOUNT_ID</code> ← chamber <code>.env</code> <code>CLOUDFLARE_DEFAULT_ACCOUNT_ID</code>, <code>CLOUDFLARE_API_TOKEN</code> ← same file (loaded by a wrapper script and never echoed), <code>CORPUS_D1_DATABASE_ID=a16cd14c-…</code>, <code>CORPUS_R2_BUCKET=chamber-tom-chamberbucketbucket-mftdknux</code>, R2 S3 creds unset. Every stdout, stderr and pty capture was written to files. <strong>Secret grep (programmatic, values never printed): 0 files contain the token, 0 contain its first 8 chars, 0 contain the account id</strong>, across 90+ captures including the error-path and TTY runs. All commands were read-only: only <code>stores</code>/<code>versions</code>/<code>show</code>/<code>lineage</code> and <code>--help</code>, no clone. The chamber <code>git status --porcelain</code> hash was identical before and after the in-repo run.</p>
+                <p><strong>Store count: 9, not 14</strong>, asserted with <code>stores --json | bun -e …</code>: <code>9 stores OK</code>. The 14-store assertion from this task's Verification fails with <code>9</code>. That is expected and is not a CLI bug: 5 of chamber's 14 defined stores have no rows (<code>persona-eval-runs</code>, <code>topic-assignment-runs</code>, <code>aph-divisions</code>, <code>bill-source-text</code>, <code>aec-shapefile-zip</code>; see 7.4's proof), and <code>list_stores</code> is <code>SELECT DISTINCT store_id</code>. Counts from <code>stores --counts --json</code> total 278 versions, which matches 7.4's audit exactly:</p>
+                <pre>id                     version_count  latest_created_at
+bill-documents         18             2026-05-17T22:03:36.555Z
+bills                  5              2026-05-17T22:03:36.272Z
+electorate-boundaries  1              2026-05-24T07:49:41.284Z
+hansard-parsed         27             2026-05-18T09:38:44.933Z
+hansard-raw            33             2026-05-18T09:38:44.385Z
+hansard-summary        67             2026-05-18T09:39:00.019Z
+mp-profiles            6              2026-05-17T12:56:39.938Z
+scrape-errors          55             2026-05-17T12:31:36.079Z
+system-prompts         66             2026-05-18T09:38:45.219Z</pre>
+                <p><strong>versions</strong> (busiest store <code>hansard-summary</code>), <code>--limit 5</code>, exit 0:</p>
+                <pre>version   created_at                size_bytes  content_hash  tags
+AZ46c8_c  2026-05-18T09:39:00.019Z  84900       e29798850029  chamber:senate, date:2026-05-14, year:2026, month:2026-05, summary
+AZ46Z7ou  2026-05-18T09:25:55.771Z  84900       472239c54404  chamber:senate, …
+AZ46RRjR  2026-05-18T08:47:47.544Z  84900       06332031a478  chamber:senate, …
+AZ46Qe6B  2026-05-18T08:44:20.097Z  61193       d2c5c50cbb47  chamber:house, …
+AZ402A6E  2026-05-17T07:30:35.451Z  86667       04ee5e9c7011  chamber:senate, …</pre>
+                <p>Filters were checked against a client-side recomputation over the unfiltered <code>--json</code> list. <code>--tag chamber:house</code> returned 61 = 61. Two tags returned 4 = 4 (AND semantics). <code>--after 2026-05-18T00:00:00Z</code> returned 4 = 4. <code>--before 2026-05-01T00:00:00Z --limit 3</code> returned 3 rows, all before the cutoff. <code>--after … --limit 2</code> returned the 2 newest. <strong>FAIL: <code>--tag</code> combined with <code>--limit</code> under-returns</strong> (bug 3 below).</p>
+                <p><strong>0.3.4 row-shape fidelity: PASS.</strong> All 278 versions across the 9 stores were read through <code>versions &lt;store&gt; --json</code> and checked by a validator script. Results: 0 problems. Every <code>created_at</code>/<code>invoked_at</code> is a canonical ISO string that round-trips through <code>Date</code>, falls in 2024–2027, and has <code>invoked_at ≤ created_at</code> (115 rows carry <code>invoked_at</code>). Lists are sorted descending by <code>created_at</code>. Every <code>content_hash</code> is 64 hex chars. <code>content_type</code> values are <code>text/plain</code> 154, <code>application/json</code> 106 and <code>application/octet-stream</code> 18. <code>size_bytes</code> is always a non-negative integer. <code>tags</code> are always arrays of non-empty strings (1,065 total). <code>parents</code> are always arrays of <code>{store_id, version, role}</code>: 82 rows carry parents, with roles <code>source</code> 82 and <code>prompt</code> 55. 0 parents point at a version missing from the listing. No unexpected keys. Per-store list lengths equal the <code>--counts</code> numbers.</p>
+                <p><strong>show</strong>: <code>show hansard-summary AZ46c8_c</code> exited 0 and rendered every meta field plus both parents (<code>hansard-parsed/AZ46c8Ah (source)</code>, <code>system-prompts/AZ46c8FX (prompt)</code>). With <code>--observations</code> it listed <strong>429 observations of 6 types</strong> (entity_mention 113, speech_summary 109, stance 103, claim 61, procedural_motion 24, constituent_reference 19). All 429 have <code>source</code> = this version and parseable <code>created_at</code>/<code>observed_at</code>. <code>confidence</code> is absent on every row: it is NULL in chamber's rows, and <code>observations/storage.ts:69</code> correctly omits it. <code>--json</code> produced one document <code>{meta, observations}</code>. <strong><code>show &lt;store&gt; latest</code>: not supported</strong>. It gives exit 1 with <code>error: Version latest not found in store hansard-summary</code>. The docs only promise <code>latest</code> for <code>cat</code> (<code>overview.mdx:182</code>), so this is a papercut, not a regression.</p>
+                <p><strong>lineage</strong> <code>hansard-summary AZ46c8_c</code>, exit 0, ~0.45 s. It walks to the raw transcript through <code>hansard-parsed</code>:</p>
+                <pre>hansard-summary/AZ46c8_c
+├─ hansard-parsed/AZ46c8Ah
+│  └─ hansard-raw/AZ46c74U
+└─ system-prompts/AZ46c8FX</pre>
+                <p><code>--depth 1</code> stops correctly at the two direct parents. <code>--json</code> gives one document <code>{root, nodes[{store, version, depth, parents}]}</code>. <code>--depth abc</code> and <code>--depth=-1</code> give exit 1 with <code>error: Validation failed: invalid --depth: must be a positive number</code>.</p>
+                <p><strong>Output hygiene against the real remote: PASS.</strong> All 10 <code>--json</code> captures (stores, stores --counts, versions, versions --limit, show, show --observations, lineage, plus error cases) parse as exactly one top-level JSON document, with stderr at 0 bytes. 0 ANSI escapes and 0 spinner frames appeared in any piped stdout or stderr capture. Under a pty (<code>script(1)</code>), the enable matrix held:</p>
+                <ul>
+                  <li>stdout and stderr both TTY: colour plus spinner on stderr.</li>
+                  <li><code>NO_COLOR=1</code>: no ANSI, no spinner.</li>
+                  <li><code>--quiet</code>: colour kept, spinner gone.</li>
+                  <li><code>--json</code> on a TTY: no ANSI, no spinner.</li>
+                  <li>stdout to a file with stderr on a TTY: the spinner appears only on the pty, and the file has 0 ANSI escapes.</li>
+                </ul>
+                <p>Piped <code>stores</code> and <code>stores --quiet</code> are byte-identical plain tables. There were no stack traces anywhere, including <code>CORPUS_DEBUG=1</code> runs (none were triggered).</p>
+                <p><strong>Error paths.</strong></p>
+                <ul>
+                  <li>Bad version, for both <code>show</code> and <code>lineage</code>: exit 1, <code>error: Version NOPE0000 not found in store hansard-summary</code>.</li>
+                  <li>Bad <code>--after</code> (bare date <code>2026-05-18</code> or <code>garbage</code>): exit 1, <code>error: Validation failed: invalid --after date: …</code>.</li>
+                  <li><code>--limit 0</code>: exit 1.</li>
+                  <li>Missing positional: exit 1.</li>
+                  <li>Unknown flag: exit 1, with node's parseArgs message.</li>
+                  <li>Unknown command: exit 2, <code>Unknown command: frobnicate</code>, with no <code>error:</code> prefix.</li>
+                  <li>Missing token: exit 1, <code>error: cannot resolve remote backend: missing CLOUDFLARE_API_TOKEN env var</code>.</li>
+                </ul>
+                <p>Papercuts:</p>
+                <ul>
+                  <li><strong>Unknown store</strong>: <code>versions no-such-store</code> exits 0 with an empty table and no note, so it can't be told apart from an empty store. <code>show no-such-store X</code> says "Version X not found", not "store not found".</li>
+                  <li>In <code>--json</code> mode errors go to <strong>stdout</strong> as <code>{"error":"not_found","message":"error: Version …"}</code>, stderr is empty, and the message carries a doubled <code>error:</code> prefix (<code>cli/output.ts:86-91</code> reuses <code>format_error</code>'s prefixed string).</li>
+                  <li>A bad token or bad DB id on <code>show</code> gives exit 1, but the message is only drizzle's <code>Failed query: select … params: hansard-summary,AZ46c8_c,1</code>. The HTTP 401 or D1 cause is buried in <code>.cause</code>, which <code>format_error</code> (<code>cli/output.ts:251</code>) doesn't walk. No secret leaked in any of these: a bogus token was used and grepped, 0 hits.</li>
+                </ul>
+                <p><strong>Bug 1 (FAIL): list-path storage errors are swallowed, so exit 0 with empty output.</strong></p>
+                <ul>
+                  <li>With an invalid <code>CLOUDFLARE_API_TOKEN</code>, <code>stores</code> prints <code>id\n--</code> and <code>versions hansard-summary</code> prints an empty table. Both exit 0 with empty stderr, even with <code>CORPUS_DEBUG=1</code>.</li>
+                  <li>A wrong <code>CORPUS_D1_DATABASE_ID</code> (zero UUID) behaves the same way.</li>
+                  <li>Cause: <code>backend/drizzle-storage.ts:261-264</code> (<code>list_stores</code>) and <code>:177-181</code> (<code>list</code>) only <code>emit({type:"error"})</code> and <code>return</code>. The CLI registers no event listener, and an <code>AsyncIterable</code> can't carry a Result.</li>
+                  <li>Effect: an auth failure looks identical to an empty database. It also hides bug 2.</li>
+                  <li>Fix: have the CLI wire an <code>on_event</code> error sink that fails the command with exit 1, or have the commands probe with a Result-returning call first.</li>
+                </ul>
+                <p><strong>Bug 2 (FAIL, placeholder-wrangler verdict): neither a clean fallback nor an actionable error. It is a silent wrong-database read.</strong></p>
+                <ul>
+                  <li>From <code>~/dev/chamber/packages/api</code> with the same env, <code>stores</code> exits 0 and prints an empty table. <code>stores --counts --json</code> gives <code>{"stores":[]}</code>. <code>versions hansard-summary --limit 2</code> gives an empty table.</li>
+                  <li>Cause: <code>cli/resolve-backend.ts:75-78</code> ranks the sniffed <code>wrangler.toml</code> <code>database_id = "placeholder-will-be-set-by-sst"</code> above <code>CORPUS_D1_DATABASE_ID</code>. The env var can never override a sniffed id, and placeholder ids aren't detected. The bucket likewise resolves to the sniffed <code>chamber-corpus</code>. Bug 1 then swallows the failing D1 query.</li>
+                  <li>Fix: let the explicit <code>CORPUS_D1_DATABASE_ID</code>/<code>CORPUS_R2_BUCKET</code> env vars beat wrangler sniffing (they are deliberate operator input). Also reject non-UUID sniffed <code>database_id</code>s with an actionable error that names the env var.</li>
+                </ul>
+                <p><strong>Bug 3 (FAIL): <code>--tag</code> + <code>--limit</code> under-returns on D1-backed backends.</strong></p>
+                <ul>
+                  <li><code>versions hansard-summary --tag chamber:house --limit 3</code> returns <strong>0 rows</strong>. <code>--limit 5</code> returns 1, and <code>--limit 10</code> returns 4, but 61 house versions exist.</li>
+                  <li>Cause: <code>backend/drizzle-storage.ts:173-174</code> applies SQL <code>LIMIT</code> before the JS tag filter at <code>:188</code>. The memory backend filters first and then limits (<code>utils.ts:387</code>), so the cloudflare and remote backends diverge from memory and file. The <code>provider_equivalence</code> pilot evidently doesn't generate tag+limit lists.</li>
+                </ul>
+                <p>Other papercuts:</p>
+                <ul>
+                  <li>Lineage's tree view drops parent <code>role</code>s (<code>show</code> renders them).</li>
+                  <li>Lineage <code>--json</code> mixes <code>store</code> (nodes) and <code>store_id</code> (parents) keys. <code>stores --json</code> uses <code>id</code>.</li>
+                  <li><code>show --observations --json</code> omits the <code>observations</code> key when there are 0, instead of giving <code>[]</code>.</li>
+                  <li>Plain tables pad the last column with trailing spaces.</li>
+                  <li>There is no <code>--no-color</code> flag (only <code>NO_COLOR</code>). That matches the docs.</li>
+                </ul>
+                <p><strong>Latency</strong> (wall clock including ~30 ms bun startup, 3 runs each, from AU to D1 HTTP):</p>
+                <ul>
+                  <li><code>stores</code>: 0.13–0.14 s.</li>
+                  <li><code>stores --counts</code>: 0.94–1.02 s (one list per store).</li>
+                  <li><code>versions hansard-summary</code> (67 rows): 0.15–0.17 s.</li>
+                  <li><code>lineage</code> (4 nodes): 0.43–0.45 s.</li>
+                  <li><code>show --observations</code> (429 obs): ~0.3 s.</li>
+                </ul>
+                <p><strong>Adversary checklist:</strong></p>
+                <ul>
+                  <li>Zero secrets: PASS.</li>
+                  <li>Read-only: PASS.</li>
+                  <li>Placeholder behaviour recorded: recorded, and the behaviour <strong>FAILS</strong>. It is not a crash, but it is a silent wrong result rather than a clean fallback or an actionable error (bugs 1 and 2).</li>
+                  <li>Piped output ANSI/spinner-free against the real remote: PASS.</li>
+                  <li>Store count asserted: 9, asserted programmatically; the 14 premise is corrected.</li>
+                  <li>Version counts recorded for 7.4: PASS (278, matches).</li>
+                </ul>
+                <p>Re-run steps 7 and the bad-token/bad-db cases after bugs 1–3 are fixed.</p>
+              </div>
             </section>
           </article>
 
