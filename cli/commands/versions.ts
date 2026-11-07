@@ -17,6 +17,7 @@ export const versions_command: Command = {
 		positionals: ["store"],
 		options: {
 			tag: { type: "string", multiple: true },
+			entity: { type: "string" },
 			limit: { type: "string" },
 			before: { type: "string" },
 			after: { type: "string" },
@@ -101,6 +102,7 @@ export const versions_command: Command = {
 			before: before_date,
 			after: after_date,
 			tags: tags.length > 0 ? tags : undefined,
+			entity_key: typeof ctx.args.entity === "string" ? ctx.args.entity : undefined,
 		});
 
 		spin.stop();
@@ -113,6 +115,9 @@ export const versions_command: Command = {
 			return ok(undefined);
 		}
 
+		const keyed = metas.some((meta) => meta.entity_key);
+		const columns = ["version", "created_at", "size_bytes", "content_hash", "tags"];
+
 		ctx.output.table(
 			metas.map((meta) => ({
 				version: meta.version,
@@ -120,8 +125,9 @@ export const versions_command: Command = {
 				size_bytes: String(meta.size_bytes),
 				content_hash: meta.content_hash.slice(0, 12),
 				tags: meta.tags?.join(", ") ?? "",
+				...(keyed ? { entity_key: meta.entity_key ?? "" } : {}),
 			})),
-			["version", "created_at", "size_bytes", "content_hash", "tags"],
+			keyed ? [...columns, "entity_key"] : columns,
 		);
 
 		return ok(undefined);

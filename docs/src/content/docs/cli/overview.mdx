@@ -107,6 +107,7 @@ List versions in a store with optional filtering.
 corpus versions <store>                    # All versions
 corpus versions <store> --limit 10         # First 10 versions
 corpus versions <store> --tag published    # Versions with tag "published"
+corpus versions <store> --entity acme       # Versions for one entity_key (adds an entity_key column when any row is keyed)
 corpus versions <store> --after 2025-01-01T00:00:00Z  # Versions created after date
 corpus versions <store> --before 2025-07-01T00:00:00Z # Versions created before date
 corpus versions <store> --json              # Machine-readable

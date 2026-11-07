@@ -14,6 +14,7 @@ export type JsonSnapshotMeta = {
 	size_bytes: number;
 	data_key: string;
 	tags?: string[];
+	entity_key?: string;
 };
 
 export function serialize_meta(meta: SnapshotMeta): JsonSnapshotMeta {
@@ -28,5 +29,6 @@ export function serialize_meta(meta: SnapshotMeta): JsonSnapshotMeta {
 		size_bytes: meta.size_bytes,
 		data_key: meta.data_key,
 		...(meta.tags ? { tags: meta.tags } : {}),
+		...(meta.entity_key ? { entity_key: meta.entity_key } : {}),
 	};
 }

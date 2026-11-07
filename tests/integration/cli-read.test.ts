@@ -467,6 +467,97 @@ describe("CLI read commands", () => {
 			expect(typeof first_version?.created_at).toBe("string");
 		});
 
+		it("versions --entity filters by entity_key and shows an entity column only when keyed", async () => {
+			const base = {
+				store_id: "keyed",
+				parents: [],
+				content_hash: "abcdef1234567890",
+				content_type: "application/json",
+				size_bytes: 2,
+			};
+			await backend.metadata.put({
+				...base,
+				version: "v1",
+				created_at: new Date(1000),
+				data_key: "k/1",
+				entity_key: "A",
+			});
+			await backend.metadata.put({
+				...base,
+				version: "v2",
+				created_at: new Date(2000),
+				data_key: "k/2",
+				entity_key: "B",
+			});
+			await backend.metadata.put({
+				...base,
+				version: "v3",
+				created_at: new Date(3000),
+				data_key: "k/3",
+				entity_key: "A",
+			});
+
+			const run = async (args: CommandContext["args"], json?: boolean) => {
+				const output = create_capture_output();
+				const result = await versions_command.run({
+					args,
+					positionals: ["keyed"],
+					backend_selector: {},
+					output,
+					cwd: test_dir,
+					env_vars: {},
+					json,
+					_test_backend: backend,
+				});
+				expect(result.ok).toBe(true);
+				return output;
+			};
+
+			const filtered = await run({ entity: "A" });
+			const table = filtered.calls.find((c) => c.type === "table");
+			expect(table?.type === "table" && table.rows.map((r) => r.version)).toEqual(["v3", "v1"]);
+			expect(table?.type === "table" && table.columns).toContain("entity_key");
+
+			const json_output = await run({ entity: "B" }, true);
+			const doc = json_output.calls.find((c) => c.type === "json")?.value as { versions: Record<string, unknown>[] };
+			expect(doc.versions.map((v) => v.entity_key)).toEqual(["B"]);
+		});
+
+		it("versions leaves the table and JSON unchanged for unkeyed stores", async () => {
+			const output = create_capture_output();
+			await versions_command.run({
+				args: {},
+				positionals: ["store_a"],
+				backend_selector: {},
+				output,
+				cwd: test_dir,
+				env_vars: {},
+				_test_backend: backend,
+			});
+			const table = output.calls.find((c) => c.type === "table");
+			expect(table?.type === "table" && table.columns).toEqual([
+				"version",
+				"created_at",
+				"size_bytes",
+				"content_hash",
+				"tags",
+			]);
+
+			const json_output = create_capture_output();
+			await versions_command.run({
+				args: {},
+				positionals: ["store_a"],
+				backend_selector: {},
+				output: json_output,
+				cwd: test_dir,
+				env_vars: {},
+				json: true,
+				_test_backend: backend,
+			});
+			const doc = json_output.calls.find((c) => c.type === "json")?.value as { versions: Record<string, unknown>[] };
+			expect(doc.versions.every((v) => !("entity_key" in v))).toBe(true);
+		});
+
 		it("show --json emits exactly one document matching the stable shape", async () => {
 			const latest = await corpus.stores.store_a.get_latest();
 			if (!latest.ok) return;

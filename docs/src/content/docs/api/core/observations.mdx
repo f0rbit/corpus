@@ -207,9 +207,26 @@ type ObservationQueryOpts = {
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date
   created_before?: Date        // created_at before this date
-  include_stale?: boolean      // Include stale observations (default: false)
+  entity_key?: string          // Filter by entity key
   limit?: number               // Max results to return
   cursor?: string              // Pagination cursor
+}
+```
+
+#### `entity_key`
+
+`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a missing source doesn't fail the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
+
+`is_stale(pointer)` follows the **source snapshot's** entity: if that snapshot has an `entity_key`, it is stale only when a newer snapshot with the same key exists in the store; unkeyed snapshots use the store-wide rule. See the [Entities guide](/corpus/guides/entities/).
+
+#### Current observations only
+
+`query()` never filters by staleness. To keep only observations whose source is still current:
+
+```ts
+for await (const obs of observations.query({ type: 'entity_mention' })) {
+  if (await observations.is_stale(obs.source)) continue
+  // current
 }
 ```
 

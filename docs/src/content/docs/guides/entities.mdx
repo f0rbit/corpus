@@ -1,0 +1,107 @@
+---
+title: Entities
+description: Hold many entities in one store with entity_key — latest-per-entity, entity-scoped observations and per-entity staleness.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A store normally has one "latest" snapshot. A crawl → extract → diff pipeline needs more: one store per *source type* (say `pages`), holding the history of many entities (one per URL, company, repository…). Setting an `entity_key` on each snapshot makes "latest", `if_changed`, observation queries and `is_stale` all work **per entity**, without a store id per entity.
+
+## The pattern
+
+```typescript
+const corpus = create_corpus()
+  .with_backend(backend)
+  .with_store(define_store('pages', json_codec(PageSchema)))
+  .build()
+```
+
+### 1. Store snapshots with an entity key
+
+```typescript
+const put = await corpus.stores.pages.put(page, {
+  entity_key: 'https://example.com/pricing',
+  if_changed: true,
+})
+```
+
+`if_changed` compares against **that entity's** latest snapshot only. Re-crawling an unchanged page writes nothing; a change to a different entity never counts.
+
+### 2. Read the latest per entity
+
+```typescript
+const latest = await corpus.stores.pages.get_latest({
+  entity_key: 'https://example.com/pricing',
+})
+
+for await (const meta of corpus.stores.pages.list({ entity_key: 'https://example.com/pricing' })) {
+  // newest-first, this entity only
+}
+```
+
+`get_latest()` with no options is unchanged: the newest snapshot in the store, whatever its key.
+
+### 3. Extract observations — the key is inherited
+
+```typescript
+await corpus.observations.put(PriceObservation, {
+  source: corpus.create_pointer('pages', put.value.version),
+  content: { sku: 'pro', amount: 49 },
+})
+```
+
+When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing.
+
+### 4. Query by entity
+
+```typescript
+for await (const obs of corpus.observations.query({
+  type: 'price',
+  entity_key: 'https://example.com/pricing',
+  limit: 10,
+})) {
+  // newest-first, this entity only
+}
+```
+
+### 5. Staleness per entity
+
+```typescript
+const stale = await corpus.observations.is_stale(obs.source)
+```
+
+If the source snapshot has an `entity_key`, the pointer is stale only when a **newer snapshot with the same key** exists in that store. A new crawl of entity B never stales observations extracted from entity A; a new crawl of A does — which is exactly the signal an extraction pipeline needs ("has this entity's source changed since I extracted?"). `corpus.is_superseded` follows the same rule.
+
+<Aside type="note">
+An observation with an explicit `entity_key` that differs from its source's still takes its staleness from the **source snapshot's** entity.
+</Aside>
+
+To work only with current observations, combine the two:
+
+```typescript
+for await (const obs of corpus.observations.query({ type: 'price', entity_key })) {
+  if (await corpus.observations.is_stale(obs.source)) continue
+  // current
+}
+```
+
+## Unkeyed data behaves as before
+
+Snapshots written without an `entity_key` have no key: `get_latest`, `list`, `if_changed` and `is_stale` use the whole store exactly as in 0.8.x. A keyed filter never matches an unkeyed snapshot. You can adopt entity keys per store, or even mid-history.
+
+## Inspecting from the CLI
+
+```bash
+corpus versions pages --entity https://example.com/pricing
+corpus versions pages --json | jq '.versions[0].entity_key'
+```
+
+`versions` shows an `entity_key` column only when at least one listed row has a key, and `--json` includes `entity_key` only on keyed snapshots.
+
+## Custom backends
+
+`MetadataClient.get_latest` takes optional `{ entity_key }` and `ListOpts` gains `entity_key`. A custom backend that ignores them still compiles but returns store-wide results — honour the option in your implementation.
+
+## Upgrading
+
+0.9.0 adds the `entity_key` column to both tables, so D1 users must migrate before deploying. See [Upgrading to 0.9.0](/corpus/guides/cloudflare/#upgrading-to-090).
