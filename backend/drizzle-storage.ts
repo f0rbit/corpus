@@ -20,7 +20,8 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
-import type { CorpusError, CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
+import { storage_error } from "./errors.js";
+import type { CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
 import { err, ok } from "../types.js";
 import { parse_snapshot_meta } from "../utils.js";
 
@@ -36,14 +37,6 @@ import { parse_snapshot_meta } from "../utils.js";
 export type DrizzleDb<TRunResult = unknown> = BaseSQLiteDatabase<"async", TRunResult, Record<string, never>>;
 
 type Emit = (event: CorpusEvent) => void;
-
-function to_error(cause: unknown): Error {
-	return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-function storage_error(operation: string): (cause: unknown) => CorpusError {
-	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
-}
 
 function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
 	return parse_snapshot_meta(row);
@@ -401,5 +394,3 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 		},
 	};
 }
-
-export { storage_error, to_error };

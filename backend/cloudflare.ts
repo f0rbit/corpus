@@ -16,9 +16,8 @@ import {
 	meta_insert_stmt,
 	obs_delete_stmt,
 	obs_insert_stmt,
-	storage_error,
-	to_error,
 } from "./drizzle-storage.js";
+import { storage_error, to_error } from "./errors.js";
 
 // Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
 // self-contained). Real bindings must assign to these: return types we never read are `unknown`

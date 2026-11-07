@@ -27,6 +27,7 @@ import type {
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
+import { storage_error } from "./backend/errors.js";
 import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
@@ -163,16 +164,20 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 	}
 
 	function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
+		const read_bytes = async (): Promise<Result<Uint8Array, CorpusError>> => {
+			const bytes = await try_catch_async(() => data_handle.bytes(), storage_error("data.bytes"));
+			if (!bytes.ok) emit({ type: "error", error: bytes.error });
+			return bytes;
+		};
 		const handle: SnapshotHandleImpl<T> = {
 			async value(): Promise<Result<T, CorpusError>> {
-				const bytes = await data_handle.bytes();
-				const decoded = await try_catch_async(() => codec.decode(bytes), decode_error);
+				const bytes = await read_bytes();
+				if (!bytes.ok) return bytes;
+				const decoded = await try_catch_async(() => codec.decode(bytes.value), decode_error);
 				if (!decoded.ok) emit({ type: "error", error: decoded.error });
 				return decoded;
 			},
-			async bytes(): Promise<Result<Uint8Array, CorpusError>> {
-				return ok(await data_handle.bytes());
-			},
+			bytes: read_bytes,
 		};
 
 		if (codec.decode_stream) {
