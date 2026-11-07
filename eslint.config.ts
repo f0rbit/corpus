@@ -76,11 +76,13 @@ export default define_lint_config({
 			rules: { "functional/no-throw-statements": "off" },
 		},
 		{
-			// The walker narrows Zod v3 schemas via instanceof, but Zod's own generics are
-			// any-parameterised (ZodObject<any, ...>, _def.shape() returns any) — every
-			// recursive walk() call trips the rule. The single boundary cast is documented
-			// in AGENTS.md; the internals are untypeable without forking Zod's types.
-			files: ["testing/arb.ts"],
+			// The walkers narrow Zod schemas via zod's own generics (v3 allows
+			// instanceof narrowing but Zod's own classes are any-parameterised —
+			// `_def.shape()` returns any — and the v4 arm walks `def` through
+			// structural types) — every recursive walk call trips the rule. The
+			// single boundary cast is documented in AGENTS.md; the internals are
+			// untypeable without forking Zod's types.
+			files: ["testing/arb.ts", "testing/arb-v3.ts", "testing/arb-v4.ts", "testing/arb-common.ts"],
 			rules: { "@typescript-eslint/no-unsafe-argument": "off" },
 		},
 		{
@@ -159,6 +161,14 @@ export default define_lint_config({
 			// the enum exists to exercise arb()'s z.nativeEnum walker branch
 			files: ["tests/unit/testing-arb.test.ts"],
 			rules: { "no-restricted-syntax": "off" },
+		},
+		{
+			// the arb suites deliberately use the zod-3-style method forms
+			// (z.string().uuid(), .email(), .datetime(), nativeEnum): they exist on both
+			// generations (deprecated-but-working in v4), and the suites must exercise the
+			// same schema source under zod 3 (`bun run test:zod3`).
+			files: ["tests/unit/testing-arb.test.ts", "tests/unit/testing-arb-dual.test.ts"],
+			rules: { "@typescript-eslint/no-deprecated": "off" },
 		},
 		{
 			// pre-convention public API names — renames are breaking:

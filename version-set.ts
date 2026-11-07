@@ -6,7 +6,7 @@
  * orchestrator.
  */
 
-import { z } from "zod";
+import { z } from "zod/v4";
 import type {
 	Backend,
 	CorpusError,
@@ -33,7 +33,7 @@ import { json_codec } from "./utils.js";
 export const VersionSetManifestSchema = z.object({
 	package: z.string(),
 	git_sha: z.string().length(40),
-	created_at: z.string().datetime(),
+	created_at: z.iso.datetime(),
 	builds: z.object({
 		worker: z.object({
 			artifact_ref: z.string(),

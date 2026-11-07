@@ -24,7 +24,7 @@ import type {
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
-import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
+import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
 
@@ -510,7 +510,11 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 			): Promise<Result<Observation<T>, CorpusError>> {
 				const validation = type.schema.safeParse(opts.content);
 				if (!validation.success) {
-					return err({ kind: "validation_error", cause: validation.error, message: validation.error.message });
+					return err({
+						kind: "validation_error",
+						cause: as_error(validation.error),
+						message: validation.error.message,
+					});
 				}
 				const id = generate_observation_id();
 				const row = create_observation_row(id, type.name, opts.source, validation.data, {

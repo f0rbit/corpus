@@ -33,7 +33,7 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { try_catch, try_catch_async } from "../../result.js";
 import { err, ok, type Result } from "../../types.js";
 
@@ -74,12 +74,12 @@ export type DiscoveryError =
 const package_manifest = z
 	.object({
 		name: z.string().optional(),
-		dependencies: z.record(z.string()).optional(),
-		devDependencies: z.record(z.string()).optional(),
-		peerDependencies: z.record(z.string()).optional(),
-		corpus: z.object({ testing: z.string().optional() }).passthrough().optional(),
+		dependencies: z.record(z.string(), z.string()).optional(),
+		devDependencies: z.record(z.string(), z.string()).optional(),
+		peerDependencies: z.record(z.string(), z.string()).optional(),
+		corpus: z.object({ testing: z.string().optional() }).loose().optional(),
 	})
-	.passthrough();
+	.loose();
 
 type PackageManifest = z.infer<typeof package_manifest>;
 

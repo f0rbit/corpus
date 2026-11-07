@@ -14,8 +14,10 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
       <div class="step-title">Install the package</div>
       <div class="step-body">
         ```bash
-        bun add @f0rbit/corpus zod
+        bun add @f0rbit/corpus zod@^4
         ```
+
+        <Aside type="note">Any zod version 3.25 or newer works — corpus is tested on zod 3.25.76 and 4.x. Apply a range like `^4` yourself if you want to pin the modern generator.</Aside>
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -43,6 +45,13 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
 
         <Aside type="tip">
           Zod schemas serve as the single source of truth - they define both validation rules and TypeScript types.
+        </Aside>
+
+        <Aside type="note">
+          Corpus supports **zod 3.25 or newer** (tested on 3.25.76 and 4.x). Schemas you pass to corpus
+          (`json_codec`, `pipeline_template_store`, `define_observation_type`, `testing.arb`) are accepted via the
+          structural `SchemaLike` interface, so both zod 3 and zod 4 schemas — and any plain object with a
+          `parse` method — work. See the [README](https://github.com/f0rbit/corpus#readme) for details.
         </Aside>
       </div>
     </div>

@@ -2,7 +2,7 @@ import { type Result, err, ok } from "../types.js";
 import { try_catch_async } from "../result.js";
 import type { CorpusError } from "../types.js";
 import { find_upward } from "./fs-walk.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 export type WranglerSniff = {
 	/** Path of the wrangler config the candidates came from (for error messages). */
@@ -28,6 +28,7 @@ const wrangler_file_schema = z.object({
 	r2_buckets: z.array(r2_binding_schema).optional(),
 	env: z
 		.record(
+			z.string(),
 			z.object({
 				account_id: z.string().optional(),
 				d1_databases: z.array(d1_binding_schema).optional(),

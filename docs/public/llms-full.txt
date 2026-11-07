@@ -1,14 +1,14 @@
-# @f0rbit/corpus v0.8.0 - Full Documentation
+# @f0rbit/corpus v0.8.1 - Full Documentation
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
 This document contains the compact reference, every documentation page, and the full public source code for LLM consumption.
 
-# @f0rbit/corpus v0.8.0
+# @f0rbit/corpus v0.8.1
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
-Install: `bun add @f0rbit/corpus zod` (or npm/pnpm/yarn). Peer dependencies: `typescript ^5`, `zod ^3`.
+Install: `bun add @f0rbit/corpus zod` (or npm/pnpm/yarn). Peer dependencies: `typescript >=5`, `zod >=3.25.0`.
 
 Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 
@@ -162,7 +162,7 @@ Every public export, grouped by the source module that defines it.
 
 ### types.ts
 - Values: `ok`, `err`, `define_store`
-- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
+- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
 
 ### result.ts
 - Values: `match`, `unwrap_or`, `unwrap`, `unwrap_err`, `try_catch`, `try_catch_async`, `fetch_result`, `pipe`, `to_nullable`, `to_fallback`, `null_on`, `fallback_on`, `format_error`, `at`, `first`, `last`, `merge_deep`
@@ -240,7 +240,7 @@ Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)
 - Types: `Command`, `AsyncCommand`, `ICommand`, `ModelRunSetup`, `ModelRunAsyncSetup`, `CommandsConstraints`
 
 ### testing/types.ts
-- Types: `ArbBrand`, `FailureKey`
+- Types: `ArbBrand`, `FailureKey`, `SchemaInferred`
 
 ### fast-check
 - Values: `fc`
@@ -289,7 +289,7 @@ import { z } from 'zod'
 
 const SessionSchema = z.object({
   userId: z.string(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   expiresAt: z.string(),
 })
 
@@ -2071,7 +2071,7 @@ Observations let you extract structured facts from versioned documents with auto
 ```ts
 function define_observation_type<T>(
   name: string,
-  schema: ZodType<T>
+  schema: SchemaLike<T>
 ): ObservationTypeDef<T>
 ```
 
@@ -2082,7 +2082,7 @@ Creates a typed observation definition for use with `observations.put()`.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | `string` | Unique identifier for this observation type |
-| `schema` | `ZodType<T>` | Zod schema for validating observation content |
+| `schema` | `SchemaLike<T>` | Schema for validating observation content — a Zod 3 or Zod 4 schema (or any object with compatible `parse`/`safeParse` methods) |
 
 ### Example
 
@@ -2182,7 +2182,7 @@ Definition for a typed observation schema.
 ```ts
 type ObservationTypeDef<T> = {
   readonly name: string
-  readonly schema: ZodType<T>
+  readonly schema: SchemaLike<T>
 }
 ```
 
@@ -5255,8 +5255,10 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
       <div class="step-title">Install the package</div>
       <div class="step-body">
         ```bash
-        bun add @f0rbit/corpus zod
+        bun add @f0rbit/corpus zod@^4
         ```
+
+        <Aside type="note">Any zod version 3.25 or newer works — corpus is tested on zod 3.25.76 and 4.x. Apply a range like `^4` yourself if you want to pin the modern generator.</Aside>
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -5284,6 +5286,13 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
 
         <Aside type="tip">
           Zod schemas serve as the single source of truth - they define both validation rules and TypeScript types.
+        </Aside>
+
+        <Aside type="note">
+          Corpus supports **zod 3.25 or newer** (tested on 3.25.76 and 4.x). Schemas you pass to corpus
+          (`json_codec`, `pipeline_template_store`, `define_observation_type`, `testing.arb`) are accepted via the
+          structural `SchemaLike` interface, so both zod 3 and zod 4 schemas — and any plain object with a
+          `parse` method — work. See the [README](https://github.com/f0rbit/corpus#readme) for details.
         </Aside>
       </div>
     </div>
@@ -6885,7 +6894,7 @@ import { z } from 'zod'
 
 const PipelineTemplateSchema = z.object({
   rollout: z.object({ type: z.literal('atomic') }),
-  gates: z.record(z.unknown()),
+  gates: z.record(z.string(), z.unknown()),
   pre_deploy_checks: z.array(z.unknown()),
   post_deploy_checks: z.array(z.unknown()),
 })
@@ -7905,7 +7914,7 @@ The walker understands ~14 common Zod kinds:
 For `string()` with custom constraints (e.g., `datetime()`), the walker generates domain-specific strings that will pass validation.
 
 <Aside type="note">
-  If you need a generator for an unsupported schema kind (e.g., `ZodEffects`, `ZodPipe`), you'll get a clear error pointing at the manual registration escape hatch.
+  If you need a generator for an unsupported schema kind (e.g., `ZodEffects` on zod 3, or a refinement/`pipe`/`custom` check on zod 4), you'll get a clear error pointing at the manual registration escape hatch.
 </Aside>
 
 ## Composing Dependent Generators
@@ -8048,12 +8057,12 @@ const gen = await testing.lookup_failure(CORPUS_ERROR_BRAND, "not_found");
 
 ## Handling Unsupported Schemas
 
-If you use `testing.arb()` with an unsupported schema kind, you get a clear error:
+If you use `testing.arb()` with an unsupported schema kind, you get a clear error — the kind name is per zod generation:
 
 ```
-Error: unsupported Zod kind: ZodEffects
-  Manually register via testing.arbitrary(schema, gen):
-  testing.arbitrary(mySchema, fc.integer().map(yourTransform))
+Error: testing.arb: unsupported schema kind 'ZodEffects'. ...        # zod 3 (the refine wrapper)
+Error: testing.arb: unsupported schema kind 'refinement'. ...        # zod 4 (refines are `custom` checks)
+Error: testing.arb: unsupported schema kind 'pipe'. ...              # zod 4 (transforms / pipes)
 ```
 
 The escape hatch is `testing.arbitrary(schema, gen)` — pass your schema and a hand-built generator. After registering, `arb(schema)` will use the registered generator.
@@ -9632,7 +9641,7 @@ import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
 import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
 const TX_DIR_PREFIX = ".tx-";
@@ -10753,7 +10762,7 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
  */
 
 import { drizzle } from "drizzle-orm/sqlite-proxy";
-import { z } from "zod";
+import { z } from "zod/v4";
 import type { DrizzleDb } from "./drizzle-storage.js";
 
 /**
@@ -11234,7 +11243,7 @@ export function create_remote_backend(config: RemoteBackendConfig): Backend {
 ### cli/config-schema.ts
 
 ```typescript
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const store_definition_schema = z.object({
 	id: z.string(),
@@ -11258,7 +11267,7 @@ const environment_config_schema = z.union([file_environment_schema, remote_envir
 export const corpus_cli_config_schema = z
 	.object({
 		stores: z.array(store_definition_schema).optional(),
-		environments: z.record(environment_config_schema).optional(),
+		environments: z.record(z.string(), environment_config_schema).optional(),
 		default_env: z.string().optional(),
 	})
 	.strict();
@@ -11963,7 +11972,7 @@ import type {
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
-import { compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
+import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
 
@@ -12449,7 +12458,11 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 			): Promise<Result<Observation<T>, CorpusError>> {
 				const validation = type.schema.safeParse(opts.content);
 				if (!validation.success) {
-					return err({ kind: "validation_error", cause: validation.error, message: validation.error.message });
+					return err({
+						kind: "validation_error",
+						cause: as_error(validation.error),
+						message: validation.error.message,
+					});
 				}
 				const id = generate_observation_id();
 				const row = create_observation_row(id, type.name, opts.source, validation.data, {
@@ -12747,6 +12760,8 @@ export type {
 	Codec,
 	BytesCodec,
 	Parser,
+	SchemaLike,
+	ParseResult,
 	Store,
 	StoreDefinition,
 	DefineStoreOpts,
@@ -12823,6 +12838,7 @@ import type {
 import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
 import { generate_observation_id } from "./utils.js";
+import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
 
 async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
@@ -12868,7 +12884,7 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 			if (!validation.success) {
 				return err({
 					kind: "validation_error",
-					cause: validation.error,
+					cause: as_error(validation.error),
 					message: validation.error.message,
 				});
 			}
@@ -13343,7 +13359,7 @@ export function create_observations_storage(adapter: ObservationsAdapter | Obser
  * @description Type definitions for the observations feature.
  */
 
-import type { ZodType } from "zod";
+import type { SchemaLike } from "../types.js";
 
 /**
  * Universal address to versioned content within a corpus store.
@@ -13401,7 +13417,7 @@ export type SnapshotPointer = {
  */
 export type ObservationTypeDef<T> = {
 	readonly name: string;
-	readonly schema: ZodType<T>;
+	readonly schema: SchemaLike<T>;
 };
 
 /**
@@ -13589,7 +13605,7 @@ export type InferObservationContent<T> = T extends ObservationTypeDef<infer C> ?
  * })
  * ```
  */
-export function define_observation_type<T>(name: string, schema: ZodType<T>): ObservationTypeDef<T> {
+export function define_observation_type<T>(name: string, schema: SchemaLike<T>): ObservationTypeDef<T> {
 	return { name, schema };
 }
 
@@ -13906,8 +13922,7 @@ export function pointer_to_snapshot(pointer: SnapshotPointer): SnapshotPointer {
  * `data_key` layout is `pipeline-templates/<content_hash>`.
  */
 
-import type { z } from "zod";
-import type { Backend, CorpusError, PutOpts, Result, SnapshotMeta, Snapshot, Store } from "./types.js";
+import type { Backend, CorpusError, PutOpts, Result, SchemaLike, Snapshot, SnapshotMeta, Store } from "./types.js";
 import { define_store } from "./types.js";
 import { create_store } from "./corpus.js";
 import { json_codec } from "./utils.js";
@@ -13973,7 +13988,7 @@ export type PipelineTemplateStore<T> = {
  *
  * const PipelineTemplateSchema = z.object({
  *   rollout: z.object({ type: z.literal('atomic') }),
- *   gates: z.record(z.unknown()),
+ *   gates: z.record(z.string(), z.unknown()),
  *   pre_deploy_checks: z.array(z.unknown()),
  *   post_deploy_checks: z.array(z.unknown()),
  * })
@@ -13996,7 +14011,7 @@ export type PipelineTemplateStore<T> = {
  */
 export function pipeline_template_store<T>(
 	backend: Backend,
-	schema: z.ZodType<T>,
+	schema: SchemaLike<T>,
 	opts?: PipelineTemplateStoreOptions,
 ): PipelineTemplateStore<T> {
 	const id = opts?.id ?? "pipeline-templates";
@@ -14668,68 +14683,78 @@ export function createCorpusInfra(name: string, config?: Partial<CorpusInfraConf
 
 ---
 
-### testing/arb.ts
+### testing/arb-common.ts
 
 ```typescript
 /**
- * @module testing/arb
- * @description Translates a Zod schema into an `fc.Arbitrary` that produces
- * values matching the schema. First consults the registry (schema-identity
- * lookup) so consumers can register a canonical generator for any schema; if
- * the schema isn't registered, dispatches on Zod class identity to a
- * hand-rolled walker covering the ~14 cases that drive 99% of corpus's
- * domain schemas.
- *
- * Unsupported kinds (e.g. `ZodEffects`, `ZodCatch`, `ZodPipe`) raise a clear
- * error pointing the user at the manual-registration escape hatch via
- * `testing.arbitrary(schema, gen)`.
- *
- * The fallback to `@traversable/zod-test`'s `generator(schema)` documented in
- * the original plan is deferred — that package declares `zod: 4` as a peer
- * while corpus uses `zod@3`, and its `@traversable/zod-types` peer is
- * missing in the install graph. Phase 1 ships hand-roll-only; the fallback
- * decision is revisited if/when we move to zod 4.
- *
- * Dispatch uses `instanceof` (not `_def.typeName`) so TypeScript narrows the
- * schema type at each branch. The single `as fc.Arbitrary<z.infer<S>>` at
- * the registry boundary is the only escape-hatch cast in the file.
+ * @module testing/arb-common
+ * @description Helpers shared by the zod-v3 and zod-v4 walkers in
+ * `arb-v3.ts` / `arb-v4.ts`: the walk context, the generation-specific
+ * arbitrary factories with generation-specific quirks (email format
+ * strictness, ISO-datetime year window), and the intersection merge.
  */
 
-import { z } from "zod";
 import fc from "fast-check";
 import type { Arbitrary } from "fast-check";
-// lookup_sync, deliberately: arb() is a synchronous API, so it consults only
-// registrations already made in this process and never triggers the vending
-// auto-loader. Await testing.lookup(...) (or testing.load_from(...)) first if
-// vended registrations should be visible to the walker.
-import { lookup_sync } from "./registry.js";
 
-/**
- * Translate a Zod schema into an `fc.Arbitrary` producing values matching the
- * schema.
- *
- * Consults the registry first; falls through to a hand-rolled walker that
- * handles primitives, objects, arrays, tuples, unions, optional/nullable,
- * branded, default, records, intersections, and lazy cycles.
- *
- * @example
- * ```ts
- * const UserSchema = z.object({ id: z.string().uuid(), name: z.string() })
- * fc.assert(fc.property(arb(UserSchema), (u) => UserSchema.safeParse(u).success))
- * ```
- */
-export function arb<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> {
-	const registered = lookup_sync(schema);
-	if (registered) return registered;
-	const ctx: WalkContext = { lazy_ties: new WeakMap() };
-	return walk(schema, ctx);
-}
-
-type WalkContext = {
-	lazy_ties: WeakMap<z.ZodLazy<z.ZodType>, Arbitrary<unknown>>;
+export type WalkContext = {
+	/** Per-schema-instance tie memo for lazy (recursive) schemas. */
+	lazy_ties: WeakMap<object, Arbitrary<unknown>>;
 };
 
-function walk(schema: z.ZodType, ctx: WalkContext): Arbitrary<unknown> {
+export function email_arb(): Arbitrary<string> {
+	// fc.emailAddress() honours RFC 5322, which permits characters (e.g. '!', '#')
+	// and consecutive dots that Zod's .email() regex rejects — in BOTH generations.
+	// Build a conservative form: simple alphanumeric local-part @ domain . tld.
+	const local = fc.stringMatching(/^[a-z][a-z0-9]{0,10}$/);
+	const domain = fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/);
+	const tld = fc.stringMatching(/^[a-z]{2,6}$/);
+	return fc.tuple(local, domain, tld).map(([l, d, t]) => `${l}@${d}.${t}`);
+}
+
+export function datetime_arb(): Arbitrary<string> {
+	// Zod's .datetime() rejects BC-era / 6-digit-year ISO strings in both
+	// generations; clamp to the safe window 1970-01-01 .. 2999-12-31 so
+	// generated strings always parse.
+	const min = Date.UTC(1970, 0, 1);
+	const max = Date.UTC(2999, 11, 31, 23, 59, 59, 999);
+	return fc.integer({ min, max }).map((ms) => new Date(ms).toISOString());
+}
+
+export function spread_merge([l, r]: readonly [unknown, unknown]): unknown {
+	return Object.assign({}, l, r);
+}
+
+```
+
+---
+
+### testing/arb-v3.ts
+
+```typescript
+/**
+ * @module testing/arb-v3
+ * @description Zod-v3 arm of the `testing.arb` walker. Dispatches on class
+ * identity via `instanceof` against the classes imported from `zod/v3` — the
+ * export subpath is present on EVERY zod version whose package manifest
+ * satisfies the peer range (`>=3.25.0`) and always re-exports the same v3
+ * classes the schemas under a v3-flavoured root install carry, so the
+ * `instanceof` checks hold regardless of which generation is installed at
+ * the repo root.
+ *
+ * The v3-specific `as` casts (dispatch entry and fc.dictionary's key parameter)
+ * are sanctioned by the `testing/arb.*` eslint override; the generation dispatch
+ * and the registry-boundary cast live in the caller, `testing/arb.ts`.
+ */
+
+import { z } from "zod/v3";
+import fc from "fast-check";
+import type { Arbitrary } from "fast-check";
+import { lookup_sync } from "./registry.js";
+import type { WalkContext } from "./arb-common.js";
+import { email_arb, datetime_arb, spread_merge } from "./arb-common.js";
+
+export function walk_v3(schema: z.ZodType, ctx: WalkContext): Arbitrary<unknown> {
 	const registered = lookup_sync(schema);
 	if (registered) return registered;
 	if (schema instanceof z.ZodString) return string_arb(schema);
@@ -14745,34 +14770,16 @@ function walk(schema: z.ZodType, ctx: WalkContext): Arbitrary<unknown> {
 	if (schema instanceof z.ZodTuple) return tuple_arb(schema, ctx);
 	if (schema instanceof z.ZodDiscriminatedUnion) return union_arb(schema._def.options, ctx);
 	if (schema instanceof z.ZodUnion) return union_arb(schema._def.options, ctx);
-	if (schema instanceof z.ZodOptional) return fc.option(walk(schema._def.innerType, ctx), { nil: undefined });
-	if (schema instanceof z.ZodNullable) return fc.option(walk(schema._def.innerType, ctx), { nil: null });
-	if (schema instanceof z.ZodBranded) return walk(schema._def.type, ctx);
-	if (schema instanceof z.ZodDefault) return walk(schema._def.innerType, ctx);
+	if (schema instanceof z.ZodOptional) return fc.option(walk_v3(schema._def.innerType, ctx), { nil: undefined });
+	if (schema instanceof z.ZodNullable) return fc.option(walk_v3(schema._def.innerType, ctx), { nil: null });
+	if (schema instanceof z.ZodBranded) return walk_v3(schema._def.type, ctx);
+	if (schema instanceof z.ZodDefault) return walk_v3(schema._def.innerType, ctx);
 	if (schema instanceof z.ZodRecord) return record_arb(schema, ctx);
 	if (schema instanceof z.ZodIntersection) return intersection_arb(schema, ctx);
 	if (schema instanceof z.ZodLazy) return lazy_arb(schema, ctx);
 	if (schema instanceof z.ZodAny) return fc.anything();
 	if (schema instanceof z.ZodUnknown) return fc.anything();
 	throw new Error(unsupported_message(schema));
-}
-
-function email_arb(): Arbitrary<string> {
-	// fast-check's fc.emailAddress() honours RFC 5322, which permits characters
-	// (e.g. '!', '#') and consecutive dots that Zod's .email() regex rejects.
-	// Build a conservative form: simple alphanumeric local-part @ domain . tld.
-	const local = fc.stringMatching(/^[a-z][a-z0-9]{0,10}$/);
-	const domain = fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/);
-	const tld = fc.stringMatching(/^[a-z]{2,6}$/);
-	return fc.tuple(local, domain, tld).map(([l, d, t]) => `${l}@${d}.${t}`);
-}
-
-function datetime_arb(): Arbitrary<string> {
-	// Zod's .datetime() rejects BC-era / 6-digit-year ISO strings; clamp to the
-	// safe window 1970-01-01 .. 2999-12-31 so generated strings always parse.
-	const min = Date.UTC(1970, 0, 1);
-	const max = Date.UTC(2999, 11, 31, 23, 59, 59, 999);
-	return fc.integer({ min, max }).map((ms) => new Date(ms).toISOString());
 }
 
 function string_arb(schema: z.ZodString): Arbitrary<string> {
@@ -14820,7 +14827,7 @@ function object_arb(schema: z.ZodObject<z.ZodRawShape>, ctx: WalkContext): Arbit
 	for (const key of Object.keys(shape)) {
 		const child = shape[key];
 		if (!child) continue;
-		entries[key] = walk(child, ctx);
+		entries[key] = walk_v3(child, ctx);
 	}
 	return fc.record(entries);
 }
@@ -14834,32 +14841,28 @@ function array_arb(schema: z.ZodArray<z.ZodType>, ctx: WalkContext): Arbitrary<u
 		opts.minLength = def.exactLength.value;
 		opts.maxLength = def.exactLength.value;
 	}
-	return fc.array(walk(def.type, ctx), opts);
+	return fc.array(walk_v3(def.type, ctx), opts);
 }
 
 function tuple_arb(schema: z.ZodTuple, ctx: WalkContext): Arbitrary<unknown[]> {
 	const items = schema._def.items;
-	const arbs = items.map((item) => walk(item, ctx));
+	const arbs = items.map((item) => walk_v3(item, ctx));
 	return fc.tuple(...arbs);
 }
 
 function union_arb(options: readonly z.ZodType[], ctx: WalkContext): Arbitrary<unknown> {
-	const arbs = options.map((o) => walk(o, ctx));
+	const arbs = options.map((o) => walk_v3(o, ctx));
 	return fc.oneof(...arbs);
 }
 
 function record_arb(schema: z.ZodRecord<z.ZodString, z.ZodType>, ctx: WalkContext): Arbitrary<Record<string, unknown>> {
-	const key_arb = walk(schema._def.keyType, ctx);
-	const value_arb = walk(schema._def.valueType, ctx);
+	const key_arb = walk_v3(schema._def.keyType, ctx);
+	const value_arb = walk_v3(schema._def.valueType, ctx);
 	return fc.dictionary(key_arb as Arbitrary<string>, value_arb);
 }
 
 function intersection_arb(schema: z.ZodIntersection<z.ZodType, z.ZodType>, ctx: WalkContext): Arbitrary<unknown> {
-	return fc.tuple(walk(schema._def.left, ctx), walk(schema._def.right, ctx)).map(spread_merge);
-}
-
-function spread_merge([l, r]: readonly [unknown, unknown]): unknown {
-	return Object.assign({}, l, r);
+	return fc.tuple(walk_v3(schema._def.left, ctx), walk_v3(schema._def.right, ctx)).map(spread_merge);
 }
 
 function lazy_arb(schema: z.ZodLazy<z.ZodType>, ctx: WalkContext): Arbitrary<unknown> {
@@ -14873,7 +14876,7 @@ function lazy_arb(schema: z.ZodLazy<z.ZodType>, ctx: WalkContext): Arbitrary<unk
 	// shrinking, which would otherwise overflow the stack on deep self-refs.
 	const { self } = fc.letrec<{ self: unknown }>((tie) => {
 		ctx.lazy_ties.set(schema, tie("self"));
-		const body = walk(schema._def.getter(), ctx);
+		const body = walk_v3(schema._def.getter(), ctx);
 		return {
 			self: fc.oneof({ depthSize: "small", maxDepth: 3 }, body, tie("self")),
 		};
@@ -14889,6 +14892,387 @@ function unsupported_message(schema: z.ZodType): string {
 		`Register a generator manually via testing.arbitrary(schema, gen) ` +
 		`at the test setup, or open a follow-up to extend the walker.`
 	);
+}
+
+```
+
+---
+
+### testing/arb-v4.ts
+
+```typescript
+/**
+ * @module testing/arb-v4
+ * @description Zod-v4 arm of the `testing.arb` walker. Zod 4 schemas expose
+ * their definition on `schema._zod.def` with a `def.type` string
+ * discriminant; v4 refinements are `custom` entries in `def.checks` (not a
+ * ZodEffects wrapper) and `.brand()` is a type-level no-op, so a branded
+ * schema is handled by its base walker.
+ *
+ * All access goes through structural types declared here — no import of a
+ * zod generation in this file's emitted `.d.ts`. Def-shape facts were read
+ * from zod 4.6.7's published `v4/core/schemas.d.ts` / `checks.d.ts`:
+ * - string constraints are checks with `check: "min_length" | "max_length" |
+ *   "length_equals"`; bare string-format schema classes (`z.uuid()`,
+ *   `z.email()`, `z.string().datetime()`) carry the format on the def itself
+ *   as `def.check === "string_format"` with `def.format` (and `def.pattern`
+ *   for regex-like formats).
+ * - `z.number().int()` attaches a `check: "number_format"` check with
+ *   `format: "safeint" | "int32" | "uint32"` (verified in `v4/core/api.js`).
+ * - object `def.shape` is a plain shape object (may surface as a thunk in
+ *   hosted-construction edges), record def has `keyType`/`valueType`,
+ *   tuple def `items`, union def `options` (discriminated unions are
+ *   `type: "union"` plus a `discriminator` — walked identically), lazy def
+ *   `getter`, enum def `entries`, literal def `values`.
+ *
+ * Unsupported kinds throw the same actionable message as the v3 walker,
+ * pointing at `testing.arbitrary(schema, gen)`; a `custom` check (refinement)
+ * throws naming `refinement`, the v4 counterpart of v3's ZodEffects.
+ */
+
+import fc from "fast-check";
+import type { Arbitrary } from "fast-check";
+import type { SchemaLike } from "../types.js";
+import { lookup_sync } from "./registry.js";
+import type { WalkContext } from "./arb-common.js";
+import { email_arb, datetime_arb, spread_merge } from "./arb-common.js";
+
+type V4Check = {
+	readonly check: string;
+	readonly format?: string;
+	readonly minimum?: number;
+	readonly maximum?: number;
+	readonly length?: number;
+	readonly value?: unknown;
+	readonly pattern?: RegExp;
+};
+
+// `def.checks` entries are check INSTANCES: the check's own def (the shape
+// above) lives at `instance._zod.def`, not on the instance itself.
+type V4CheckInstance = { readonly _zod?: { readonly def?: V4Check } };
+
+function checks_of(def: { readonly checks?: readonly V4CheckInstance[] | undefined }): V4Check[] {
+	return (def.checks ?? []).flatMap((c) => (c._zod?.def ? [c._zod.def] : []));
+}
+
+type V4Def = {
+	readonly type: string;
+	readonly check?: string;
+	readonly format?: string;
+	readonly pattern?: RegExp;
+	readonly checks?: readonly V4CheckInstance[] | undefined;
+	readonly values?: readonly unknown[];
+	readonly entries?: Record<string, string | number>;
+	readonly shape?: unknown;
+	readonly element?: unknown;
+	readonly items?: readonly unknown[];
+	readonly options?: readonly unknown[];
+	readonly innerType?: unknown;
+	readonly keyType?: unknown;
+	readonly valueType?: unknown;
+	readonly left?: unknown;
+	readonly right?: unknown;
+	readonly getter?: () => unknown;
+};
+
+export type V4Schema = SchemaLike & { readonly _zod: { readonly def: V4Def } };
+
+const INT_NUMBER_FORMATS = new Set(["int32", "uint32", "safeint"]);
+
+export function walk_v4(schema: V4Schema, ctx: WalkContext): Arbitrary<unknown> {
+	const registered = lookup_sync(schema);
+	if (registered) return registered;
+
+	const def = schema._zod.def;
+	// Refinement-class `custom` checks (from .refine()) change how values are
+	// matched — v3's equivalent (ZodEffects wrapper) threw, so mirror that with
+	// the generation-specific name `refinement`. NOTE: `overwrite` checks
+	// (.overwrite, .trim, .toLowerCase, …) are deliberately NOT thrown —
+	// v3's walker silently ignores its `trim` check and this mirrors that;
+	// generated values are valid input to the schema.
+	const refinement = checks_of(def).find((c) => c.check === "custom");
+	if (refinement) throw new Error(unsupported_message("refinement"));
+	return walk_def(def, ctx);
+}
+
+function walk_def(def: V4Def, ctx: WalkContext): Arbitrary<unknown> {
+	switch (def.type) {
+		case "string":
+			return string_arb(def);
+		case "number":
+		case "int":
+			return number_arb(def);
+		case "boolean":
+			return fc.boolean();
+		case "bigint":
+			return fc.bigInt();
+		case "date":
+			return fc.date();
+		case "any":
+		case "unknown":
+			return fc.anything();
+		case "literal":
+			return literal_arb(def);
+		case "enum":
+			return enum_arb(def);
+		case "object":
+			return object_arb(def, ctx);
+		case "array":
+			return array_arb(def, ctx);
+		case "tuple":
+			return tuple_arb(def, ctx);
+		case "union":
+			return union_arb(def, ctx);
+		case "record":
+			return record_arb(def, ctx);
+		case "intersection":
+			return fc.tuple(walk_child(def.left, ctx), walk_child(def.right, ctx)).map(spread_merge);
+		case "optional":
+			return fc.option(walk_child(def.innerType, ctx), { nil: undefined });
+		case "nullable":
+			return fc.option(walk_child(def.innerType, ctx), { nil: null });
+		case "default":
+			return walk_child(def.innerType, ctx);
+		case "lazy":
+			return lazy_arb(def.getter, ctx);
+		default:
+			throw new Error(unsupported_message(def.type));
+	}
+}
+
+function walk_child(child: unknown, ctx: WalkContext): Arbitrary<unknown> {
+	// Generation dispatch boundary: the child is a real v4 schema instance
+	// (typed `SomeType` by zod, opaque here), so the cast only widens the
+	// structural v4 shape back onto the value.
+	return walk_v4(child as V4Schema, ctx);
+}
+
+function string_arb(def: V4Def): Arbitrary<string> {
+	// v4's string-format schema classes (z.uuid(), z.email(), z.string().datetime(), …)
+	// carry their format check on the def itself; plain z.string() schemas keep
+	// constraints only inside def.checks. Same first-match-found semantics as
+	// the v3 walker: a format wins over min/max, unknown formats degrade to a
+	// plain string exactly like v3 ignores unknown checks.
+	const mine: V4Check[] = def.check === "string_format" ? [def as V4Check] : [];
+	for (const c of [...mine, ...checks_of(def)]) {
+		if (c.check === "string_format") {
+			if (c.format === "uuid") return fc.uuid();
+			if (c.format === "email") return email_arb();
+			if (c.format === "datetime") return datetime_arb();
+			if (c.format === "regex" && c.pattern) return fc.stringMatching(c.pattern);
+		}
+	}
+
+	const checks = checks_of(def);
+	const min = checks.find((c) => c.check === "min_length");
+	const max = checks.find((c) => c.check === "max_length");
+	const length = checks.find((c) => c.check === "length_equals");
+	if (length) {
+		return length.length === undefined
+			? fc.string()
+			: fc.string({ minLength: length.length, maxLength: length.length });
+	}
+	const opts: { minLength?: number; maxLength?: number } = {};
+	if (min?.minimum !== undefined) opts.minLength = min.minimum;
+	if (max?.maximum !== undefined) opts.maxLength = max.maximum;
+	return fc.string(opts);
+}
+
+function number_arb(def: V4Def): Arbitrary<number> {
+	const checks = checks_of(def);
+	const is_int =
+		def.type === "int" ||
+		checks.some((c) => c.check === "number_format" && c.format !== undefined && INT_NUMBER_FORMATS.has(c.format));
+	const min_check = checks.find((c) => c.check === "greater_than");
+	const max_check = checks.find((c) => c.check === "less_than");
+	// greater_than/less_than defs carry their bound on `value` (number | bigint |
+	// Date per util.Numeric); numeric schemas only hit the number branch here.
+	const min = typeof min_check?.value === "number" ? min_check.value : undefined;
+	const max = typeof max_check?.value === "number" ? max_check.value : undefined;
+	if (is_int) {
+		const opts: { min?: number; max?: number } = {};
+		if (min !== undefined) opts.min = Math.ceil(min);
+		if (max !== undefined) opts.max = Math.floor(max);
+		return fc.integer(opts);
+	}
+	const opts: { min?: number; max?: number; noNaN?: boolean; noDefaultInfinity?: boolean } = {
+		// zod 4 rejects NaN AND +/-Infinity for z.number() (v3 accepted Infinity)
+		noNaN: true,
+		noDefaultInfinity: true,
+	};
+	if (min !== undefined) opts.min = min;
+	if (max !== undefined) opts.max = max;
+	return fc.double(opts);
+}
+
+function literal_arb(def: V4Def): Arbitrary<unknown> {
+	const values = def.values ?? [];
+	if (values.length === 1) return fc.constant(values[0]);
+	return fc.constantFrom(...(values as (string | number | bigint | boolean | null)[]));
+}
+
+function enum_arb(def: V4Def): Arbitrary<unknown> {
+	const values = Object.values(def.entries ?? {});
+	return fc.constantFrom(...values);
+}
+
+function object_arb(def: V4Def, ctx: WalkContext): Arbitrary<Record<string, unknown>> {
+	// Object shape facts: the def normally carries a plain shape object, but a
+	// def may surface a shape accessor at construction edges — normalise both.
+	const raw = def.shape;
+	const shape = (typeof raw === "function" ? (raw as () => Record<string, unknown>)() : raw) as
+		| Record<string, unknown>
+		| undefined;
+	const entries: Record<string, Arbitrary<unknown>> = {};
+	for (const key of Object.keys(shape ?? {})) {
+		const child = shape?.[key];
+		if (!child || typeof child !== "object") continue;
+		entries[key] = walk_child(child, ctx);
+	}
+	return fc.record(entries);
+}
+
+function array_arb(def: V4Def, ctx: WalkContext): Arbitrary<unknown[]> {
+	const checks = checks_of(def);
+	const opts: { minLength?: number; maxLength?: number } = {};
+	const min = checks.find((c) => c.check === "min_length");
+	const max = checks.find((c) => c.check === "max_length");
+	const exact = checks.find((c) => c.check === "length_equals");
+	if (exact?.length !== undefined) {
+		opts.minLength = exact.length;
+		opts.maxLength = exact.length;
+	} else {
+		if (min?.minimum !== undefined) opts.minLength = min.minimum;
+		if (max?.maximum !== undefined) opts.maxLength = max.maximum;
+	}
+	return fc.array(walk_child(def.element, ctx), opts);
+}
+
+function tuple_arb(def: V4Def, ctx: WalkContext): Arbitrary<unknown[]> {
+	const arbs = (def.items ?? []).map((item) => walk_child(item, ctx));
+	return fc.tuple(...arbs);
+}
+
+function union_arb(def: V4Def, ctx: WalkContext): Arbitrary<unknown> {
+	const arbs = (def.options ?? []).map((o) => walk_child(o, ctx));
+	return fc.oneof(...arbs);
+}
+
+function record_arb(def: V4Def, ctx: WalkContext): Arbitrary<Record<string, unknown>> {
+	const key_arb = walk_child(def.keyType, ctx);
+	const value_arb = walk_child(def.valueType, ctx);
+	return fc.dictionary(key_arb as Arbitrary<string>, value_arb);
+}
+
+function lazy_arb(getter: (() => unknown) | undefined, ctx: WalkContext): Arbitrary<unknown> {
+	if (!getter) throw new Error(unsupported_message("lazy"));
+	const existing = ctx.lazy_ties.get(getter);
+	if (existing) return existing;
+	// fast-check's depth bookkeeping is driven by fc.oneof, not by fc.letrec
+	// alone (same recipe as the v3 walker); the def's getter is the per-schema
+	// identity key for recursion sites.
+	const { self } = fc.letrec<{ self: unknown }>((tie) => {
+		ctx.lazy_ties.set(getter, tie("self"));
+		const body = walk_child(getter(), ctx);
+		return {
+			self: fc.oneof({ depthSize: "small", maxDepth: 3 }, body, tie("self")),
+		};
+	});
+	ctx.lazy_ties.set(getter, self);
+	return self;
+}
+
+function unsupported_message(kind: string): string {
+	return (
+		`testing.arb: unsupported schema kind '${kind}'. ` +
+		`Register a generator manually via testing.arbitrary(schema, gen) ` +
+		`at the test setup, or open a follow-up to extend the walker.`
+	);
+}
+
+```
+
+---
+
+### testing/arb.ts
+
+```typescript
+/**
+ * @module testing/arb
+ * @description Translates a Zod schema into an `fc.Arbitrary` that produces
+ * values matching the schema, for BOTH supported zod generations. First
+ * consults the registry (schema-identity lookup) so consumers can register a
+ * canonical generator for any schema; if the schema isn't registered,
+ * dispatches on generation — v4 schemas carry an `_zod` property, v3 schemas
+ * don't — to a hand-rolled walker per generation:
+ *
+ * - `arb-v3.ts`: `instanceof` over the classes imported from `zod/v3`.
+ * - `arb-v4.ts`: structural walk over `schema._zod.def` (no zod generation
+ *   imported, so its emitted types stay generation-neutral).
+ *
+ * Both arms cover the same surface (primitives with constraints, objects,
+ * arrays, tuples, unions, optional/nullable/default, records, intersections,
+ * lazy cycles) for zod versions whose manifest satisfies the peer range
+ * (`>=3.25.0`), and raise the same actionable error for unsupported kinds
+ * (v3: e.g. `ZodEffects`; v4: refinements surface as `custom` checks),
+ * pointing the user at the manual-registration escape hatch via
+ * `testing.arbitrary(schema, gen)`.
+ *
+ * The public signature accepts `SchemaLike` (from `./types.js`) — never a
+ * zod-typed class — so the only zod-generational cast is the dispatch
+ * boundary plus the single `as Arbitrary<SchemaInferred<S>>` at the registry
+ * boundary below.
+ */
+
+import type { Arbitrary } from "fast-check";
+import type { z as z3 } from "zod/v3";
+import type { SchemaLike } from "../types.js";
+import type { SchemaInferred } from "./types.js";
+import type { WalkContext } from "./arb-common.js";
+import { walk_v3 } from "./arb-v3.js";
+import { walk_v4, type V4Schema } from "./arb-v4.js";
+// lookup_sync, deliberately: arb() is a synchronous API, so it consults only
+// registrations already made in this process and never triggers the vending
+// auto-loader. Await testing.lookup(...) (or testing.load_from(...)) first if
+// vended registrations should be visible to the walker.
+import { lookup_sync } from "./registry.js";
+
+/**
+ * Translate a Zod schema into an `fc.Arbitrary` producing values matching the
+ * schema. Accepts zod 3 AND zod 4 schemas.
+ *
+ * Consults the registry first; falls through to a hand-rolled walker that
+ * handles primitives, objects, arrays, tuples, unions, optional/nullable,
+ * branded, default, records, intersections, and lazy cycles.
+ *
+ * @example
+ * ```ts
+ * import { z } from 'zod' // works under zod 3 and zod 4
+ *
+ * const UserSchema = z.object({ id: z.string().uuid(), name: z.string() })
+ * fc.assert(fc.property(arb(UserSchema), (u) => UserSchema.safeParse(u).success))
+ * ```
+ */
+export function arb<S extends SchemaLike>(schema: S): Arbitrary<SchemaInferred<S>> {
+	const registered = lookup_sync(schema);
+	if (registered) return registered;
+	const ctx: WalkContext = { lazy_ties: new WeakMap() };
+	if (is_v4_schema(schema)) {
+		// Generation dispatch boundary: the `_zod` presence flag is the runtime
+		// contract; the casts only re-attach the generation's own shape.
+		const derived = walk_v4(schema as V4Schema, ctx);
+		// Registry-boundary escape hatch: the internal walker returns
+		// Arbitrary<unknown>; the public generic resolves the schema's output type.
+		return derived as Arbitrary<SchemaInferred<S>>;
+	}
+	const derived = walk_v3(schema as unknown as V3ZodType, ctx);
+	return derived as Arbitrary<SchemaInferred<S>>;
+}
+
+type V3ZodType = z3.ZodType;
+
+export function is_v4_schema(schema: SchemaLike): schema is SchemaLike & { _zod: unknown } {
+	return "_zod" in schema;
 }
 
 ```
@@ -15301,7 +15685,7 @@ export type {
 	ModelRunAsyncSetup,
 	CommandsConstraints,
 } from "./commands.js";
-export type { ArbBrand, FailureKey } from "./types.js";
+export type { ArbBrand, FailureKey, SchemaInferred } from "./types.js";
 export * as law from "./laws/index.js";
 export { default as fc } from "fast-check";
 
@@ -16272,7 +16656,7 @@ function register_corpus_error_variants(): void {
  *    types (`UserId`, `OrderId`, `CorpusError`) where a single canonical
  *    arbitrary is registered once and reused everywhere.
  * 2. **Zod schema instance** — `arbitrary(schema, gen)` / `lookup(schema)`.
- *    Backed by a `WeakMap<z.ZodType, fc.Arbitrary<unknown>>` so registered
+ *    Backed by a `WeakMap<SchemaLike, fc.Arbitrary<unknown>>` so registered
  *    schemas remain garbage-collectable. Used for ad-hoc schemas declared in a
  *    test file without a long-lived brand.
  *
@@ -16293,12 +16677,12 @@ function register_corpus_error_variants(): void {
  */
 
 import type { Arbitrary } from "fast-check";
-import type { z } from "zod";
-import type { ArbBrand } from "./types.js";
+import type { SchemaLike } from "../types.js";
+import type { ArbBrand, SchemaInferred } from "./types.js";
 import { __reset_auto_load_for_tests, ensure_loaded } from "./vending/auto-load.js";
 
 let brand_arbs = new Map<symbol, Arbitrary<unknown>>();
-let schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
+let schema_arbs = new WeakMap<SchemaLike, Arbitrary<unknown>>();
 let failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
 
 /**
@@ -16320,8 +16704,8 @@ export function arbitrary<T>(key: ArbBrand<T>, gen: Arbitrary<T>): void;
  * testing.arbitrary(UserSchema, fc.record({ id: fc.uuid(), name: fc.string() }))
  * ```
  */
-export function arbitrary<S extends z.ZodType>(schema: S, gen: Arbitrary<z.infer<S>>): void;
-export function arbitrary(key: symbol | z.ZodType, gen: Arbitrary<unknown>): void {
+export function arbitrary<S extends SchemaLike>(schema: S, gen: Arbitrary<SchemaInferred<S>>): void;
+export function arbitrary(key: symbol | SchemaLike, gen: Arbitrary<unknown>): void {
 	if (typeof key === "symbol") {
 		if (brand_arbs.has(key)) {
 			console.warn(`testing.arbitrary: brand ${String(key)} already registered — overwriting.`);
@@ -16355,8 +16739,8 @@ export function lookup<T>(key: ArbBrand<T>): Promise<Arbitrary<T> | undefined>;
  *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<S extends z.ZodType>(schema: S): Promise<Arbitrary<z.infer<S>> | undefined>;
-export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown> | undefined> {
+export function lookup<S extends SchemaLike>(schema: S): Promise<Arbitrary<SchemaInferred<S>> | undefined>;
+export async function lookup(key: symbol | SchemaLike): Promise<Arbitrary<unknown> | undefined> {
 	await ensure_loaded();
 	return lookup_now(key);
 }
@@ -16368,12 +16752,12 @@ export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown
  * this process so far (manual calls, or a prior awaited `lookup`/`load_from`).
  */
 export function lookup_sync<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
-export function lookup_sync<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
-export function lookup_sync(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+export function lookup_sync<S extends SchemaLike>(schema: S): Arbitrary<SchemaInferred<S>> | undefined;
+export function lookup_sync(key: symbol | SchemaLike): Arbitrary<unknown> | undefined {
 	return lookup_now(key);
 }
 
-function lookup_now(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+function lookup_now(key: symbol | SchemaLike): Arbitrary<unknown> | undefined {
 	if (typeof key === "symbol") return brand_arbs.get(key);
 	return schema_arbs.get(key);
 }
@@ -16464,7 +16848,7 @@ export function list_failure_variants<E extends { kind: string }>(brand: ArbBran
  */
 export function __reset_registry_for_tests(): void {
 	brand_arbs = new Map<symbol, Arbitrary<unknown>>();
-	schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
+	schema_arbs = new WeakMap<SchemaLike, Arbitrary<unknown>>();
 	failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
 	__reset_auto_load_for_tests();
 }
@@ -16488,6 +16872,8 @@ export function __reset_registry_for_tests(): void {
  *   union. Used by `failure` / `lookup_failure` to address specific variants.
  */
 
+import type { SchemaLike } from "../types.js";
+
 /**
  * A branded symbol that carries `T` at the type level.
  *
@@ -16504,6 +16890,17 @@ export function __reset_registry_for_tests(): void {
  * ```
  */
 export type ArbBrand<T> = symbol & { readonly __arb_type?: (x: T) => void };
+
+/**
+ * Extract the output type a schema validates to — without importing a zod
+ * generation into the testing substrate's `.d.ts`. Zod 4 schemas carry the
+ * output on `_zod`; zod 3 schemas (no `_zod`) fall back to the `parse` return.
+ */
+export type SchemaInferred<S> = S extends { _zod: { output: infer O } }
+	? O
+	: S extends SchemaLike<infer T>
+		? T
+		: unknown;
 
 /**
  * The set of discriminant values for a tagged error union.
@@ -16682,7 +17079,7 @@ function describe_discovery_error(error: DiscoveryError): string {
 import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { try_catch, try_catch_async } from "../../result.js";
 import { err, ok, type Result } from "../../types.js";
 
@@ -16723,12 +17120,12 @@ export type DiscoveryError =
 const package_manifest = z
 	.object({
 		name: z.string().optional(),
-		dependencies: z.record(z.string()).optional(),
-		devDependencies: z.record(z.string()).optional(),
-		peerDependencies: z.record(z.string()).optional(),
-		corpus: z.object({ testing: z.string().optional() }).passthrough().optional(),
+		dependencies: z.record(z.string(), z.string()).optional(),
+		devDependencies: z.record(z.string(), z.string()).optional(),
+		peerDependencies: z.record(z.string(), z.string()).optional(),
+		corpus: z.object({ testing: z.string().optional() }).loose().optional(),
 	})
-	.passthrough();
+	.loose();
 
 type PackageManifest = z.infer<typeof package_manifest>;
 
@@ -17281,6 +17678,45 @@ export type BytesCodec = Codec<Uint8Array>;
 export type Parser<T> = { parse: (data: unknown) => T };
 
 /**
+ * Structured shape of a `safeParse` result as corpus consumes it — defined
+ * structurally so zod 3 and zod 4 safeParse results are both assignable
+ * (the full safeParse result types carry extra optional fields, which this
+ * shape ignores).
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type ParseResult<T> = { success: true; data: T } | { success: false; error: { message: string } };
+
+/**
+ * Structural type for schema validators that also validate via `safeParse` —
+ * the public-API supertype for consumer-supplied schemas (`define_observation_type`,
+ * the testing registry, `testing.arb`). Accepts zod 3 AND zod 4 schemas without
+ * importing a zod generation into corpus's emitted `.d.ts` files.
+ *
+ * Library-owned schemas in corpus always use the zod `v4` subpath (same shape
+ * under any installed zod), so passing either generation side by side works.
+ *
+ * @category Types
+ * @group Codec Types
+ *
+ * @example
+ * ```ts
+ * import { z as z3 } from 'zod/v3'
+ * import { z as z4 } from 'zod/v4'
+ * import { define_observation_type } from '@f0rbit/corpus'
+ *
+ * // Both generations satisfy SchemaLike<T>
+ * const from_v3 = define_observation_type('legacy', z3.object({ name: z3.string() }))
+ * const from_v4 = define_observation_type('current', z4.object({ name: z4.string() }))
+ * ```
+ */
+export type SchemaLike<T = unknown> = {
+	parse: (data: unknown) => T;
+	safeParse: (data: unknown) => ParseResult<T>;
+};
+
+/**
  * A typed store for managing versioned data snapshots.
  *
  * Stores provide the main API for reading and writing data:
@@ -17620,7 +18056,7 @@ import type {
 	ParentRef,
 	Parser,
 } from "./types.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -18082,6 +18518,14 @@ export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema
 	};
 }
 
+/**
+ * Normalise a `SchemaLike` failure (structurally `{ message }`) into an `Error`
+ * for `CorpusError.cause`. Real zod errors extend `Error` and pass through.
+ */
+export function as_error(failure: { message: string }): Error {
+	return failure instanceof Error ? failure : new Error(failure.message);
+}
+
 ```
 
 ---
@@ -18097,7 +18541,7 @@ export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema
  * orchestrator.
  */
 
-import { z } from "zod";
+import { z } from "zod/v4";
 import type {
 	Backend,
 	CorpusError,
@@ -18124,7 +18568,7 @@ import { json_codec } from "./utils.js";
 export const VersionSetManifestSchema = z.object({
 	package: z.string(),
 	git_sha: z.string().length(40),
-	created_at: z.string().datetime(),
+	created_at: z.iso.datetime(),
 	builds: z.object({
 		worker: z.object({
 			artifact_ref: z.string(),

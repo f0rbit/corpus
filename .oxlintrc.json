@@ -39,6 +39,14 @@
 			}
 		},
 		{
+			// `_zod` is zod 4's own namespace property (def/traits live under it);
+			// the v4 walker reads it structurally to stay zod-generation-neutral.
+			"files": ["testing/arb-v4.ts"],
+			"rules": {
+				"no-underscore-dangle": ["error", { "allow": ["_zod"] }]
+			}
+		},
+		{
 			// Node ESM __dirname shim in the docs generator script.
 			"files": ["scripts/generate-llm-docs.js"],
 			"rules": {

@@ -43,7 +43,7 @@ The walker understands ~14 common Zod kinds:
 For `string()` with custom constraints (e.g., `datetime()`), the walker generates domain-specific strings that will pass validation.
 
 <Aside type="note">
-  If you need a generator for an unsupported schema kind (e.g., `ZodEffects`, `ZodPipe`), you'll get a clear error pointing at the manual registration escape hatch.
+  If you need a generator for an unsupported schema kind (e.g., `ZodEffects` on zod 3, or a refinement/`pipe`/`custom` check on zod 4), you'll get a clear error pointing at the manual registration escape hatch.
 </Aside>
 
 ## Composing Dependent Generators
@@ -186,12 +186,12 @@ const gen = await testing.lookup_failure(CORPUS_ERROR_BRAND, "not_found");
 
 ## Handling Unsupported Schemas
 
-If you use `testing.arb()` with an unsupported schema kind, you get a clear error:
+If you use `testing.arb()` with an unsupported schema kind, you get a clear error — the kind name is per zod generation:
 
 ```
-Error: unsupported Zod kind: ZodEffects
-  Manually register via testing.arbitrary(schema, gen):
-  testing.arbitrary(mySchema, fc.integer().map(yourTransform))
+Error: testing.arb: unsupported schema kind 'ZodEffects'. ...        # zod 3 (the refine wrapper)
+Error: testing.arb: unsupported schema kind 'refinement'. ...        # zod 4 (refines are `custom` checks)
+Error: testing.arb: unsupported schema kind 'pipe'. ...              # zod 4 (transforms / pipes)
 ```
 
 The escape hatch is `testing.arbitrary(schema, gen)` — pass your schema and a hand-built generator. After registering, `arb(schema)` will use the registered generator.

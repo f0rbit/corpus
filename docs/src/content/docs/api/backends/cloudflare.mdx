@@ -30,7 +30,7 @@ import { z } from 'zod'
 
 const SessionSchema = z.object({
   userId: z.string(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   expiresAt: z.string(),
 })
 

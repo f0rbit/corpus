@@ -11,8 +11,7 @@
  * `data_key` layout is `pipeline-templates/<content_hash>`.
  */
 
-import type { z } from "zod";
-import type { Backend, CorpusError, PutOpts, Result, SnapshotMeta, Snapshot, Store } from "./types.js";
+import type { Backend, CorpusError, PutOpts, Result, SchemaLike, Snapshot, SnapshotMeta, Store } from "./types.js";
 import { define_store } from "./types.js";
 import { create_store } from "./corpus.js";
 import { json_codec } from "./utils.js";
@@ -78,7 +77,7 @@ export type PipelineTemplateStore<T> = {
  *
  * const PipelineTemplateSchema = z.object({
  *   rollout: z.object({ type: z.literal('atomic') }),
- *   gates: z.record(z.unknown()),
+ *   gates: z.record(z.string(), z.unknown()),
  *   pre_deploy_checks: z.array(z.unknown()),
  *   post_deploy_checks: z.array(z.unknown()),
  * })
@@ -101,7 +100,7 @@ export type PipelineTemplateStore<T> = {
  */
 export function pipeline_template_store<T>(
 	backend: Backend,
-	schema: z.ZodType<T>,
+	schema: SchemaLike<T>,
 	opts?: PipelineTemplateStoreOptions,
 ): PipelineTemplateStore<T> {
 	const id = opts?.id ?? "pipeline-templates";

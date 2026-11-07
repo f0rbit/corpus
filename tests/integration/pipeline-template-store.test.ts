@@ -23,7 +23,7 @@ const test_template_schema = z.object({
 			),
 		}),
 	]),
-	gates: z.record(z.unknown()),
+	gates: z.record(z.string(), z.unknown()),
 	pre_deploy_checks: z.array(z.object({ kind: z.string(), policy: z.string() })),
 	post_deploy_checks: z.array(z.object({ kind: z.string(), policy: z.string() })),
 });

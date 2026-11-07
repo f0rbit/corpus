@@ -23,7 +23,7 @@ import { z } from 'zod'
 
 const PipelineTemplateSchema = z.object({
   rollout: z.object({ type: z.literal('atomic') }),
-  gates: z.record(z.unknown()),
+  gates: z.record(z.string(), z.unknown()),
   pre_deploy_checks: z.array(z.unknown()),
   post_deploy_checks: z.array(z.unknown()),
 })

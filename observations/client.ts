@@ -16,6 +16,7 @@ import type {
 import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
 import { generate_observation_id } from "./utils.js";
+import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
 
 async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
@@ -61,7 +62,7 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 			if (!validation.success) {
 				return err({
 					kind: "validation_error",
-					cause: validation.error,
+					cause: as_error(validation.error),
 					message: validation.error.message,
 				});
 			}

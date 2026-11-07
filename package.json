@@ -1,6 +1,6 @@
 {
 	"name": "@f0rbit/corpus",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"description": "A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support",
 	"keywords": [
 		"data-store",
@@ -73,6 +73,7 @@
 		"build": "tsc -p tsconfig.build.json",
 		"build:llm": "node scripts/generate-llm-docs.js",
 		"test": "bun test",
+		"test:zod3": "sh -c 'bun add --no-save zod@3.25.76 && bun test; code=$?; bun add --no-save zod@4.6.7; exit $code'",
 		"typecheck": "tsc --noEmit",
 		"gate": "bunx f0rbit-lint check && bun run typecheck && bun test && bun run lint && bun run fmt:check && bun run build",
 		"prepublishOnly": "npm run build",
@@ -85,17 +86,22 @@
 		"fmt:check": "oxfmt --check ."
 	},
 	"dependencies": {
-		"@traversable/zod-test": "^0.0.28",
-		"drizzle-orm": "^0.44.7",
+		"drizzle-orm": ">=0.45.4",
 		"fast-check": "^4.7.0"
 	},
 	"devDependencies": {
 		"@f0rbit/lint": "0.4.0",
-		"@types/bun": "latest"
+		"@types/bun": "latest",
+		"zod": "^4.6.7"
 	},
 	"peerDependencies": {
-		"typescript": "^5",
-		"zod": "^3"
+		"typescript": ">=5",
+		"zod": ">=3.25.0"
+	},
+	"peerDependenciesMeta": {
+		"typescript": {
+			"optional": true
+		}
 	},
 	"corpus": {
 		"testing": "./dist/testing/register.js"

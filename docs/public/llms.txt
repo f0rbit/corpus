@@ -1,8 +1,8 @@
-# @f0rbit/corpus v0.8.0
+# @f0rbit/corpus v0.8.1
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
-Install: `bun add @f0rbit/corpus zod` (or npm/pnpm/yarn). Peer dependencies: `typescript ^5`, `zod ^3`.
+Install: `bun add @f0rbit/corpus zod` (or npm/pnpm/yarn). Peer dependencies: `typescript >=5`, `zod >=3.25.0`.
 
 Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 
@@ -156,7 +156,7 @@ Every public export, grouped by the source module that defines it.
 
 ### types.ts
 - Values: `ok`, `err`, `define_store`
-- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
+- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
 
 ### result.ts
 - Values: `match`, `unwrap_or`, `unwrap`, `unwrap_err`, `try_catch`, `try_catch_async`, `fetch_result`, `pipe`, `to_nullable`, `to_fallback`, `null_on`, `fallback_on`, `format_error`, `at`, `first`, `last`, `merge_deep`
@@ -234,7 +234,7 @@ Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)
 - Types: `Command`, `AsyncCommand`, `ICommand`, `ModelRunSetup`, `ModelRunAsyncSetup`, `CommandsConstraints`
 
 ### testing/types.ts
-- Types: `ArbBrand`, `FailureKey`
+- Types: `ArbBrand`, `FailureKey`, `SchemaInferred`
 
 ### fast-check
 - Values: `fc`
