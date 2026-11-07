@@ -114,7 +114,7 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
     <div class="step-content vertical-content">
       <div class="step-title">Handle errors with pattern matching</div>
       <div class="step-body">
-        Corpus uses `Result<T, E>` types instead of throwing exceptions:
+        Corpus uses `Result<T, E>` types instead of throwing exceptions (the only exception is `create_corpus().build()`, which throws if you forgot to configure a backend):
 
         ```typescript
         const snapshot = await corpus.stores.posts.get('nonexistent-version')

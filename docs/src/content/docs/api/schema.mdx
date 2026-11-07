@@ -192,7 +192,12 @@ const confident = await db
 Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from schema changes.
 </Aside>
 
-Include the corpus schemas in your Drizzle config:
+`@f0rbit/corpus/schema` exports both `corpus_snapshots` and `corpus_observations`. Re-export them from a file in your project and include it in your Drizzle config:
+
+```ts
+// src/corpus-schema.ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
 
 ```ts
 // drizzle.config.ts
@@ -201,8 +206,7 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   schema: [
     './src/schema.ts',           // Your app schemas
-    './node_modules/@f0rbit/corpus/schema.ts',
-    './node_modules/@f0rbit/corpus/observations/schema.ts',
+    './src/corpus-schema.ts',    // Corpus tables (or ./node_modules/@f0rbit/corpus/dist/schema.js)
   ],
   out: './drizzle',
   dialect: 'sqlite',

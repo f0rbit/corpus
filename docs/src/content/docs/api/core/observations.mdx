@@ -212,6 +212,10 @@ type ObservationQueryOpts = {
 }
 ```
 
+<Aside type="caution" title="Unknown keys are ignored">
+Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+</Aside>
+
 ### Cursor-Based Pagination
 
 The `cursor` field enables efficient pagination through large observation result sets without offset-based iteration:

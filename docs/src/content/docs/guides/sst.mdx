@@ -138,7 +138,13 @@ export default {
 
 ## Drizzle Migrations
 
-Corpus schemas are exported for use with Drizzle Kit. Configure `drizzle.config.ts`:
+Corpus schemas are exported for use with Drizzle Kit. Re-export them from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Then configure `drizzle.config.ts`:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -146,13 +152,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 

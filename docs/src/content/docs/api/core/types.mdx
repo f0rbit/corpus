@@ -95,7 +95,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling — no thrown exceptions.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one exception is a config-time programmer-error guard: `create_corpus().build()` throws if no backend was configured.
 
 ```ts
 type Result<T, E = CorpusError> =

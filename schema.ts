@@ -52,3 +52,6 @@ export const corpus_snapshots = sqliteTable(
 
 export type CorpusSnapshotRow = typeof corpus_snapshots.$inferSelect;
 export type CorpusSnapshotInsert = typeof corpus_snapshots.$inferInsert;
+
+export { corpus_observations } from "./observations/schema.js";
+export type { ObservationRow, ObservationInsert } from "./observations/schema.js";

@@ -352,6 +352,12 @@ Corpus uses Drizzle ORM for schema management. Install Drizzle Kit and generate 
 bun add -D drizzle-kit
 ```
 
+Re-export the tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
 Create `drizzle.config.ts`:
 
 ```ts
@@ -360,13 +366,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 
@@ -2271,6 +2276,10 @@ type ObservationQueryOpts = {
 }
 ```
 
+<Aside type="caution" title="Unknown keys are ignored">
+Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+</Aside>
+
 ### Cursor-Based Pagination
 
 The `cursor` field enables efficient pagination through large observation result sets without offset-based iteration:
@@ -2627,7 +2636,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling — no thrown exceptions.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one exception is a config-time programmer-error guard: `create_corpus().build()` throws if no backend was configured.
 
 ```ts
 type Result<T, E = CorpusError> =
@@ -3393,7 +3402,12 @@ const confident = await db
 Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from schema changes.
 </Aside>
 
-Include the corpus schemas in your Drizzle config:
+`@f0rbit/corpus/schema` exports both `corpus_snapshots` and `corpus_observations`. Re-export them from a file in your project and include it in your Drizzle config:
+
+```ts
+// src/corpus-schema.ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
 
 ```ts
 // drizzle.config.ts
@@ -3402,8 +3416,7 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   schema: [
     './src/schema.ts',           // Your app schemas
-    './node_modules/@f0rbit/corpus/schema.ts',
-    './node_modules/@f0rbit/corpus/observations/schema.ts',
+    './src/corpus-schema.ts',    // Corpus tables (or ./node_modules/@f0rbit/corpus/dist/schema.js)
   ],
   out: './drizzle',
   dialect: 'sqlite',
@@ -5355,7 +5368,7 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
     <div class="step-content vertical-content">
       <div class="step-title">Handle errors with pattern matching</div>
       <div class="step-body">
-        Corpus uses `Result<T, E>` types instead of throwing exceptions:
+        Corpus uses `Result<T, E>` types instead of throwing exceptions (the only exception is `create_corpus().build()`, which throws if you forgot to configure a backend):
 
         ```typescript
         const snapshot = await corpus.stores.posts.get('nonexistent-version')
@@ -5736,7 +5749,13 @@ Install Drizzle Kit as a dev dependency:
 bun add -D drizzle-kit
 ```
 
-Create `drizzle.config.ts` in your project root:
+Re-export the corpus tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Create `drizzle.config.ts` in your project root and point it at that file:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -5744,13 +5763,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+Alternatively, point `schema` straight at the published build: `'./node_modules/@f0rbit/corpus/dist/schema.js'`.
 
 Generate and apply migrations:
 
@@ -5763,8 +5781,16 @@ wrangler d1 migrations apply corpus-db
 ```
 
 <Aside type="tip">
-  The `corpus_snapshots` and `corpus_observations` schemas are exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
+  The `corpus_snapshots` and `corpus_observations` schemas are both exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
 </Aside>
+
+### Generating migrations
+
+Corpus does not ship migration SQL — you own your migration history. Run `bunx drizzle-kit generate` with the config above to produce SQL in `./migrations`, then apply it with `wrangler d1 migrations apply <database-name>`. If you already have app tables, list your own schema file alongside the corpus re-export in the `schema` array.
+
+### Upgrading corpus
+
+When a corpus release changes either table, the release notes will say so. After upgrading `@f0rbit/corpus`, rerun `bunx drizzle-kit generate` and apply the new migration; if nothing changed, drizzle-kit reports there is nothing to generate.
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -6575,6 +6601,31 @@ const isSuperseded = await corpus.is_superseded(pointer)
 Staleness is determined per-version, not per-path. If any part of a document changes, all observations from that version become stale.
 </Aside>
 
+### Per-field citations
+
+To cite where each field of an extracted result came from, use one of two patterns:
+
+- **One observation per field**, each with its own `path` (a JSONPath into the source snapshot), so every field carries its own pointer.
+- **A field→pointer map inside your own content schema**:
+
+```typescript
+import { z } from 'zod'
+import { define_observation_type } from '@f0rbit/corpus'
+
+const citation = z.object({
+  store_id: z.string(),
+  version: z.string(),
+  path: z.string().optional(),
+})
+
+const extraction = define_observation_type('extraction', z.object({
+  title: z.string(),
+  citations: z.record(z.string(), citation), // field name -> where it came from
+}))
+```
+
+The first gives you queryable per-field rows; the second keeps a single observation per extraction.
+
 ## API Reference
 
 ### ObservationsClient
@@ -7105,7 +7156,13 @@ export default {
 
 ## Drizzle Migrations
 
-Corpus schemas are exported for use with Drizzle Kit. Configure `drizzle.config.ts`:
+Corpus schemas are exported for use with Drizzle Kit. Re-export them from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Then configure `drizzle.config.ts`:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -7113,13 +7170,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 
@@ -13042,7 +13098,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * @example
  * ```ts
  * import { drizzle } from 'drizzle-orm/d1'
- * import { corpus_observations } from 'corpus/observation-schema'
+ * import { corpus_observations } from '@f0rbit/corpus/schema'
  *
  * const db = drizzle(env.D1)
  * const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.type, 'entity_mention'))
@@ -14625,6 +14681,9 @@ export const corpus_snapshots = sqliteTable(
 
 export type CorpusSnapshotRow = typeof corpus_snapshots.$inferSelect;
 export type CorpusSnapshotInsert = typeof corpus_snapshots.$inferInsert;
+
+export { corpus_observations } from "./observations/schema.js";
+export type { ObservationRow, ObservationInsert } from "./observations/schema.js";
 
 ```
 

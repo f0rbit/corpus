@@ -150,7 +150,7 @@ Exception maps — new intentional exceptions go in one of these two, each entry
 
 ### Schema / migrations
 
-Drizzle is the sole source of truth: `schema.ts` (`corpus_snapshots`) and `observations/schema.ts` (`corpus_observations`). The snapshots table is exposed via `@f0rbit/corpus/schema`; `corpus_observations` is re-exported through the main barrel (`observations/index.ts`). Corpus ships **no** migration SQL and no `drizzle-kit` history — consumers point `drizzle-kit generate` at the exported tables and own their migration history (see `docs/src/content/docs/guides/cloudflare.mdx`). `sst.ts` is only the `createCorpusInfra` resource-naming helper; the former `CORPUS_MIGRATION_SQL` constant was removed in commit `6aba89c`.
+Drizzle is the sole source of truth: `schema.ts` (`corpus_snapshots`) and `observations/schema.ts` (`corpus_observations`). `@f0rbit/corpus/schema` (root `schema.ts`) exports BOTH tables (it re-exports `corpus_observations`; only `dist/` ships, so docs must never point at `node_modules/@f0rbit/corpus/observations/...`); `corpus_observations` is also re-exported through the main barrel (`observations/index.ts`). Corpus ships **no** migration SQL and no `drizzle-kit` history — consumers point `drizzle-kit generate` at the exported tables and own their migration history (see `docs/src/content/docs/guides/cloudflare.mdx`). `sst.ts` is only the `createCorpusInfra` resource-naming helper; the former `CORPUS_MIGRATION_SQL` constant was removed in commit `6aba89c`.
 
 ### Version sets
 

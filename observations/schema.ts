@@ -26,7 +26,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * @example
  * ```ts
  * import { drizzle } from 'drizzle-orm/d1'
- * import { corpus_observations } from 'corpus/observation-schema'
+ * import { corpus_observations } from '@f0rbit/corpus/schema'
  *
  * const db = drizzle(env.D1)
  * const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.type, 'entity_mention'))
