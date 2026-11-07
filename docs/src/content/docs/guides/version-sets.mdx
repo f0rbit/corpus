@@ -25,8 +25,8 @@ import { VersionSetManifestSchema, type VersionSetManifest } from '@f0rbit/corpu
 //   git_sha: string                    // 40-char sha
 //   created_at: string                 // ISO-8601 datetime
 //   builds: {
-//     worker: { artifact_ref, size_bytes, compatibility_date }
-//     assets?: { artifact_ref?, version_affinity: 'pinned' | 'none' }
+//     worker: { artifact_ref, size_bytes, compatibility_date, bundle_manifest_ref? }
+//     assets?: { artifact_ref?, manifest_ref?, version_affinity: 'pinned' | 'none' }
 //   }
 //   migrations: {
 //     d1_plan_ref?: string
@@ -39,6 +39,8 @@ import { VersionSetManifestSchema, type VersionSetManifest } from '@f0rbit/corpu
 ```
 
 All cross-store references (`artifact_ref`, `d1_plan_ref`, `env_manifest_ref`, `infra_plan_ref`, `grants_ref`) are corpus versions in the form `<store>/<hash>` — the orchestrator resolves them at deploy time.
+
+`builds.worker.bundle_manifest_ref` and `builds.assets.manifest_ref` (added in 0.9.0, both optional) point at the directory-bundle and asset manifest blobs. Directory-bundle manifests still carry the required `artifact_ref` (devpad stamps `""` there), with `bundle_manifest_ref` as the authoritative reference. Manifests written before 0.9.0 parse unchanged.
 
 ## Creating a store
 

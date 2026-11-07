@@ -758,9 +758,13 @@ export type VersionSetManifest = {
 			artifact_ref: string;
 			size_bytes: number;
 			compatibility_date: string;
+			/** Corpus ref of the directory-bundle manifest blob (directory-bundle workers). */
+			bundle_manifest_ref?: string;
 		};
 		assets?: {
 			artifact_ref?: string;
+			/** Corpus ref of the asset manifest blob. */
+			manifest_ref?: string;
 			version_affinity: "pinned" | "none";
 		};
 	};

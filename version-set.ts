@@ -39,10 +39,12 @@ export const VersionSetManifestSchema = z.object({
 			artifact_ref: z.string(),
 			size_bytes: z.number().int(),
 			compatibility_date: z.string(),
+			bundle_manifest_ref: z.string().optional(),
 		}),
 		assets: z
 			.object({
 				artifact_ref: z.string().optional(),
+				manifest_ref: z.string().optional(),
 				version_affinity: z.enum(["pinned", "none"]).default("pinned"),
 			})
 			.optional(),
