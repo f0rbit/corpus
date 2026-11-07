@@ -6,12 +6,9 @@ import { resolve_backend } from "../resolve-backend.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { load_cli_config } from "../load-config.js";
 import { serialize_meta } from "../meta.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
-const date_schema = z
-	.string()
-	.datetime()
-	.transform((s) => new Date(s));
+const date_schema = z.iso.datetime().transform((s) => new Date(s));
 
 export const versions_command: Command = {
 	name: "versions",

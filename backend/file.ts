@@ -22,7 +22,7 @@ import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
 import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /** Prefix used for transaction staging directories (`<base>/.tx-<id>/`). */
 const TX_DIR_PREFIX = ".tx-";

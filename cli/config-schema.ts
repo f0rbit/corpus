@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const store_definition_schema = z.object({
 	id: z.string(),
@@ -22,7 +22,7 @@ const environment_config_schema = z.union([file_environment_schema, remote_envir
 export const corpus_cli_config_schema = z
 	.object({
 		stores: z.array(store_definition_schema).optional(),
-		environments: z.record(environment_config_schema).optional(),
+		environments: z.record(z.string(), environment_config_schema).optional(),
 		default_env: z.string().optional(),
 	})
 	.strict();

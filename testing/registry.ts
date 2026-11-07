@@ -9,7 +9,7 @@
  *    types (`UserId`, `OrderId`, `CorpusError`) where a single canonical
  *    arbitrary is registered once and reused everywhere.
  * 2. **Zod schema instance** — `arbitrary(schema, gen)` / `lookup(schema)`.
- *    Backed by a `WeakMap<z.ZodType, fc.Arbitrary<unknown>>` so registered
+ *    Backed by a `WeakMap<SchemaLike, fc.Arbitrary<unknown>>` so registered
  *    schemas remain garbage-collectable. Used for ad-hoc schemas declared in a
  *    test file without a long-lived brand.
  *
@@ -30,12 +30,12 @@
  */
 
 import type { Arbitrary } from "fast-check";
-import type { z } from "zod";
-import type { ArbBrand } from "./types.js";
+import type { SchemaLike } from "../types.js";
+import type { ArbBrand, SchemaInferred } from "./types.js";
 import { __reset_auto_load_for_tests, ensure_loaded } from "./vending/auto-load.js";
 
 let brand_arbs = new Map<symbol, Arbitrary<unknown>>();
-let schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
+let schema_arbs = new WeakMap<SchemaLike, Arbitrary<unknown>>();
 let failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
 
 /**
@@ -57,8 +57,8 @@ export function arbitrary<T>(key: ArbBrand<T>, gen: Arbitrary<T>): void;
  * testing.arbitrary(UserSchema, fc.record({ id: fc.uuid(), name: fc.string() }))
  * ```
  */
-export function arbitrary<S extends z.ZodType>(schema: S, gen: Arbitrary<z.infer<S>>): void;
-export function arbitrary(key: symbol | z.ZodType, gen: Arbitrary<unknown>): void {
+export function arbitrary<S extends SchemaLike>(schema: S, gen: Arbitrary<SchemaInferred<S>>): void;
+export function arbitrary(key: symbol | SchemaLike, gen: Arbitrary<unknown>): void {
 	if (typeof key === "symbol") {
 		if (brand_arbs.has(key)) {
 			console.warn(`testing.arbitrary: brand ${String(key)} already registered — overwriting.`);
@@ -92,8 +92,8 @@ export function lookup<T>(key: ArbBrand<T>): Promise<Arbitrary<T> | undefined>;
  *
  * @returns the registered arbitrary, or `undefined` if none is registered.
  */
-export function lookup<S extends z.ZodType>(schema: S): Promise<Arbitrary<z.infer<S>> | undefined>;
-export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown> | undefined> {
+export function lookup<S extends SchemaLike>(schema: S): Promise<Arbitrary<SchemaInferred<S>> | undefined>;
+export async function lookup(key: symbol | SchemaLike): Promise<Arbitrary<unknown> | undefined> {
 	await ensure_loaded();
 	return lookup_now(key);
 }
@@ -105,12 +105,12 @@ export async function lookup(key: symbol | z.ZodType): Promise<Arbitrary<unknown
  * this process so far (manual calls, or a prior awaited `lookup`/`load_from`).
  */
 export function lookup_sync<T>(key: ArbBrand<T>): Arbitrary<T> | undefined;
-export function lookup_sync<S extends z.ZodType>(schema: S): Arbitrary<z.infer<S>> | undefined;
-export function lookup_sync(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+export function lookup_sync<S extends SchemaLike>(schema: S): Arbitrary<SchemaInferred<S>> | undefined;
+export function lookup_sync(key: symbol | SchemaLike): Arbitrary<unknown> | undefined {
 	return lookup_now(key);
 }
 
-function lookup_now(key: symbol | z.ZodType): Arbitrary<unknown> | undefined {
+function lookup_now(key: symbol | SchemaLike): Arbitrary<unknown> | undefined {
 	if (typeof key === "symbol") return brand_arbs.get(key);
 	return schema_arbs.get(key);
 }
@@ -201,7 +201,7 @@ export function list_failure_variants<E extends { kind: string }>(brand: ArbBran
  */
 export function __reset_registry_for_tests(): void {
 	brand_arbs = new Map<symbol, Arbitrary<unknown>>();
-	schema_arbs = new WeakMap<z.ZodType, Arbitrary<unknown>>();
+	schema_arbs = new WeakMap<SchemaLike, Arbitrary<unknown>>();
 	failures = new Map<symbol, Map<string, Arbitrary<unknown>>>();
 	__reset_auto_load_for_tests();
 }

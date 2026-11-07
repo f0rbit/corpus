@@ -3,7 +3,7 @@
  * @description Type definitions for the observations feature.
  */
 
-import type { ZodType } from "zod";
+import type { SchemaLike } from "../types.js";
 
 /**
  * Universal address to versioned content within a corpus store.
@@ -61,7 +61,7 @@ export type SnapshotPointer = {
  */
 export type ObservationTypeDef<T> = {
 	readonly name: string;
-	readonly schema: ZodType<T>;
+	readonly schema: SchemaLike<T>;
 };
 
 /**
@@ -249,6 +249,6 @@ export type InferObservationContent<T> = T extends ObservationTypeDef<infer C> ?
  * })
  * ```
  */
-export function define_observation_type<T>(name: string, schema: ZodType<T>): ObservationTypeDef<T> {
+export function define_observation_type<T>(name: string, schema: SchemaLike<T>): ObservationTypeDef<T> {
 	return { name, schema };
 }

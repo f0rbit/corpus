@@ -44,6 +44,8 @@ export type {
 	Codec,
 	BytesCodec,
 	Parser,
+	SchemaLike,
+	ParseResult,
 	Store,
 	StoreDefinition,
 	DefineStoreOpts,

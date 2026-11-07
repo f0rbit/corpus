@@ -43,6 +43,6 @@ export type {
 	ModelRunAsyncSetup,
 	CommandsConstraints,
 } from "./commands.js";
-export type { ArbBrand, FailureKey } from "./types.js";
+export type { ArbBrand, FailureKey, SchemaInferred } from "./types.js";
 export * as law from "./laws/index.js";
 export { default as fc } from "fast-check";

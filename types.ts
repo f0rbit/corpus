@@ -375,6 +375,45 @@ export type BytesCodec = Codec<Uint8Array>;
 export type Parser<T> = { parse: (data: unknown) => T };
 
 /**
+ * Structured shape of a `safeParse` result as corpus consumes it — defined
+ * structurally so zod 3 and zod 4 safeParse results are both assignable
+ * (the full safeParse result types carry extra optional fields, which this
+ * shape ignores).
+ *
+ * @category Types
+ * @group Codec Types
+ */
+export type ParseResult<T> = { success: true; data: T } | { success: false; error: { message: string } };
+
+/**
+ * Structural type for schema validators that also validate via `safeParse` —
+ * the public-API supertype for consumer-supplied schemas (`define_observation_type`,
+ * the testing registry, `testing.arb`). Accepts zod 3 AND zod 4 schemas without
+ * importing a zod generation into corpus's emitted `.d.ts` files.
+ *
+ * Library-owned schemas in corpus always use the zod `v4` subpath (same shape
+ * under any installed zod), so passing either generation side by side works.
+ *
+ * @category Types
+ * @group Codec Types
+ *
+ * @example
+ * ```ts
+ * import { z as z3 } from 'zod/v3'
+ * import { z as z4 } from 'zod/v4'
+ * import { define_observation_type } from '@f0rbit/corpus'
+ *
+ * // Both generations satisfy SchemaLike<T>
+ * const from_v3 = define_observation_type('legacy', z3.object({ name: z3.string() }))
+ * const from_v4 = define_observation_type('current', z4.object({ name: z4.string() }))
+ * ```
+ */
+export type SchemaLike<T = unknown> = {
+	parse: (data: unknown) => T;
+	safeParse: (data: unknown) => ParseResult<T>;
+};
+
+/**
  * A typed store for managing versioned data snapshots.
  *
  * Stores provide the main API for reading and writing data:

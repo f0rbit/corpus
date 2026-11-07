@@ -322,9 +322,15 @@ describe("testing/arb", () => {
 	});
 
 	describe("unsupported schema kinds", () => {
-		test("ZodEffects throws with a message naming the kind and pointing at the escape hatch", () => {
+		// The suite runs under both zod generations (tests import the root zod):
+		// v3 wraps .refine() in ZodEffects; v4 attaches a `custom` check and the
+		// v4 walker names `refinement` for it. Each generation asserts its own
+		// kind name — same actionability contract, generation-specific wording.
+		const is_zod4 = "_zod" in z.string();
+		const kind_pattern = is_zod4 ? /refinement/ : /ZodEffects/;
+		test("refined schemas throw with a message naming the kind and pointing at the escape hatch", () => {
 			const schema = z.string().refine((s) => s.length > 0);
-			expect(() => arb(schema)).toThrow(/ZodEffects/);
+			expect(() => arb(schema)).toThrow(kind_pattern);
 			expect(() => arb(schema)).toThrow(/testing\.arbitrary/);
 		});
 	});

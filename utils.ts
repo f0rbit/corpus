@@ -13,7 +13,7 @@ import type {
 	ParentRef,
 	Parser,
 } from "./types.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /**
  * Computes the SHA-256 hash of binary data.
@@ -473,4 +473,12 @@ export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema
 		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,
 	};
+}
+
+/**
+ * Normalise a `SchemaLike` failure (structurally `{ message }`) into an `Error`
+ * for `CorpusError.cause`. Real zod errors extend `Error` and pass through.
+ */
+export function as_error(failure: { message: string }): Error {
+	return failure instanceof Error ? failure : new Error(failure.message);
 }

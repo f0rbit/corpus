@@ -9,7 +9,7 @@
  */
 
 import { drizzle } from "drizzle-orm/sqlite-proxy";
-import { z } from "zod";
+import { z } from "zod/v4";
 import type { DrizzleDb } from "./drizzle-storage.js";
 
 /**

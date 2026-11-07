@@ -12,7 +12,7 @@ Observations let you extract structured facts from versioned documents with auto
 ```ts
 function define_observation_type<T>(
   name: string,
-  schema: ZodType<T>
+  schema: SchemaLike<T>
 ): ObservationTypeDef<T>
 ```
 
@@ -23,7 +23,7 @@ Creates a typed observation definition for use with `observations.put()`.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | `string` | Unique identifier for this observation type |
-| `schema` | `ZodType<T>` | Zod schema for validating observation content |
+| `schema` | `SchemaLike<T>` | Schema for validating observation content — a Zod 3 or Zod 4 schema (or any object with compatible `parse`/`safeParse` methods) |
 
 ### Example
 
@@ -123,7 +123,7 @@ Definition for a typed observation schema.
 ```ts
 type ObservationTypeDef<T> = {
   readonly name: string
-  readonly schema: ZodType<T>
+  readonly schema: SchemaLike<T>
 }
 ```
 

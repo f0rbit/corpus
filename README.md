@@ -33,6 +33,13 @@ if (result.ok) {
 }
 ```
 
+## zod compatibility
+
+corpus supports **zod 3.25 or newer** (tested on 3.25.76 and 4.x). Two details make this work:
+
+- Consumer-supplied schemas (`json_codec`, `pipeline_template_store`, `define_observation_type`, `testing.arb`, `testing.arbitrary`) are typed via the structural `SchemaLike` interface — no zod generation is imported into corpus's public types, and both zod 3 and zod 4 schemas (or plain `{ parse }` parsers) satisfy it.
+- corpus's own internal schemas always import the `zod/v4` export subpath, which ships with every zod version in the supported range, so their behaviour is identical whichever generation your project installs.
+
 ## cli
 
 A read-only command-line tool for querying and cloning corpus snapshots across backends.

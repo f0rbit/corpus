@@ -10,6 +10,8 @@
  *   union. Used by `failure` / `lookup_failure` to address specific variants.
  */
 
+import type { SchemaLike } from "../types.js";
+
 /**
  * A branded symbol that carries `T` at the type level.
  *
@@ -26,6 +28,17 @@
  * ```
  */
 export type ArbBrand<T> = symbol & { readonly __arb_type?: (x: T) => void };
+
+/**
+ * Extract the output type a schema validates to — without importing a zod
+ * generation into the testing substrate's `.d.ts`. Zod 4 schemas carry the
+ * output on `_zod`; zod 3 schemas (no `_zod`) fall back to the `parse` return.
+ */
+export type SchemaInferred<S> = S extends { _zod: { output: infer O } }
+	? O
+	: S extends SchemaLike<infer T>
+		? T
+		: unknown;
 
 /**
  * The set of discriminant values for a tagged error union.
