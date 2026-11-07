@@ -100,6 +100,8 @@ export type Observation<T = unknown> = {
 	observed_at?: Date;
 	created_at: Date;
 	derived_from?: SnapshotPointer[];
+	/** Entity the observation is about. Inherited from the source snapshot unless set explicitly on put. */
+	entity_key?: string;
 };
 
 /**
@@ -124,6 +126,11 @@ export type ObservationPutOpts<T> = {
 	confidence?: number;
 	observed_at?: Date;
 	derived_from?: SnapshotPointer[];
+	/**
+	 * Entity the observation is about. When omitted, inherited from the source
+	 * snapshot's `entity_key`; stored unkeyed if the source is missing or unkeyed.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -185,9 +192,18 @@ export type VersionFilter =
  *   exclude_source_version: 'v3',
  *   limit: 1
  * }
+ *
+ * // Newest price observations for one entity
+ * const for_entity: ObservationQueryOpts = {
+ *   type: 'price',
+ *   entity_key: 'https://example.com/pricing',
+ *   limit: 10
+ * }
  * ```
  */
 export type ObservationQueryOpts = {
+	/** Exact match on `entity_key`. Unkeyed observations never match. */
+	entity_key?: string;
 	type?: string | string[];
 	source_store?: string;
 	source_version?: string;

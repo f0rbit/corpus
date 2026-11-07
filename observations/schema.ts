@@ -22,6 +22,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * - `observed_at` - When the observation was made (ISO 8601)
  * - `created_at` - When the record was stored (ISO 8601)
  * - `derived_from` - Optional JSON array of SnapshotPointers for provenance
+ * - `entity_key` - Optional entity the observation is about (NULL when unkeyed)
  *
  * @example
  * ```ts
@@ -55,12 +56,16 @@ export const corpus_observations = sqliteTable(
 
 		// Derivation lineage
 		derived_from: text("derived_from"),
+
+		// Entity the observation is about (NULL when unkeyed)
+		entity_key: text("entity_key"),
 	},
 	(table) => [
 		index("idx_obs_type").on(table.type),
 		index("idx_obs_source").on(table.source_store_id, table.source_version),
 		index("idx_obs_type_observed").on(table.type, table.observed_at),
 		index("idx_obs_type_source").on(table.type, table.source_store_id),
+		index("idx_obs_type_entity").on(table.type, table.entity_key),
 	],
 );
 

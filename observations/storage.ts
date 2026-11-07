@@ -23,6 +23,7 @@ export type StorageQueryOpts = {
 	created_before?: string; // ISO string
 	observed_after?: string; // ISO string
 	observed_before?: string; // ISO string
+	entity_key?: string;
 	limit?: number;
 };
 
@@ -71,6 +72,7 @@ function row_to_base(row: ObservationRow) {
 		...(row.observed_at && { observed_at: new Date(row.observed_at) }),
 		created_at: new Date(row.created_at),
 		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) as SnapshotPointer[] }),
+		...(row.entity_key && { entity_key: row.entity_key }),
 	};
 }
 
@@ -103,6 +105,7 @@ export function create_observation_row(
 		confidence?: number;
 		observed_at?: Date;
 		derived_from?: SnapshotPointer[];
+		entity_key?: string;
 	},
 ): ObservationRow {
 	const now = new Date();
@@ -119,6 +122,7 @@ export function create_observation_row(
 		observed_at: opts.observed_at?.toISOString() ?? null,
 		created_at: now.toISOString(),
 		derived_from: opts.derived_from ? JSON.stringify(opts.derived_from) : null,
+		entity_key: opts.entity_key ?? null,
 	};
 }
 
@@ -139,6 +143,7 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },
 		{ key: "observed_after", predicate: (r, after) => r.observed_at !== null && r.observed_at > (after as string) },
 		{ key: "observed_before", predicate: (r, before) => r.observed_at !== null && r.observed_at < (before as string) },
+		{ key: "entity_key", predicate: (r, entity_key) => r.entity_key === (entity_key as string) },
 	],
 	sort: (a, b) => b.created_at.localeCompare(a.created_at),
 });

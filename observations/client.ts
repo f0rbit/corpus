@@ -40,6 +40,7 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		created_before: opts.created_before?.toISOString(),
 		observed_after: opts.after?.toISOString(),
 		observed_before: opts.before?.toISOString(),
+		entity_key: opts.entity_key,
 		limit: opts.limit,
 	};
 }
@@ -52,6 +53,12 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 	async function get_latest_version(store_id: string): Promise<string | null> {
 		const result = await metadata.get_latest(store_id);
 		return result.ok ? result.value.version : null;
+	}
+
+	async function source_entity_key(source: SnapshotPointer): Promise<Result<string | undefined, CorpusError>> {
+		const meta = await metadata.get(source.store_id, source.version);
+		if (meta.ok) return ok(meta.value.entity_key);
+		return meta.error.kind === "not_found" ? ok(undefined) : meta;
 	}
 
 	return {
@@ -68,11 +75,16 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				});
 			}
 
+			const inherited = opts.entity_key === undefined ? await source_entity_key(opts.source) : ok(opts.entity_key);
+			if (!inherited.ok) return inherited;
+			const entity_key = inherited.value;
+
 			const id = generate_observation_id();
 			const row = create_observation_row(id, type.name, opts.source, validation.data, {
 				confidence: opts.confidence,
 				observed_at: opts.observed_at,
 				derived_from: opts.derived_from,
+				entity_key,
 			});
 
 			const result = await storage.put_row(row);
@@ -87,6 +99,7 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				...(opts.observed_at && { observed_at: opts.observed_at }),
 				created_at: new Date(row.created_at),
 				...(opts.derived_from && { derived_from: opts.derived_from }),
+				...(entity_key !== undefined && { entity_key }),
 			};
 
 			return ok(observation);
@@ -143,6 +156,12 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async is_stale(pointer: SnapshotPointer): Promise<boolean> {
+			const source = await metadata.get(pointer.store_id, pointer.version);
+			const entity_key = source.ok ? source.value.entity_key : undefined;
+			if (entity_key !== undefined) {
+				const scoped = await metadata.get_latest(pointer.store_id, { entity_key });
+				return scoped.ok && pointer.version !== scoped.value.version;
+			}
 			const latest = await get_latest_version(pointer.store_id);
 			if (!latest) return false;
 			return pointer.version !== latest;

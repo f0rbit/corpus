@@ -338,6 +338,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.observed_before) {
 				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
 			}
+			if (opts.entity_key !== undefined) {
+				conditions.push(eq(corpus_observations.entity_key, opts.entity_key));
+			}
 
 			let query = db
 				.select()

@@ -41,6 +41,7 @@ const make_obs_row = (id: string, type = "sentiment"): ObservationRow => ({
 	observed_at: null,
 	created_at: new Date().toISOString(),
 	derived_from: null,
+	entity_key: null,
 });
 
 const setup = (on_event?: EventHandler) => {
