@@ -143,7 +143,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	};
 
 	const storage = create_drizzle_observations_storage(db);
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
 	 * Apply a batch of ops atomically.

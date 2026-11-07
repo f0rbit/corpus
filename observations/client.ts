@@ -3,7 +3,8 @@
  * @description Centralized business logic for observations, built on storage adapters.
  */
 
-import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types.js";
+import { z } from "zod/v4";
+import type { Result, CorpusError, CorpusEvent, MetadataClient, ObservationsClient } from "../types.js";
 import type {
 	Observation,
 	ObservationMeta,
@@ -18,6 +19,38 @@ import { row_to_observation, row_to_meta, create_observation_row } from "./stora
 import { generate_observation_id } from "./utils.js";
 import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
+
+const query_keys = {
+	entity_key: true,
+	type: true,
+	source_store: true,
+	source_version: true,
+	exclude_source_version: true,
+	source_prefix: true,
+	after: true,
+	before: true,
+	created_after: true,
+	created_before: true,
+	limit: true,
+	cursor: true,
+	version_filter: true,
+} as const satisfies Record<keyof ObservationQueryOpts, true>;
+
+const query_keys_schema = z.strictObject(
+	Object.fromEntries(Object.keys(query_keys).map((key) => [key, z.unknown().optional()])),
+);
+
+type Emit = (event: CorpusEvent) => void;
+
+function check_query_keys(opts: ObservationQueryOpts, emit: Emit): boolean {
+	const parsed = query_keys_schema.safeParse(opts);
+	if (parsed.success) return true;
+	emit({
+		type: "error",
+		error: { kind: "validation_error", cause: as_error(parsed.error), message: parsed.error.message },
+	});
+	return false;
+}
 
 /**
  * Convert client query opts to storage query opts.
@@ -70,7 +103,11 @@ async function* filtered_rows(storage: ObservationsStorage, opts: ObservationQue
  * Creates an ObservationsClient from a storage adapter.
  * All business logic (validation, staleness, etc.) is centralized here.
  */
-export function create_observations_client(storage: ObservationsStorage, metadata: MetadataClient): ObservationsClient {
+export function create_observations_client(
+	storage: ObservationsStorage,
+	metadata: MetadataClient,
+	emit: Emit = () => undefined,
+): ObservationsClient {
 	async function get_latest_version(store_id: string): Promise<string | null> {
 		const result = await metadata.get_latest(store_id);
 		return result.ok ? result.value.version : null;
@@ -138,12 +175,14 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
+			if (!check_query_keys(opts, emit)) return;
 			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_observation(row);
 			}
 		},
 
 		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
+			if (!check_query_keys(opts, emit)) return;
 			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_meta(row);
 			}

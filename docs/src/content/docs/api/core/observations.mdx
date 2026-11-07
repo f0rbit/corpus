@@ -230,8 +230,8 @@ for await (const obs of observations.query({ type: 'entity_mention' })) {
 }
 ```
 
-<Aside type="caution" title="Unknown keys are ignored">
-Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+<Aside type="caution" title="Unknown keys are rejected">
+`query` and `query_meta` reject keys that are not in `ObservationQueryOpts`. At compile time the options type is checked even when passed through a variable, so a typo like `source_stor` is a type error. At runtime (for example after a cast or from untyped input) the query yields nothing and the backend's `on_event` handler receives an `error` event carrying a `validation_error`, rather than silently returning unfiltered results.
 </Aside>
 
 Results are ordered newest-first by `created_at`; observations with an identical `created_at` are returned in reverse insertion order (later-inserted first) on every backend.

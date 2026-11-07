@@ -698,11 +698,16 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
  * }
  * ```
  */
+export type StrictQueryOpts<O extends ObservationQueryOpts> = O &
+	([Exclude<keyof O, keyof ObservationQueryOpts>] extends [never]
+		? unknown
+		: { [K in Exclude<keyof O, keyof ObservationQueryOpts>]: never });
+
 export type ObservationsClient = {
 	put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>;
 	get: (id: string) => Promise<Result<Observation, CorpusError>>;
-	query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>;
-	query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>;
+	query: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<Observation>;
+	query_meta: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<ObservationMeta>;
 	delete: (id: string) => Promise<Result<void, CorpusError>>;
 	delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>;
 	is_stale: (pointer: SnapshotPointer) => Promise<boolean>;
