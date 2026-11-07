@@ -214,6 +214,7 @@ The active plan is the source of truth for in-flight design; consult it before c
 
 ## Gotchas
 
+- **`get_latest`/`list` tie-break is insertion order, never the version string.** Equal `created_at` (same ms) → the most recently PUT snapshot is latest and `list` is newest-first, on every backend: memory/file iterate Maps in insertion order (`base.ts` uses `>=` and reverses before the stable sort), drizzle orders by `created_at desc, rowid desc` (`corpus_snapshots` is a rowid table; `onConflictDoUpdate` keeps the original rowid, matching `Map.set` keeping position on re-put). Layered `get_latest` keeps the first read layer on ties. `generate_version` output is NOT lexicographically ordered (base64url alphabet, `.10` < `.2`) — never compare versions.
 - `create_corpus().build()` **throws** when no backend is configured — the one intentional throw in the library. It's a config-time programmer-error guard on builder misuse (unreachable from runtime data); converting `build()` to return a Result would break the public API. Everything downstream of `build()` returns `Result`.
 - `CorpusError` is a **discriminated union** — switch on `error.kind`, not `error.message`. Adding a new kind is a breaking change to consumers (TypeScript will force exhaustiveness).
 - The `Corpus` type carries `create_pointer`, `resolve_pointer`, `is_superseded` as methods on the corpus instance, not just exports. Both code paths exist; the instance methods are the documented API.

@@ -309,6 +309,43 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					if (!result.ok) return;
 					expect(result.value.version).toBe("v2");
 				});
+
+				it("breaks created_at ties by insertion order (later put wins)", async () => {
+					const created_at = new Date("2024-01-01T00:00:00.000Z");
+					await backend.metadata.put(make_meta("test-store", "z-first", { created_at }));
+					await backend.metadata.put(make_meta("test-store", "a-second", { created_at }));
+
+					const result = await backend.metadata.get_latest("test-store");
+
+					expect(result.ok).toBe(true);
+					if (!result.ok) return;
+					expect(result.value.version).toBe("a-second");
+
+					const versions: string[] = [];
+					for await (const meta of backend.metadata.list("test-store")) {
+						versions.push(meta.version);
+					}
+					expect(versions).toEqual(["a-second", "z-first"]);
+				});
+
+				it("store-level get_latest is always the last put, even within one millisecond", async () => {
+					const tie_schema = z.object({ n: z.number() });
+					const corpus = create_corpus()
+						.with_backend(backend)
+						.with_store(define_store("ties", json_codec(tie_schema)))
+						.build();
+
+					for (let n = 0; n < 10; n++) {
+						const put = await corpus.stores.ties.put({ n });
+						expect(put.ok).toBe(true);
+						if (!put.ok) return;
+
+						const latest = await corpus.stores.ties.get_latest();
+						expect(latest.ok).toBe(true);
+						if (!latest.ok) return;
+						expect(latest.value.meta.version).toBe(put.value.version);
+					}
+				});
 			});
 
 			describe("get_children", () => {

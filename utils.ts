@@ -50,8 +50,9 @@ let sequence = 0;
  * Format: base64url-encoded timestamp, with optional `.N` suffix when multiple
  * versions are generated within the same millisecond.
  *
- * Versions sort lexicographically in chronological order, making them suitable
- * for use as database keys where ordering matters.
+ * Versions are unique, but they are NOT lexicographically ordered: the base64url
+ * alphabet is not ASCII-ordered and `.10` sorts before `.2`. Never order snapshots
+ * by version string; order by `created_at` with insertion order as the tie-break.
  *
  * @category Utilities
  * @group Versioning
@@ -62,9 +63,6 @@ let sequence = 0;
  * const v1 = generate_version() // => 'AZJx4vM'
  * const v2 = generate_version() // => 'AZJx4vM.1' (same millisecond)
  * const v3 = generate_version() // => 'AZJx4vN' (next millisecond)
- *
- * // Versions sort chronologically
- * [v3, v1, v2].sort() // => [v1, v2, v3]
  * ```
  */
 export function generate_version(): string {

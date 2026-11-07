@@ -174,7 +174,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				.select()
 				.from(corpus_snapshots)
 				.where(and(...conditions))
-				.orderBy(desc(corpus_snapshots.created_at));
+				.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`));
 
 			if (opts?.limit) {
 				query = query.limit(opts.limit) as typeof query;
@@ -202,7 +202,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 					.select()
 					.from(corpus_snapshots)
 					.where(eq(corpus_snapshots.store_id, store_id))
-					.orderBy(desc(corpus_snapshots.created_at))
+					.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`))
 					.limit(1);
 
 				const row = to_nullable(first(rows));
