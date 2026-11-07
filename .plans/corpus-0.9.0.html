@@ -215,7 +215,7 @@
         <p>Executed by the build stage: background coders write diffs only. Overlapping work uses per-coder worktrees, integrated linearly by the reviewer, one commit per fix. Verification, the adversary checklist and proof are captured once per phase. ONE PR, closing #57, opens at the end of phase 3.</p>
 
         <section class="phase" id="phase-1">
-          <header><h3>Phase 1: Entity scoping</h3><span class="badge todo">todo</span></header>
+          <header><h3>Phase 1: Entity scoping</h3><span class="badge done">todo</span></header>
           <p>Adds <code>entity_key</code> end to end. This is the only phase with a schema change.</p>
           <dl class="meta">
             <dt>Devpad task</dt><dd>see devpad (created on approval)</dd>
@@ -223,7 +223,7 @@
           </dl>
 
           <article class="task" id="task-1-1">
-            <header><h3>Task 1.1: Snapshot <code>entity_key</code></h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 1.1: Snapshot <code>entity_key</code></h3><span class="badge done">todo</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>schema.ts</code>, <code>types.ts</code>, <code>utils.ts</code>, <code>corpus.ts</code>, <code>backend/{base,drizzle-storage,file,layered}.ts</code>, <code>tests/integration/backend-contract.test.ts</code>, <code>tests/integration/put-if-changed.test.ts</code></dd>
               <dt>Dependencies</dt><dd>none</dd>
@@ -239,7 +239,7 @@ bun run typecheck</pre>
           </article>
 
           <article class="task" id="task-1-2">
-            <header><h3>Task 1.2: Observation <code>entity_key</code> and entity-aware staleness</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 1.2: Observation <code>entity_key</code> and entity-aware staleness</h3><span class="badge done">todo</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>observations/{schema,types,client,storage}.ts</code>, observation part of <code>backend/drizzle-storage.ts</code>, observation parts of <code>backend/{file,cloudflare,layered}.ts</code>, <code>tests/integration/observations-*.test.ts</code></dd>
               <dt>Dependencies</dt><dd>1.1 committed</dd>
@@ -255,7 +255,7 @@ bun run typecheck</pre>
           </article>
 
           <article class="task" id="task-1-3">
-            <header><h3>Task 1.3: CLI, docs and migration guide</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 1.3: CLI, docs and migration guide</h3><span class="badge done">todo</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>cli/meta.ts</code>, <code>cli/commands/versions.ts</code>, <code>tests/integration/cli-read.test.ts</code>, <code>docs/src/content/docs/guides/{observations,cloudflare}.mdx</code>, <code>docs/src/content/docs/api/core/observations.mdx</code>, new <code>docs/src/content/docs/guides/entities.mdx</code> plus sidebar entry</dd>
               <dt>Dependencies</dt><dd>1.1 API shape (parallel with 1.2)</dd>
@@ -292,7 +292,17 @@ bun run test:zod3
             </ul></div>
           </section>
 
-          <section data-kind="proof"><h4>Proof</h4><div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div></section>
+          <section data-kind="proof"><h4>Proof</h4><div class="proof">
+<p>Commits on <code>feat/entity-scoping</code>: <code>7f86d18</code> (1.1 snapshot entity_key), <code>53426cd</code> (1.3 CLI + docs), <code>0056e5a</code> (1.2 observation entity_key + is_stale), <code>7cdfbaa</code> (AGENTS.md + schema docs).</p>
+<p>Gate: 1117 tests pass, 0 fail, lint 0 errors; <code>bun run test:zod3</code>: 1117 pass; <code>docs:build</code> green. Mutation checks: moving the snapshot entity filter and the observation entity filter from SQL to JS makes the <code>limit: 1</code> interleaved tests fail on drizzle backends.</p>
+<p>Migration (0.8.2 to this build, drizzle-kit generate in a scratch app): exactly
+<pre>ALTER TABLE `corpus_observations` ADD `entity_key` text;
+CREATE INDEX `idx_obs_type_entity` ON `corpus_observations` (`type`,`entity_key`);
+ALTER TABLE `corpus_snapshots` ADD `entity_key` text;
+CREATE INDEX `idx_store_entity` ON `corpus_snapshots` (`store_id`,`entity_key`);</pre>
+Both migrations applied with <code>wrangler d1 migrations apply --local</code>; a Worker under <code>wrangler dev --local</code> on the packed tarball: keyed puts, <code>if_changed</code> unchanged per entity, <code>get_latest({entity_key})</code> A=a2 / B=b1 / store-wide=a2, observation inherited key A, <code>is_stale</code> a1=true / b1=false, <code>query({entity_key:"A"})</code> returned only A.</p>
+<p>File-backend compat: data and observations written by npm 0.8.2, read by this build: list, get_latest, observation query and is_stale output byte-identical; no <code>entity_key</code> property on unkeyed records.</p>
+</div></section>
         </section>
 
         <section class="phase" id="phase-2">
