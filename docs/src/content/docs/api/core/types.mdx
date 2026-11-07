@@ -43,7 +43,7 @@ Interface for interacting with a versioned data store.
 type Store<T> = {
   readonly id: string
   readonly codec: Codec<T>
-  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
   get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
@@ -186,8 +186,27 @@ type PutOpts = {
   parents?: ParentRef[]
   invoked_at?: Date
   tags?: string[]
+  if_changed?: boolean
+}
+
+type PutResult = SnapshotMeta & { deduplicated: boolean; unchanged: boolean }
+```
+
+`PutResult` is the `SnapshotMeta` of the stored snapshot plus two flags:
+
+- `deduplicated` — the data blob already existed (any version), so no data was written.
+- `unchanged` — `if_changed` was set and the content matched the store's **latest** snapshot. Nothing was written (no data or metadata put, no `data_put`/`snapshot_put` events) and the meta returned is that of the existing latest version.
+
+`if_changed` compares only against the latest version, so reverting B → A still writes a new version. Inside `corpus.transaction`, the comparison uses the transaction-visible latest (in-tx puts and deletes included).
+
+```ts
+const result = await store.put(config, { if_changed: true })
+if (result.ok && result.value.unchanged) {
+  console.log('no change, still at', result.value.version)
 }
 ```
+
+Note: `MetadataClient.find_by_hash` searches the **whole history**, so it is for deduplication, not change detection — use `put(data, { if_changed: true })` to skip no-op writes.
 
 ---
 

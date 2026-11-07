@@ -51,6 +51,7 @@ export type {
 	DefineStoreOpts,
 	DataKeyContext,
 	PutOpts,
+	PutResult,
 	CorpusBuilder,
 	Corpus,
 	CorpusError,
