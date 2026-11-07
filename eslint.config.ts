@@ -38,6 +38,13 @@ export default define_lint_config({
 			rules: { "functional/no-try-statements": "off" },
 		},
 		{
+			// the structural R2Bucket's `put<B>` body parameter is a deliberate single-use type parameter:
+			// workers-types' ReadableStream class is unrelated to the lib one, so only a generic keeps the
+			// real binding assignable while the call site stays typed
+			files: ["backend/cloudflare.ts"],
+			rules: { "@typescript-eslint/no-unnecessary-type-parameters": "off" },
+		},
+		{
 			// create_corpus().build() throws by design: config-time programmer-error guard
 			files: ["corpus.ts"],
 			rules: { "functional/no-throw-statements": "off" },

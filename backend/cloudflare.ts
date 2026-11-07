@@ -20,12 +20,19 @@ import {
 	to_error,
 } from "./drizzle-storage.js";
 
-type D1Database = { prepare: (sql: string) => unknown };
+// Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
+// self-contained). Real bindings must assign to these: return types we never read are `unknown`
+// (real `put` resolves `R2Object | null`, `head` resolves `R2Object | null`), and members use method
+// shorthand so parameters are checked bivariantly — the real overloaded signatures
+// (`put(key, ReadableStream | ArrayBuffer | ..., options?)`, `delete(string | string[])`) and the
+// workers-types `ReadableStream` class (hence `body: unknown`, narrowed once at the read boundary, and a
+// generic `put` body, which keeps the call site typed without requiring the two stream classes to relate).
+type D1Database = { prepare(sql: string): unknown };
 type R2Bucket = {
-	get: (key: string) => Promise<{ body: ReadableStream<Uint8Array>; arrayBuffer: () => Promise<ArrayBuffer> } | null>;
-	put: (key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<void>;
-	delete: (key: string) => Promise<void>;
-	head: (key: string) => Promise<{ key: string } | null>;
+	get(key: string): Promise<{ body: unknown; arrayBuffer(): Promise<ArrayBuffer> } | null>;
+	put<B extends ReadableStream<Uint8Array> | Uint8Array>(key: string, data: B): Promise<unknown>;
+	delete(key: string): Promise<unknown>;
+	head(key: string): Promise<unknown>;
 };
 
 export type CloudflareBackendConfig = {
@@ -102,7 +109,8 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			}
 
 			return ok({
-				stream: () => object.body,
+				// workers-types' ReadableStream<any> is a distinct class from the lib one; R2 bodies are byte streams
+				stream: () => object.body as ReadableStream<Uint8Array>,
 				bytes: async () => new Uint8Array(await object.arrayBuffer()),
 			});
 		},
