@@ -1,6 +1,7 @@
 export { create_corpus, create_store } from "./corpus.js";
 
 export { copy, type CopyOpts, type CopyProgressEvent, type CopySummary } from "./copy.js";
+export { with_error_tracking, collect_listing, type ErrorTracker } from "./listing.js";
 
 export { define_config, type CorpusCliConfig } from "./cli/config-schema.js";
 

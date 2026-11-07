@@ -39,4 +39,6 @@ export type {
 
 export { ok, err, define_store } from "./types.js";
 
+export { with_error_tracking, collect_listing, type ErrorTracker } from "./listing.js";
+
 export * from "./observations/index.js";

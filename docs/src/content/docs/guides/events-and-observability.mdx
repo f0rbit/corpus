@@ -235,6 +235,24 @@ on_event: (event) => {
 }
 ```
 
+## Detecting Listing Failures
+
+`metadata.list()` and `metadata.list_stores()` return an `AsyncIterable` with no error channel. When storage fails, the backend emits an `error` event and the iterator simply ends, so a bad token looks the same as an empty database. `with_error_tracking` records those events, and `collect_listing` turns them back into a failing `Result`:
+
+```typescript
+import { create_cloudflare_backend, with_error_tracking, collect_listing } from '@f0rbit/corpus/cloudflare'
+
+const { on_event, tracker } = with_error_tracking(/* optional handler to forward events to */)
+const backend = create_cloudflare_backend({ d1, r2, on_event })
+
+const ids = await collect_listing(tracker, backend.metadata.list_stores!())
+if (!ids.ok) {
+  console.error(ids.error.kind) // e.g. 'storage_error'
+}
+```
+
+Passing `undefined` as the tracker collects the iterable as-is. The same tracker is how you detect a failed source listing after `copy()`: check `tracker.errors`.
+
 ## See Also
 
 - [Backend Types](/corpus/api/backends/types) — Full CorpusEvent and EventHandler definitions
