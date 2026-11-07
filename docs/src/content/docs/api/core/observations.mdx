@@ -200,6 +200,7 @@ type ObservationQueryOpts = {
   type?: string | string[]     // Filter by observation type(s)
   source_store?: string        // Filter by source store
   source_version?: string      // Filter by exact source version
+  exclude_source_version?: string  // Drop observations from this source version
   source_prefix?: string       // Filter by source version prefix
   version_filter?: VersionFilter  // Filter by version (see above)
   after?: Date                 // observed_at after this date
@@ -209,6 +210,27 @@ type ObservationQueryOpts = {
   include_stale?: boolean      // Include stale observations (default: false)
   limit?: number               // Max results to return
   cursor?: string              // Pagination cursor
+}
+```
+
+<Aside type="caution" title="Unknown keys are ignored">
+Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+</Aside>
+
+Results are ordered newest-first by `created_at`; observations with an identical `created_at` are returned in reverse insertion order (later-inserted first) on every backend.
+
+#### Newest previous observation
+
+Versions are opaque strings and are not reliably orderable, so there is no "before this version" filter. To find the newest observation for a source from any version other than the one you're about to write, exclude it and take the first result:
+
+```ts
+for await (const prev of observations.query({
+  type: 'entity_mention',
+  source_store: 'hansard',
+  exclude_source_version: new_version,
+  limit: 1,
+})) {
+  // newest observation from a different version
 }
 ```
 

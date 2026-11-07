@@ -224,6 +224,12 @@ export type MetadataClient = {
 	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
+	/**
+	 * Find any version of the store with this content hash. Searches the WHOLE
+	 * history, so it is for deduplication, not change detection (an old
+	 * version matching does not mean the latest matches). To skip no-op
+	 * writes use `store.put(data, { if_changed: true })`.
+	 */
 	find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>;
 	/**
 	 * Enumerate every distinct store id known to this backend. Optional —
@@ -433,7 +439,7 @@ export type SchemaLike<T = unknown> = {
 export type Store<T> = {
 	readonly id: string;
 	readonly codec: Codec<T>;
-	put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
@@ -442,7 +448,7 @@ export type Store<T> = {
 	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	delete: (version: string) => Promise<Result<void, CorpusError>>;
 	put_stream: T extends StreamableValue
-		? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+		? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
 		: never;
 };
 
@@ -450,7 +456,37 @@ export type PutOpts = {
 	parents?: ParentRef[];
 	invoked_at?: Date;
 	tags?: string[];
+	/**
+	 * Skip the write when the content equals the store's LATEST snapshot.
+	 *
+	 * The new content hash is compared against the latest version only (not the
+	 * whole history), so reverting B → A still writes a new version. When
+	 * unchanged, nothing is written (no data or metadata put, and no
+	 * `data_put` / `snapshot_put` events) and the existing latest meta is
+	 * returned with `unchanged: true`. An empty store always writes.
+	 *
+	 * Inside `corpus.transaction`, the comparison uses the transaction-visible
+	 * latest (in-tx puts and deletes included).
+	 *
+	 * @example
+	 * ```ts
+	 * const first = await store.put(config, { if_changed: true })
+	 * const second = await store.put(config, { if_changed: true })
+	 * if (second.ok && second.value.unchanged) {
+	 *   // second.value.version === first.value.version
+	 * }
+	 * ```
+	 */
+	if_changed?: boolean;
 };
+
+/**
+ * Result of a store `put`: the snapshot meta plus write-outcome flags.
+ * - `deduplicated`: the data blob already existed (any version, any time), so no data was written.
+ * - `unchanged`: `if_changed` was set and the content matched the latest snapshot; nothing was written
+ *   and the meta is that of the existing latest version.
+ */
+export type PutResult = SnapshotMeta & { deduplicated: boolean; unchanged: boolean };
 
 /**
  * Context passed to data_key_fn for generating custom storage paths.
@@ -573,7 +609,7 @@ export type TransactionResult<R> = {
  * @group Transaction Types
  */
 export type TransactionHandle = {
-	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
 	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
 	observe: <T>(

@@ -120,7 +120,8 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 				all.push(meta);
 			}
 
-			const filtered = filter_snapshots(all, opts);
+			// storage.list yields insertion order; reversing before the stable sort makes ties newest-put-first
+			const filtered = filter_snapshots(all.toReversed(), opts);
 			let count = 0;
 			for (const meta of filtered) {
 				yield meta;
@@ -132,7 +133,8 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 			for await (const meta of storage.list(store_id)) {
-				if (!latest || meta.created_at > latest.created_at) {
+				// >= : on equal created_at the later-inserted snapshot wins (storage.list is insertion order)
+				if (!latest || meta.created_at >= latest.created_at) {
 					latest = meta;
 				}
 			}

@@ -18,6 +18,7 @@ import type {
 	DataKeyContext,
 	DataHandle,
 	PutOpts,
+	PutResult,
 	TransactionHandle,
 	TransactionResult,
 } from "./types.js";
@@ -38,7 +39,7 @@ type SnapshotHandleImpl<T> = Omit<SnapshotHandle<T>, "stream"> & {
 };
 
 type StoreImpl<T> = Omit<Store<T>, "put_stream"> & {
-	put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 };
 
 function to_error(cause: unknown): Error {
@@ -100,10 +101,21 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return `${ctx.store_id}/${ctx.content_hash}`;
 	}
 
-	async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+	async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 		const version = generate_version();
 		const content_hash = await compute_hash(bytes);
 		const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags };
+
+		if (opts?.if_changed) {
+			const latest = await backend.metadata.get_latest(id);
+			if (latest.ok && latest.value.content_hash === content_hash) {
+				return ok({ ...latest.value, deduplicated: true, unchanged: true });
+			}
+			if (!latest.ok && latest.error.kind !== "not_found") {
+				emit({ type: "error", error: latest.error });
+				return latest;
+			}
+		}
 
 		// deduplication: reuse existing data_key if content already exists
 		const existing = await backend.metadata.find_by_hash(id, content_hash);
@@ -140,7 +152,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		}
 
 		emit({ type: "snapshot_put", store_id: id, version, content_hash, deduplicated });
-		return ok(meta);
+		return ok({ ...meta, deduplicated, unchanged: false });
 	}
 
 	function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
@@ -206,10 +218,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return ok({ meta, handle: build_handle(data_result.value) });
 	}
 
-	async function put_stream_impl(
-		stream: ReadableStream<T>,
-		opts?: PutOpts,
-	): Promise<Result<SnapshotMeta, CorpusError>> {
+	async function put_stream_impl(stream: ReadableStream<T>, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 		if (!codec.encode_stream) {
 			const error: CorpusError = { kind: "invalid_config", message: "codec does not support encode_stream" };
 			emit({ type: "error", error });
@@ -244,7 +253,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		id,
 		codec,
 
-		async put(data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+		async put(data: T, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 			const bytes = await try_catch_async(() => codec.encode(data), encode_error);
 			if (!bytes.ok) {
 				emit({ type: "error", error: bytes.error });
@@ -420,8 +429,31 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 			return undefined;
 		}
 
+		// latest version as seen from inside the tx: the last in-tx put wins (Map iteration is insertion order,
+		// and versions must never be compared), then live versions minus in-tx deletes.
+		// Limitation: a failed backend `list` (only reached when this tx deleted a version of the store) ends the
+		// iterator silently, so a listing error looks like "no surviving versions" and `if_changed` writes.
+		async function find_tx_latest(store_id: string): Promise<Result<SnapshotMeta | null, CorpusError>> {
+			const prefix = `${store_id}:`;
+			const buffered = [...buffered_meta].filter(([k]) => k.startsWith(prefix) && !tombstoned_meta.has(k));
+			const newest_buffered = buffered.at(-1);
+			if (newest_buffered) return ok(newest_buffered[1]);
+
+			if (![...tombstoned_meta].some((k) => k.startsWith(prefix))) {
+				const live = await b.metadata.get_latest(store_id);
+				if (live.ok) return ok(live.value);
+				return live.error.kind === "not_found" ? ok(null) : live;
+			}
+
+			// list is newest-first (insertion-order tie-break), so the first non-tombstoned entry is the latest
+			for await (const m of b.metadata.list(store_id)) {
+				if (!tombstoned_meta.has(meta_key(store_id, m.version))) return ok(m);
+			}
+			return ok(null);
+		}
+
 		const handle: TransactionHandle = {
-			async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+			async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 				const def = definitions_by_id[store.id];
 				if (!def) {
 					return err({ kind: "invalid_config", message: `store '${store.id}' is not registered on this corpus` });
@@ -433,6 +465,14 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 
 				const version = generate_version();
 				const content_hash = await compute_hash(bytes);
+
+				if (opts?.if_changed) {
+					const latest = await find_tx_latest(store.id);
+					if (!latest.ok) return latest;
+					if (latest.value?.content_hash === content_hash) {
+						return ok({ ...latest.value, deduplicated: true, unchanged: true });
+					}
+				}
 
 				// dedup against buffer first, then live backend
 				let existing_data_key: string | undefined = find_buffered_by_hash(store.id, content_hash)?.data_key;
@@ -468,7 +508,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 				ops.push({ type: "meta_put", meta });
 				buffered_meta.set(meta_key(store.id, version), meta);
 				commits.push(meta);
-				return ok(meta);
+				return ok({ ...meta, deduplicated: existing_data_key !== undefined, unchanged: false });
 			},
 
 			async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {

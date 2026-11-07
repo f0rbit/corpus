@@ -53,7 +53,13 @@ Install Drizzle Kit as a dev dependency:
 bun add -D drizzle-kit
 ```
 
-Create `drizzle.config.ts` in your project root:
+Re-export the corpus tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Create `drizzle.config.ts` in your project root and point it at that file:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -61,13 +67,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+Alternatively, point `schema` straight at the published build: `'./node_modules/@f0rbit/corpus/dist/schema.js'`.
 
 Generate and apply migrations:
 
@@ -80,8 +85,16 @@ wrangler d1 migrations apply corpus-db
 ```
 
 <Aside type="tip">
-  The `corpus_snapshots` and `corpus_observations` schemas are exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
+  The `corpus_snapshots` and `corpus_observations` schemas are both exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
 </Aside>
+
+### Generating migrations
+
+Corpus does not ship migration SQL — you own your migration history. Run `bunx drizzle-kit generate` with the config above to produce SQL in `./migrations`, then apply it with `wrangler d1 migrations apply <database-name>`. If you already have app tables, list your own schema file alongside the corpus re-export in the `schema` array.
+
+### Upgrading corpus
+
+When a corpus release changes either table, the release notes will say so. After upgrading `@f0rbit/corpus`, rerun `bunx drizzle-kit generate` and apply the new migration; if nothing changed, drizzle-kit reports there is nothing to generate.
       </div>
     </div>
     <div class="step-connector vertical-connector" />

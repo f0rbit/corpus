@@ -132,6 +132,7 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 					if (result.error.kind !== "not_found") return result;
 					continue;
 				}
+				// strict: on equal created_at the earlier (higher-priority) read layer wins
 				if (!latest || result.value.created_at > latest.created_at) {
 					latest = result.value;
 				}

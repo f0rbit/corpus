@@ -322,6 +322,31 @@ const isSuperseded = await corpus.is_superseded(pointer)
 Staleness is determined per-version, not per-path. If any part of a document changes, all observations from that version become stale.
 </Aside>
 
+### Per-field citations
+
+To cite where each field of an extracted result came from, use one of two patterns:
+
+- **One observation per field**, each with its own `path` (a JSONPath into the source snapshot), so every field carries its own pointer.
+- **A field→pointer map inside your own content schema**:
+
+```typescript
+import { z } from 'zod'
+import { define_observation_type } from '@f0rbit/corpus'
+
+const citation = z.object({
+  store_id: z.string(),
+  version: z.string(),
+  path: z.string().optional(),
+})
+
+const extraction = define_observation_type('extraction', z.object({
+  title: z.string(),
+  citations: z.record(z.string(), citation), // field name -> where it came from
+}))
+```
+
+The first gives you queryable per-field rows; the second keeps a single observation per extraction.
+
 ## API Reference
 
 ### ObservationsClient
@@ -369,6 +394,7 @@ type ObservationQueryOpts = {
   type?: string | string[]     // Filter by observation type(s)
   source_store?: string        // Filter by source store
   source_version?: string      // Filter by exact source version
+  exclude_source_version?: string  // Drop observations from this source version
   source_prefix?: string       // Filter by source version prefix
   after?: Date                 // observed_at after this date
   before?: Date                // observed_at before this date

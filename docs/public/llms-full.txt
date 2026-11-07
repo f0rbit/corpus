@@ -162,7 +162,7 @@ Every public export, grouped by the source module that defines it.
 
 ### types.ts
 - Values: `ok`, `err`, `define_store`
-- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
+- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `PutResult`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
 
 ### result.ts
 - Values: `match`, `unwrap_or`, `unwrap`, `unwrap_err`, `try_catch`, `try_catch_async`, `fetch_result`, `pipe`, `to_nullable`, `to_fallback`, `null_on`, `fallback_on`, `format_error`, `at`, `first`, `last`, `merge_deep`
@@ -352,6 +352,12 @@ Corpus uses Drizzle ORM for schema management. Install Drizzle Kit and generate 
 bun add -D drizzle-kit
 ```
 
+Re-export the tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
 Create `drizzle.config.ts`:
 
 ```ts
@@ -360,13 +366,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 
@@ -2259,6 +2264,7 @@ type ObservationQueryOpts = {
   type?: string | string[]     // Filter by observation type(s)
   source_store?: string        // Filter by source store
   source_version?: string      // Filter by exact source version
+  exclude_source_version?: string  // Drop observations from this source version
   source_prefix?: string       // Filter by source version prefix
   version_filter?: VersionFilter  // Filter by version (see above)
   after?: Date                 // observed_at after this date
@@ -2268,6 +2274,27 @@ type ObservationQueryOpts = {
   include_stale?: boolean      // Include stale observations (default: false)
   limit?: number               // Max results to return
   cursor?: string              // Pagination cursor
+}
+```
+
+<Aside type="caution" title="Unknown keys are ignored">
+Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+</Aside>
+
+Results are ordered newest-first by `created_at`; observations with an identical `created_at` are returned in reverse insertion order (later-inserted first) on every backend.
+
+#### Newest previous observation
+
+Versions are opaque strings and are not reliably orderable, so there is no "before this version" filter. To find the newest observation for a source from any version other than the one you're about to write, exclude it and take the first result:
+
+```ts
+for await (const prev of observations.query({
+  type: 'entity_mention',
+  source_store: 'hansard',
+  exclude_source_version: new_version,
+  limit: 1,
+})) {
+  // newest observation from a different version
 }
 ```
 
@@ -2575,7 +2602,7 @@ Interface for interacting with a versioned data store.
 type Store<T> = {
   readonly id: string
   readonly codec: Codec<T>
-  put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>
   get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>
@@ -2627,7 +2654,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling — no thrown exceptions.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one exception is a config-time programmer-error guard: `create_corpus().build()` throws if no backend was configured.
 
 ```ts
 type Result<T, E = CorpusError> =
@@ -2718,8 +2745,27 @@ type PutOpts = {
   parents?: ParentRef[]
   invoked_at?: Date
   tags?: string[]
+  if_changed?: boolean
+}
+
+type PutResult = SnapshotMeta & { deduplicated: boolean; unchanged: boolean }
+```
+
+`PutResult` is the `SnapshotMeta` of the stored snapshot plus two flags:
+
+- `deduplicated` — the data blob already existed (any version), so no data was written.
+- `unchanged` — `if_changed` was set and the content matched the store's **latest** snapshot. Nothing was written (no data or metadata put, no `data_put`/`snapshot_put` events) and the meta returned is that of the existing latest version.
+
+`if_changed` compares only against the latest version, so reverting B → A still writes a new version. Inside `corpus.transaction`, the comparison uses the transaction-visible latest (in-tx puts and deletes included).
+
+```ts
+const result = await store.put(config, { if_changed: true })
+if (result.ok && result.value.unchanged) {
+  console.log('no change, still at', result.value.version)
 }
 ```
+
+Note: `MetadataClient.find_by_hash` searches the **whole history**, so it is for deduplication, not change detection — use `put(data, { if_changed: true })` to skip no-op writes.
 
 ---
 
@@ -2793,7 +2839,7 @@ type MetadataStorage = {
 - **put**: Store or update the metadata. Return `void` or throw if I/O fails.
 - **delete**: Remove metadata. No error if already absent.
 - **list**: Yield all metadata rows for a store (order doesn't matter). No pagination—the wrapper handles that.
-- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`.
+- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`. It searches the whole history, so it is for dedup, not change detection (use `put(data, { if_changed: true })` for that).
 
 ### Example: Postgres Metadata Adapter
 
@@ -3393,7 +3439,12 @@ const confident = await db
 Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from schema changes.
 </Aside>
 
-Include the corpus schemas in your Drizzle config:
+`@f0rbit/corpus/schema` exports both `corpus_snapshots` and `corpus_observations`. Re-export them from a file in your project and include it in your Drizzle config:
+
+```ts
+// src/corpus-schema.ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
 
 ```ts
 // drizzle.config.ts
@@ -3402,8 +3453,7 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   schema: [
     './src/schema.ts',           // Your app schemas
-    './node_modules/@f0rbit/corpus/schema.ts',
-    './node_modules/@f0rbit/corpus/observations/schema.ts',
+    './src/corpus-schema.ts',    // Corpus tables (or ./node_modules/@f0rbit/corpus/dist/schema.js)
   ],
   out: './drizzle',
   dialect: 'sqlite',
@@ -5355,7 +5405,7 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
     <div class="step-content vertical-content">
       <div class="step-title">Handle errors with pattern matching</div>
       <div class="step-body">
-        Corpus uses `Result<T, E>` types instead of throwing exceptions:
+        Corpus uses `Result<T, E>` types instead of throwing exceptions (the only exception is `create_corpus().build()`, which throws if you forgot to configure a backend):
 
         ```typescript
         const snapshot = await corpus.stores.posts.get('nonexistent-version')
@@ -5736,7 +5786,13 @@ Install Drizzle Kit as a dev dependency:
 bun add -D drizzle-kit
 ```
 
-Create `drizzle.config.ts` in your project root:
+Re-export the corpus tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Create `drizzle.config.ts` in your project root and point it at that file:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -5744,13 +5800,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+Alternatively, point `schema` straight at the published build: `'./node_modules/@f0rbit/corpus/dist/schema.js'`.
 
 Generate and apply migrations:
 
@@ -5763,8 +5818,16 @@ wrangler d1 migrations apply corpus-db
 ```
 
 <Aside type="tip">
-  The `corpus_snapshots` and `corpus_observations` schemas are exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
+  The `corpus_snapshots` and `corpus_observations` schemas are both exported from `@f0rbit/corpus/schema`. See the [Schema API](/corpus/api/schema) for full schema details.
 </Aside>
+
+### Generating migrations
+
+Corpus does not ship migration SQL — you own your migration history. Run `bunx drizzle-kit generate` with the config above to produce SQL in `./migrations`, then apply it with `wrangler d1 migrations apply <database-name>`. If you already have app tables, list your own schema file alongside the corpus re-export in the `schema` array.
+
+### Upgrading corpus
+
+When a corpus release changes either table, the release notes will say so. After upgrading `@f0rbit/corpus`, rerun `bunx drizzle-kit generate` and apply the new migration; if nothing changed, drizzle-kit reports there is nothing to generate.
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -6575,6 +6638,31 @@ const isSuperseded = await corpus.is_superseded(pointer)
 Staleness is determined per-version, not per-path. If any part of a document changes, all observations from that version become stale.
 </Aside>
 
+### Per-field citations
+
+To cite where each field of an extracted result came from, use one of two patterns:
+
+- **One observation per field**, each with its own `path` (a JSONPath into the source snapshot), so every field carries its own pointer.
+- **A field→pointer map inside your own content schema**:
+
+```typescript
+import { z } from 'zod'
+import { define_observation_type } from '@f0rbit/corpus'
+
+const citation = z.object({
+  store_id: z.string(),
+  version: z.string(),
+  path: z.string().optional(),
+})
+
+const extraction = define_observation_type('extraction', z.object({
+  title: z.string(),
+  citations: z.record(z.string(), citation), // field name -> where it came from
+}))
+```
+
+The first gives you queryable per-field rows; the second keeps a single observation per extraction.
+
 ## API Reference
 
 ### ObservationsClient
@@ -6622,6 +6710,7 @@ type ObservationQueryOpts = {
   type?: string | string[]     // Filter by observation type(s)
   source_store?: string        // Filter by source store
   source_version?: string      // Filter by exact source version
+  exclude_source_version?: string  // Drop observations from this source version
   source_prefix?: string       // Filter by source version prefix
   after?: Date                 // observed_at after this date
   before?: Date                // observed_at before this date
@@ -7105,7 +7194,13 @@ export default {
 
 ## Drizzle Migrations
 
-Corpus schemas are exported for use with Drizzle Kit. Configure `drizzle.config.ts`:
+Corpus schemas are exported for use with Drizzle Kit. Re-export them from a schema file in your project (`src/corpus-schema.ts`):
+
+```typescript
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
+Then configure `drizzle.config.ts`:
 
 ```typescript
 import { defineConfig } from 'drizzle-kit'
@@ -7113,13 +7208,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 
@@ -7499,7 +7593,7 @@ The handle exposes:
 
 ```typescript
 type TransactionHandle = {
-  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>
   observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
@@ -8910,7 +9004,8 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 				all.push(meta);
 			}
 
-			const filtered = filter_snapshots(all, opts);
+			// storage.list yields insertion order; reversing before the stable sort makes ties newest-put-first
+			const filtered = filter_snapshots(all.toReversed(), opts);
 			let count = 0;
 			for (const meta of filtered) {
 				yield meta;
@@ -8922,7 +9017,8 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 			for await (const meta of storage.list(store_id)) {
-				if (!latest || meta.created_at > latest.created_at) {
+				// >= : on equal created_at the later-inserted snapshot wins (storage.list is insertion order)
+				if (!latest || meta.created_at >= latest.created_at) {
 					latest = meta;
 				}
 			}
@@ -9022,12 +9118,19 @@ import {
 	to_error,
 } from "./drizzle-storage.js";
 
-type D1Database = { prepare: (sql: string) => unknown };
+// Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
+// self-contained). Real bindings must assign to these: return types we never read are `unknown`
+// (real `put` resolves `R2Object | null`, `head` resolves `R2Object | null`), and members use method
+// shorthand so parameters are checked bivariantly — the real overloaded signatures
+// (`put(key, ReadableStream | ArrayBuffer | ..., options?)`, `delete(string | string[])`) and the
+// workers-types `ReadableStream` class (hence `body: unknown`, narrowed once at the read boundary, and a
+// generic `put` body, which keeps the call site typed without requiring the two stream classes to relate).
+type D1Database = { prepare(sql: string): unknown };
 type R2Bucket = {
-	get: (key: string) => Promise<{ body: ReadableStream<Uint8Array>; arrayBuffer: () => Promise<ArrayBuffer> } | null>;
-	put: (key: string, data: ReadableStream<Uint8Array> | Uint8Array) => Promise<void>;
-	delete: (key: string) => Promise<void>;
-	head: (key: string) => Promise<{ key: string } | null>;
+	get(key: string): Promise<{ body: unknown; arrayBuffer(): Promise<ArrayBuffer> } | null>;
+	put<B extends ReadableStream<Uint8Array> | Uint8Array>(key: string, data: B): Promise<unknown>;
+	delete(key: string): Promise<unknown>;
+	head(key: string): Promise<unknown>;
 };
 
 export type CloudflareBackendConfig = {
@@ -9104,7 +9207,8 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			}
 
 			return ok({
-				stream: () => object.body,
+				// workers-types' ReadableStream<any> is a distinct class from the lib one; R2 bodies are byte streams
+				stream: () => object.body as ReadableStream<Uint8Array>,
 				bytes: async () => new Uint8Array(await object.arrayBuffer()),
 			});
 		},
@@ -9240,7 +9344,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
  * internally, then batch them itself.
  */
 
-import { and, desc, eq, gt, inArray, like, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, lt, ne, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
@@ -9399,7 +9503,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				.select()
 				.from(corpus_snapshots)
 				.where(and(...conditions))
-				.orderBy(desc(corpus_snapshots.created_at));
+				.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`));
 
 			if (opts?.limit) {
 				query = query.limit(opts.limit) as typeof query;
@@ -9427,7 +9531,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 					.select()
 					.from(corpus_snapshots)
 					.where(eq(corpus_snapshots.store_id, store_id))
-					.orderBy(desc(corpus_snapshots.created_at))
+					.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`))
 					.limit(1);
 
 				const row = to_nullable(first(rows));
@@ -9535,6 +9639,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.source_version) {
 				conditions.push(eq(corpus_observations.source_version, opts.source_version));
 			}
+			if (opts.exclude_source_version) {
+				conditions.push(ne(corpus_observations.source_version, opts.exclude_source_version));
+			}
 			if (opts.source_prefix) {
 				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
 			}
@@ -9555,7 +9662,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 				.select()
 				.from(corpus_observations)
 				.where(conditions.length > 0 ? and(...conditions) : undefined)
-				.orderBy(desc(corpus_observations.created_at));
+				.orderBy(desc(corpus_observations.created_at), desc(sql`rowid`));
 
 			if (opts.limit) {
 				query = query.limit(opts.limit) as typeof query;
@@ -10340,6 +10447,7 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 					if (result.error.kind !== "not_found") return result;
 					continue;
 				}
+				// strict: on equal created_at the earlier (higher-priority) read layer wins
 				if (!latest || result.value.created_at > latest.created_at) {
 					latest = result.value;
 				}
@@ -11313,6 +11421,7 @@ export type {
 	Store,
 	StoreDefinition,
 	PutOpts,
+	PutResult,
 	CorpusBuilder,
 	Corpus,
 	CorpusError,
@@ -11966,6 +12075,7 @@ import type {
 	DataKeyContext,
 	DataHandle,
 	PutOpts,
+	PutResult,
 	TransactionHandle,
 	TransactionResult,
 } from "./types.js";
@@ -11986,7 +12096,7 @@ type SnapshotHandleImpl<T> = Omit<SnapshotHandle<T>, "stream"> & {
 };
 
 type StoreImpl<T> = Omit<Store<T>, "put_stream"> & {
-	put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put_stream: (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 };
 
 function to_error(cause: unknown): Error {
@@ -12048,10 +12158,21 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return `${ctx.store_id}/${ctx.content_hash}`;
 	}
 
-	async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+	async function do_put(bytes: Uint8Array, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 		const version = generate_version();
 		const content_hash = await compute_hash(bytes);
 		const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags };
+
+		if (opts?.if_changed) {
+			const latest = await backend.metadata.get_latest(id);
+			if (latest.ok && latest.value.content_hash === content_hash) {
+				return ok({ ...latest.value, deduplicated: true, unchanged: true });
+			}
+			if (!latest.ok && latest.error.kind !== "not_found") {
+				emit({ type: "error", error: latest.error });
+				return latest;
+			}
+		}
 
 		// deduplication: reuse existing data_key if content already exists
 		const existing = await backend.metadata.find_by_hash(id, content_hash);
@@ -12088,7 +12209,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		}
 
 		emit({ type: "snapshot_put", store_id: id, version, content_hash, deduplicated });
-		return ok(meta);
+		return ok({ ...meta, deduplicated, unchanged: false });
 	}
 
 	function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
@@ -12154,10 +12275,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return ok({ meta, handle: build_handle(data_result.value) });
 	}
 
-	async function put_stream_impl(
-		stream: ReadableStream<T>,
-		opts?: PutOpts,
-	): Promise<Result<SnapshotMeta, CorpusError>> {
+	async function put_stream_impl(stream: ReadableStream<T>, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 		if (!codec.encode_stream) {
 			const error: CorpusError = { kind: "invalid_config", message: "codec does not support encode_stream" };
 			emit({ type: "error", error });
@@ -12192,7 +12310,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		id,
 		codec,
 
-		async put(data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+		async put(data: T, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 			const bytes = await try_catch_async(() => codec.encode(data), encode_error);
 			if (!bytes.ok) {
 				emit({ type: "error", error: bytes.error });
@@ -12368,8 +12486,31 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 			return undefined;
 		}
 
+		// latest version as seen from inside the tx: the last in-tx put wins (Map iteration is insertion order,
+		// and versions must never be compared), then live versions minus in-tx deletes.
+		// Limitation: a failed backend `list` (only reached when this tx deleted a version of the store) ends the
+		// iterator silently, so a listing error looks like "no surviving versions" and `if_changed` writes.
+		async function find_tx_latest(store_id: string): Promise<Result<SnapshotMeta | null, CorpusError>> {
+			const prefix = `${store_id}:`;
+			const buffered = [...buffered_meta].filter(([k]) => k.startsWith(prefix) && !tombstoned_meta.has(k));
+			const newest_buffered = buffered.at(-1);
+			if (newest_buffered) return ok(newest_buffered[1]);
+
+			if (![...tombstoned_meta].some((k) => k.startsWith(prefix))) {
+				const live = await b.metadata.get_latest(store_id);
+				if (live.ok) return ok(live.value);
+				return live.error.kind === "not_found" ? ok(null) : live;
+			}
+
+			// list is newest-first (insertion-order tie-break), so the first non-tombstoned entry is the latest
+			for await (const m of b.metadata.list(store_id)) {
+				if (!tombstoned_meta.has(meta_key(store_id, m.version))) return ok(m);
+			}
+			return ok(null);
+		}
+
 		const handle: TransactionHandle = {
-			async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<SnapshotMeta, CorpusError>> {
+			async put<T>(store: Store<T>, data: T, opts?: PutOpts): Promise<Result<PutResult, CorpusError>> {
 				const def = definitions_by_id[store.id];
 				if (!def) {
 					return err({ kind: "invalid_config", message: `store '${store.id}' is not registered on this corpus` });
@@ -12381,6 +12522,14 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 
 				const version = generate_version();
 				const content_hash = await compute_hash(bytes);
+
+				if (opts?.if_changed) {
+					const latest = await find_tx_latest(store.id);
+					if (!latest.ok) return latest;
+					if (latest.value?.content_hash === content_hash) {
+						return ok({ ...latest.value, deduplicated: true, unchanged: true });
+					}
+				}
 
 				// dedup against buffer first, then live backend
 				let existing_data_key: string | undefined = find_buffered_by_hash(store.id, content_hash)?.data_key;
@@ -12416,7 +12565,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 				ops.push({ type: "meta_put", meta });
 				buffered_meta.set(meta_key(store.id, version), meta);
 				commits.push(meta);
-				return ok(meta);
+				return ok({ ...meta, deduplicated: existing_data_key !== undefined, unchanged: false });
 			},
 
 			async get<T>(store: Store<T>, version: string): Promise<Result<Snapshot<T>, CorpusError>> {
@@ -12767,6 +12916,7 @@ export type {
 	DefineStoreOpts,
 	DataKeyContext,
 	PutOpts,
+	PutResult,
 	CorpusBuilder,
 	Corpus,
 	CorpusError,
@@ -12856,6 +13006,7 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		type: opts.type,
 		source_store_id: opts.source_store,
 		source_version: opts.source_version,
+		exclude_source_version: opts.exclude_source_version,
 		source_prefix: opts.source_prefix,
 		created_after: opts.created_after?.toISOString(),
 		created_before: opts.created_before?.toISOString(),
@@ -13042,7 +13193,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * @example
  * ```ts
  * import { drizzle } from 'drizzle-orm/d1'
- * import { corpus_observations } from 'corpus/observation-schema'
+ * import { corpus_observations } from '@f0rbit/corpus/schema'
  *
  * const db = drizzle(env.D1)
  * const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.type, 'entity_mention'))
@@ -13109,6 +13260,7 @@ export type StorageQueryOpts = {
 	type?: string | string[];
 	source_store_id?: string;
 	source_version?: string;
+	exclude_source_version?: string;
 	source_prefix?: string;
 	created_after?: string; // ISO string
 	created_before?: string; // ISO string
@@ -13224,6 +13376,7 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		},
 		{ key: "source_store_id", predicate: (r, id) => r.source_store_id === id },
 		{ key: "source_version", predicate: (r, version) => r.source_version === version },
+		{ key: "exclude_source_version", predicate: (r, version) => r.source_version !== version },
 		{ key: "source_prefix", predicate: (r, prefix) => r.source_version.startsWith(prefix as string) },
 		{ key: "created_after", predicate: (r, after) => r.created_at > (after as string) },
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },
@@ -13238,7 +13391,8 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
  * Used by in-memory storage implementations (memory backend, file backend).
  */
 export function filter_observation_rows(rows: ObservationRow[], opts: StorageQueryOpts = {}): ObservationRow[] {
-	return observation_filter_pipeline(rows, opts);
+	// rows arrive in insertion order; reversing first makes the stable sort put later-inserted rows first among equal created_at
+	return observation_filter_pipeline(rows.toReversed(), opts);
 }
 
 /**
@@ -13533,12 +13687,28 @@ export type VersionFilter =
  *   source_store: 'hansard',
  *   version_filter: new Set(['v1', 'v2'])
  * }
+ *
+ * // Newest observation from any version other than the one about to be written
+ * const previous: ObservationQueryOpts = {
+ *   type: 'entity_mention',
+ *   source_store: 'hansard',
+ *   exclude_source_version: 'v3',
+ *   limit: 1
+ * }
  * ```
  */
 export type ObservationQueryOpts = {
 	type?: string | string[];
 	source_store?: string;
 	source_version?: string;
+	/**
+	 * Drop observations whose `source_version` equals this value.
+	 * Combines (AND) with `source_store` / `source_version`. Results are newest-first
+	 * (`created_at` desc, ties broken by later insertion first), so the newest
+	 * observation from a previous version is
+	 * `query({ type, source_store, exclude_source_version: v, limit: 1 })`.
+	 */
+	exclude_source_version?: string;
 	source_prefix?: string;
 	after?: Date;
 	before?: Date;
@@ -14625,6 +14795,9 @@ export const corpus_snapshots = sqliteTable(
 
 export type CorpusSnapshotRow = typeof corpus_snapshots.$inferSelect;
 export type CorpusSnapshotInsert = typeof corpus_snapshots.$inferInsert;
+
+export { corpus_observations } from "./observations/schema.js";
+export type { ObservationRow, ObservationInsert } from "./observations/schema.js";
 
 ```
 
@@ -17527,6 +17700,12 @@ export type MetadataClient = {
 	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
+	/**
+	 * Find any version of the store with this content hash. Searches the WHOLE
+	 * history, so it is for deduplication, not change detection (an old
+	 * version matching does not mean the latest matches). To skip no-op
+	 * writes use `store.put(data, { if_changed: true })`.
+	 */
 	find_by_hash: (store_id: string, content_hash: string) => Promise<SnapshotMeta | null>;
 	/**
 	 * Enumerate every distinct store id known to this backend. Optional —
@@ -17736,7 +17915,7 @@ export type SchemaLike<T = unknown> = {
 export type Store<T> = {
 	readonly id: string;
 	readonly codec: Codec<T>;
-	put: (data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
@@ -17745,7 +17924,7 @@ export type Store<T> = {
 	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	delete: (version: string) => Promise<Result<void, CorpusError>>;
 	put_stream: T extends StreamableValue
-		? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+		? (stream: ReadableStream<T>, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
 		: never;
 };
 
@@ -17753,7 +17932,37 @@ export type PutOpts = {
 	parents?: ParentRef[];
 	invoked_at?: Date;
 	tags?: string[];
+	/**
+	 * Skip the write when the content equals the store's LATEST snapshot.
+	 *
+	 * The new content hash is compared against the latest version only (not the
+	 * whole history), so reverting B → A still writes a new version. When
+	 * unchanged, nothing is written (no data or metadata put, and no
+	 * `data_put` / `snapshot_put` events) and the existing latest meta is
+	 * returned with `unchanged: true`. An empty store always writes.
+	 *
+	 * Inside `corpus.transaction`, the comparison uses the transaction-visible
+	 * latest (in-tx puts and deletes included).
+	 *
+	 * @example
+	 * ```ts
+	 * const first = await store.put(config, { if_changed: true })
+	 * const second = await store.put(config, { if_changed: true })
+	 * if (second.ok && second.value.unchanged) {
+	 *   // second.value.version === first.value.version
+	 * }
+	 * ```
+	 */
+	if_changed?: boolean;
 };
+
+/**
+ * Result of a store `put`: the snapshot meta plus write-outcome flags.
+ * - `deduplicated`: the data blob already existed (any version, any time), so no data was written.
+ * - `unchanged`: `if_changed` was set and the content matched the latest snapshot; nothing was written
+ *   and the meta is that of the existing latest version.
+ */
+export type PutResult = SnapshotMeta & { deduplicated: boolean; unchanged: boolean };
 
 /**
  * Context passed to data_key_fn for generating custom storage paths.
@@ -17876,7 +18085,7 @@ export type TransactionResult<R> = {
  * @group Transaction Types
  */
 export type TransactionHandle = {
-	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
+	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
 	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
 	observe: <T>(
@@ -18093,8 +18302,9 @@ let sequence = 0;
  * Format: base64url-encoded timestamp, with optional `.N` suffix when multiple
  * versions are generated within the same millisecond.
  *
- * Versions sort lexicographically in chronological order, making them suitable
- * for use as database keys where ordering matters.
+ * Versions are unique, but they are NOT lexicographically ordered: the base64url
+ * alphabet is not ASCII-ordered and `.10` sorts before `.2`. Never order snapshots
+ * by version string; order by `created_at` with insertion order as the tie-break.
  *
  * @category Utilities
  * @group Versioning
@@ -18105,9 +18315,6 @@ let sequence = 0;
  * const v1 = generate_version() // => 'AZJx4vM'
  * const v2 = generate_version() // => 'AZJx4vM.1' (same millisecond)
  * const v3 = generate_version() // => 'AZJx4vN' (next millisecond)
- *
- * // Versions sort chronologically
- * [v3, v1, v2].sort() // => [v1, v2, v3]
  * ```
  */
 export function generate_version(): string {

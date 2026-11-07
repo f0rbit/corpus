@@ -53,7 +53,7 @@ type MetadataStorage = {
 - **put**: Store or update the metadata. Return `void` or throw if I/O fails.
 - **delete**: Remove metadata. No error if already absent.
 - **list**: Yield all metadata rows for a store (order doesn't matter). No pagination—the wrapper handles that.
-- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`.
+- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`. It searches the whole history, so it is for dedup, not change detection (use `put(data, { if_changed: true })` for that).
 
 ### Example: Postgres Metadata Adapter
 

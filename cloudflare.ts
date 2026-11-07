@@ -26,6 +26,7 @@ export type {
 	Store,
 	StoreDefinition,
 	PutOpts,
+	PutResult,
 	CorpusBuilder,
 	Corpus,
 	CorpusError,

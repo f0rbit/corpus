@@ -93,6 +93,12 @@ Corpus uses Drizzle ORM for schema management. Install Drizzle Kit and generate 
 bun add -D drizzle-kit
 ```
 
+Re-export the tables from a schema file in your project (`src/corpus-schema.ts`):
+
+```ts
+export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
+```
+
 Create `drizzle.config.ts`:
 
 ```ts
@@ -101,13 +107,12 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'd1-http',
-  schema: [
-    './node_modules/@f0rbit/corpus/schema.js',
-    './node_modules/@f0rbit/corpus/observations/schema.js',
-  ],
+  schema: './src/corpus-schema.ts',
   out: './migrations',
 })
 ```
+
+(Pointing `schema` at `./node_modules/@f0rbit/corpus/dist/schema.js` also works.)
 
 Generate and apply migrations:
 

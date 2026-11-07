@@ -45,7 +45,7 @@ The handle exposes:
 
 ```typescript
 type TransactionHandle = {
-  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<SnapshotMeta, CorpusError>>
+  put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
   delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>
   observe: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>
