@@ -15,7 +15,7 @@
  * internally, then batch them itself.
  */
 
-import { and, desc, eq, gt, inArray, like, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, lt, ne, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
@@ -310,6 +310,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.source_version) {
 				conditions.push(eq(corpus_observations.source_version, opts.source_version));
 			}
+			if (opts.exclude_source_version) {
+				conditions.push(ne(corpus_observations.source_version, opts.exclude_source_version));
+			}
 			if (opts.source_prefix) {
 				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
 			}
@@ -330,7 +333,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 				.select()
 				.from(corpus_observations)
 				.where(conditions.length > 0 ? and(...conditions) : undefined)
-				.orderBy(desc(corpus_observations.created_at));
+				.orderBy(desc(corpus_observations.created_at), desc(sql`rowid`));
 
 			if (opts.limit) {
 				query = query.limit(opts.limit) as typeof query;

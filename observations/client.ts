@@ -34,6 +34,7 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		type: opts.type,
 		source_store_id: opts.source_store,
 		source_version: opts.source_version,
+		exclude_source_version: opts.exclude_source_version,
 		source_prefix: opts.source_prefix,
 		created_after: opts.created_after?.toISOString(),
 		created_before: opts.created_before?.toISOString(),

@@ -163,6 +163,8 @@ The `version_set_store` factory lives in `version-set.ts`. The manifest schema (
 
 Observations are versioned annotations on snapshot pointers (store + version + optional JSONPath + span). They live in a separate Drizzle table and a separate client (`corpus.observations`). They're optional — only enabled when `observations` is wired into the backend. Internally, `observations/` is treated as its own subsystem with its own types and adapter interface — keep observation logic out of `backend/*.ts`.
 
+Observation queries are newest-first: `created_at` desc, ties broken by later insertion first (drizzle `desc(sql\`rowid\`)`; JS adapters reverse the insertion-ordered rows before the stable sort in `filter_observation_rows`). A new `ObservationQueryOpts`key must be threaded through`to_storage_opts`(client.ts),`StorageQueryOpts`+ the filter table (storage.ts), and the SQL conditions in`backend/drizzle-storage.ts`.
+
 ### Testing substrate
 
 Property-based testing primitives live in `testing/`, exported under the `@f0rbit/corpus/testing` entry point and as a namespace re-export (`import { testing } from "@f0rbit/corpus"`). Prefer the direct entry point in hot paths — it skips the main barrel's transitive imports.

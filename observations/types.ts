@@ -177,12 +177,28 @@ export type VersionFilter =
  *   source_store: 'hansard',
  *   version_filter: new Set(['v1', 'v2'])
  * }
+ *
+ * // Newest observation from any version other than the one about to be written
+ * const previous: ObservationQueryOpts = {
+ *   type: 'entity_mention',
+ *   source_store: 'hansard',
+ *   exclude_source_version: 'v3',
+ *   limit: 1
+ * }
  * ```
  */
 export type ObservationQueryOpts = {
 	type?: string | string[];
 	source_store?: string;
 	source_version?: string;
+	/**
+	 * Drop observations whose `source_version` equals this value.
+	 * Combines (AND) with `source_store` / `source_version`. Results are newest-first
+	 * (`created_at` desc, ties broken by later insertion first), so the newest
+	 * observation from a previous version is
+	 * `query({ type, source_store, exclude_source_version: v, limit: 1 })`.
+	 */
+	exclude_source_version?: string;
 	source_prefix?: string;
 	after?: Date;
 	before?: Date;

@@ -17,6 +17,7 @@ export type StorageQueryOpts = {
 	type?: string | string[];
 	source_store_id?: string;
 	source_version?: string;
+	exclude_source_version?: string;
 	source_prefix?: string;
 	created_after?: string; // ISO string
 	created_before?: string; // ISO string
@@ -132,6 +133,7 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		},
 		{ key: "source_store_id", predicate: (r, id) => r.source_store_id === id },
 		{ key: "source_version", predicate: (r, version) => r.source_version === version },
+		{ key: "exclude_source_version", predicate: (r, version) => r.source_version !== version },
 		{ key: "source_prefix", predicate: (r, prefix) => r.source_version.startsWith(prefix as string) },
 		{ key: "created_after", predicate: (r, after) => r.created_at > (after as string) },
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },
@@ -146,7 +148,8 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
  * Used by in-memory storage implementations (memory backend, file backend).
  */
 export function filter_observation_rows(rows: ObservationRow[], opts: StorageQueryOpts = {}): ObservationRow[] {
-	return observation_filter_pipeline(rows, opts);
+	// rows arrive in insertion order; reversing first makes the stable sort put later-inserted rows first among equal created_at
+	return observation_filter_pipeline(rows.toReversed(), opts);
 }
 
 /**
