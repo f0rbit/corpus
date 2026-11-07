@@ -2280,7 +2280,7 @@ type ObservationQueryOpts = {
 
 #### `entity_key`
 
-`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a missing source doesn't fail the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
+`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a source snapshot that isn't found stores no key and the put still succeeds; any other metadata error, such as a storage failure, fails the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
 
 `is_stale(pointer)` follows the **source snapshot's** entity: if that snapshot has an `entity_key`, it is stale only when a newer snapshot with the same key exists in the store; unkeyed snapshots use the store-wide rule. See the [Entities guide](/corpus/guides/entities/).
 
@@ -3294,6 +3294,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 | `size_bytes` | `integer` | Size of the stored data |
 | `data_key` | `text` | Key to retrieve binary data from storage (R2/filesystem) |
 | `tags` | `text` | Optional JSON array of string tags |
+| `entity_key` | `text` | Optional entity the snapshot is about (NULL when unkeyed) |
 
 **Primary Key:** `(store_id, version)`
 
@@ -3301,6 +3302,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 - `idx_store_created` on `(store_id, created_at)` - efficient latest queries
 - `idx_content_hash` on `(store_id, content_hash)` - deduplication lookups
 - `idx_data_key` on `(data_key)` - data retrieval
+- `idx_store_entity` on `(store_id, entity_key)` - per-entity latest and list queries
 
 ---
 
@@ -3326,6 +3328,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 | `observed_at` | `text` | ISO 8601 timestamp when observation was made |
 | `created_at` | `text` | ISO 8601 timestamp when record was stored |
 | `derived_from` | `text` | Optional JSON array of source snapshot pointers |
+| `entity_key` | `text` | Optional entity the observation is about (NULL when unkeyed) |
 
 **Primary Key:** `id`
 
@@ -3334,6 +3337,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 - `idx_obs_source` on `(source_store_id, source_version)` - find observations for a snapshot
 - `idx_obs_type_observed` on `(type, observed_at)` - temporal queries by type
 - `idx_obs_type_source` on `(type, source_store_id)` - type queries within a store
+- `idx_obs_type_entity` on `(type, entity_key)` - per-entity observation queries
 
 ---
 
@@ -6160,7 +6164,7 @@ await corpus.observations.put(PriceObservation, {
 })
 ```
 
-When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing.
+When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing. Any other metadata error (for example a storage failure) fails the put, so a key is never silently dropped.
 
 ### 4. Query by entity
 
@@ -9823,6 +9827,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.observed_before) {
 				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
 			}
+			if (opts.entity_key !== undefined) {
+				conditions.push(eq(corpus_observations.entity_key, opts.entity_key));
+			}
 
 			let query = db
 				.select()
@@ -13201,6 +13208,7 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		created_before: opts.created_before?.toISOString(),
 		observed_after: opts.after?.toISOString(),
 		observed_before: opts.before?.toISOString(),
+		entity_key: opts.entity_key,
 		limit: opts.limit,
 	};
 }
@@ -13213,6 +13221,12 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 	async function get_latest_version(store_id: string): Promise<string | null> {
 		const result = await metadata.get_latest(store_id);
 		return result.ok ? result.value.version : null;
+	}
+
+	async function source_entity_key(source: SnapshotPointer): Promise<Result<string | undefined, CorpusError>> {
+		const meta = await metadata.get(source.store_id, source.version);
+		if (meta.ok) return ok(meta.value.entity_key);
+		return meta.error.kind === "not_found" ? ok(undefined) : meta;
 	}
 
 	return {
@@ -13229,11 +13243,16 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				});
 			}
 
+			const inherited = opts.entity_key === undefined ? await source_entity_key(opts.source) : ok(opts.entity_key);
+			if (!inherited.ok) return inherited;
+			const entity_key = inherited.value;
+
 			const id = generate_observation_id();
 			const row = create_observation_row(id, type.name, opts.source, validation.data, {
 				confidence: opts.confidence,
 				observed_at: opts.observed_at,
 				derived_from: opts.derived_from,
+				entity_key,
 			});
 
 			const result = await storage.put_row(row);
@@ -13248,6 +13267,7 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				...(opts.observed_at && { observed_at: opts.observed_at }),
 				created_at: new Date(row.created_at),
 				...(opts.derived_from && { derived_from: opts.derived_from }),
+				...(entity_key !== undefined && { entity_key }),
 			};
 
 			return ok(observation);
@@ -13304,6 +13324,12 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async is_stale(pointer: SnapshotPointer): Promise<boolean> {
+			const source = await metadata.get(pointer.store_id, pointer.version);
+			const entity_key = source.ok ? source.value.entity_key : undefined;
+			if (entity_key !== undefined) {
+				const scoped = await metadata.get_latest(pointer.store_id, { entity_key });
+				return scoped.ok && pointer.version !== scoped.value.version;
+			}
 			const latest = await get_latest_version(pointer.store_id);
 			if (!latest) return false;
 			return pointer.version !== latest;
@@ -13378,6 +13404,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * - `observed_at` - When the observation was made (ISO 8601)
  * - `created_at` - When the record was stored (ISO 8601)
  * - `derived_from` - Optional JSON array of SnapshotPointers for provenance
+ * - `entity_key` - Optional entity the observation is about (NULL when unkeyed)
  *
  * @example
  * ```ts
@@ -13411,12 +13438,16 @@ export const corpus_observations = sqliteTable(
 
 		// Derivation lineage
 		derived_from: text("derived_from"),
+
+		// Entity the observation is about (NULL when unkeyed)
+		entity_key: text("entity_key"),
 	},
 	(table) => [
 		index("idx_obs_type").on(table.type),
 		index("idx_obs_source").on(table.source_store_id, table.source_version),
 		index("idx_obs_type_observed").on(table.type, table.observed_at),
 		index("idx_obs_type_source").on(table.type, table.source_store_id),
+		index("idx_obs_type_entity").on(table.type, table.entity_key),
 	],
 );
 
@@ -13455,6 +13486,7 @@ export type StorageQueryOpts = {
 	created_before?: string; // ISO string
 	observed_after?: string; // ISO string
 	observed_before?: string; // ISO string
+	entity_key?: string;
 	limit?: number;
 };
 
@@ -13503,6 +13535,7 @@ function row_to_base(row: ObservationRow) {
 		...(row.observed_at && { observed_at: new Date(row.observed_at) }),
 		created_at: new Date(row.created_at),
 		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) as SnapshotPointer[] }),
+		...(row.entity_key && { entity_key: row.entity_key }),
 	};
 }
 
@@ -13535,6 +13568,7 @@ export function create_observation_row(
 		confidence?: number;
 		observed_at?: Date;
 		derived_from?: SnapshotPointer[];
+		entity_key?: string;
 	},
 ): ObservationRow {
 	const now = new Date();
@@ -13551,6 +13585,7 @@ export function create_observation_row(
 		observed_at: opts.observed_at?.toISOString() ?? null,
 		created_at: now.toISOString(),
 		derived_from: opts.derived_from ? JSON.stringify(opts.derived_from) : null,
+		entity_key: opts.entity_key ?? null,
 	};
 }
 
@@ -13571,6 +13606,7 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },
 		{ key: "observed_after", predicate: (r, after) => r.observed_at !== null && r.observed_at > (after as string) },
 		{ key: "observed_before", predicate: (r, before) => r.observed_at !== null && r.observed_at < (before as string) },
+		{ key: "entity_key", predicate: (r, entity_key) => r.entity_key === (entity_key as string) },
 	],
 	sort: (a, b) => b.created_at.localeCompare(a.created_at),
 });
@@ -13799,6 +13835,8 @@ export type Observation<T = unknown> = {
 	observed_at?: Date;
 	created_at: Date;
 	derived_from?: SnapshotPointer[];
+	/** Entity the observation is about. Inherited from the source snapshot unless set explicitly on put. */
+	entity_key?: string;
 };
 
 /**
@@ -13823,6 +13861,11 @@ export type ObservationPutOpts<T> = {
 	confidence?: number;
 	observed_at?: Date;
 	derived_from?: SnapshotPointer[];
+	/**
+	 * Entity the observation is about. When omitted, inherited from the source
+	 * snapshot's `entity_key`; stored unkeyed if the source is missing or unkeyed.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -13884,9 +13927,18 @@ export type VersionFilter =
  *   exclude_source_version: 'v3',
  *   limit: 1
  * }
+ *
+ * // Newest price observations for one entity
+ * const for_entity: ObservationQueryOpts = {
+ *   type: 'price',
+ *   entity_key: 'https://example.com/pricing',
+ *   limit: 10
+ * }
  * ```
  */
 export type ObservationQueryOpts = {
+	/** Exact match on `entity_key`. Unkeyed observations never match. */
+	entity_key?: string;
 	type?: string | string[];
 	source_store?: string;
 	source_version?: string;

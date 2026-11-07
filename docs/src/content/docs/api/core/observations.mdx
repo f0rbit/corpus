@@ -215,7 +215,7 @@ type ObservationQueryOpts = {
 
 #### `entity_key`
 
-`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a missing source doesn't fail the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
+`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a source snapshot that isn't found stores no key and the put still succeeds; any other metadata error, such as a storage failure, fails the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
 
 `is_stale(pointer)` follows the **source snapshot's** entity: if that snapshot has an `entity_key`, it is stale only when a newer snapshot with the same key exists in the store; unkeyed snapshots use the store-wide rule. See the [Entities guide](/corpus/guides/entities/).
 

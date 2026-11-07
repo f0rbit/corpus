@@ -50,7 +50,7 @@ await corpus.observations.put(PriceObservation, {
 })
 ```
 
-When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing.
+When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing. Any other metadata error (for example a storage failure) fails the put, so a key is never silently dropped.
 
 ### 4. Query by entity
 

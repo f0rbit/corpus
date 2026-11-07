@@ -29,6 +29,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 | `size_bytes` | `integer` | Size of the stored data |
 | `data_key` | `text` | Key to retrieve binary data from storage (R2/filesystem) |
 | `tags` | `text` | Optional JSON array of string tags |
+| `entity_key` | `text` | Optional entity the snapshot is about (NULL when unkeyed) |
 
 **Primary Key:** `(store_id, version)`
 
@@ -36,6 +37,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 - `idx_store_created` on `(store_id, created_at)` - efficient latest queries
 - `idx_content_hash` on `(store_id, content_hash)` - deduplication lookups
 - `idx_data_key` on `(data_key)` - data retrieval
+- `idx_store_entity` on `(store_id, entity_key)` - per-entity latest and list queries
 
 ---
 
@@ -61,6 +63,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 | `observed_at` | `text` | ISO 8601 timestamp when observation was made |
 | `created_at` | `text` | ISO 8601 timestamp when record was stored |
 | `derived_from` | `text` | Optional JSON array of source snapshot pointers |
+| `entity_key` | `text` | Optional entity the observation is about (NULL when unkeyed) |
 
 **Primary Key:** `id`
 
@@ -69,6 +72,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 - `idx_obs_source` on `(source_store_id, source_version)` - find observations for a snapshot
 - `idx_obs_type_observed` on `(type, observed_at)` - temporal queries by type
 - `idx_obs_type_source` on `(type, source_store_id)` - type queries within a store
+- `idx_obs_type_entity` on `(type, entity_key)` - per-entity observation queries
 
 ---
 

@@ -150,7 +150,16 @@ Exception maps — new intentional exceptions go in one of these two, each entry
 
 ### Schema / migrations
 
-Drizzle is the sole source of truth: `schema.ts` (`corpus_snapshots`) and `observations/schema.ts` (`corpus_observations`). `@f0rbit/corpus/schema` (root `schema.ts`) exports BOTH tables (it re-exports `corpus_observations`; only `dist/` ships, so docs must never point at `node_modules/@f0rbit/corpus/observations/...`); `corpus_observations` is also re-exported through the main barrel (`observations/index.ts`). Corpus ships **no** migration SQL and no `drizzle-kit` history — consumers point `drizzle-kit generate` at the exported tables and own their migration history (see `docs/src/content/docs/guides/cloudflare.mdx`). `sst.ts` is only the `createCorpusInfra` resource-naming helper; the former `CORPUS_MIGRATION_SQL` constant was removed in commit `6aba89c`.
+Drizzle is the sole source of truth: `schema.ts` (`corpus_snapshots`) and `observations/schema.ts` (`corpus_observations`). `@f0rbit/corpus/schema` (root `schema.ts`) exports BOTH tables (it re-exports `corpus_observations`; only `dist/` ships, so docs must never point at `node_modules/@f0rbit/corpus/observations/...`); `corpus_observations` is also re-exported through the main barrel (`observations/index.ts`). Corpus ships **no** migration SQL and no `drizzle-kit` history — consumers point `drizzle-kit generate` at the exported tables and own their migration history (see `docs/src/content/docs/guides/cloudflare.mdx`). The tables DO change across releases (0.9.0 added `entity_key` + an index to each): release notes and the cloudflare guide's upgrade section must say **migrate D1 before deploying** for any column change. `sst.ts` is only the `createCorpusInfra` resource-naming helper; the former `CORPUS_MIGRATION_SQL` constant was removed in commit `6aba89c`.
+
+### Entity scoping (0.9.0)
+
+- `SnapshotMeta.entity_key` / `Observation.entity_key` are optional and **omitted** (never `undefined`/`""`) when unset; DB nulls are dropped by `parse_snapshot_meta` / `row_to_base`. `ObservationRow` literals need `entity_key: null`.
+- Matching is exact. An unkeyed record never matches a keyed filter. `get_latest(store_id, { entity_key }?)`, `ListOpts.entity_key` and `ObservationQueryOpts.entity_key` filter; store-wide `get_latest` ignores entities. `put({ if_changed, entity_key })` compares against that entity's latest; the tx-visible latest (`tx.get_latest`, in-tx puts) is entity-scoped too.
+- Every snapshot/observation filter must be a SQL condition in the drizzle `list`/`get_latest` so it applies before `LIMIT` (contract tests use `limit: 1` with interleaved entities). Observation keys thread through `to_storage_opts` (client.ts) → `StorageQueryOpts` + filter table (storage.ts) → SQL (`backend/drizzle-storage.ts`).
+- `observations.put` inherits `entity_key` from the source snapshot unless set explicitly. Source not found → stored unkeyed, put succeeds; any other metadata error fails the put.
+- `is_stale`: a keyed source is stale only when a newer snapshot with the same key exists; unkeyed/unknown source keeps the store-wide rule. It returns a boolean, so metadata errors are swallowed (keyed source + `get_latest` error → `false`).
+- CLI: `serialize_meta` omits `entity_key` unless set; `versions --entity` → `ListOpts.entity_key`. Docs never mention `include_stale` (it doesn't exist); "current only" = `query()` + `is_stale`.
 
 ### Version sets
 
