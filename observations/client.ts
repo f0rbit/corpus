@@ -11,19 +11,13 @@ import type {
 	ObservationPutOpts,
 	ObservationQueryOpts,
 	SnapshotPointer,
-	VersionFilter,
 } from "./types.js";
+import type { ObservationRow } from "./schema.js";
 import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
 import { generate_observation_id } from "./utils.js";
 import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
-
-async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
-	if (typeof filter === "function") return filter(store_id, version);
-	if (filter instanceof Set) return filter.has(version);
-	return filter.includes(version);
-}
 
 /**
  * Convert client query opts to storage query opts.
@@ -43,6 +37,33 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		entity_key: opts.entity_key,
 		limit: opts.limit,
 	};
+}
+
+/**
+ * Rows matching opts including version_filter. Set/array filters run in storage (before LIMIT);
+ * function filters scan all candidate rows and stop after `limit` matches.
+ */
+async function* filtered_rows(storage: ObservationsStorage, opts: ObservationQueryOpts): AsyncIterable<ObservationRow> {
+	const filter = opts.version_filter;
+	const storage_opts = to_storage_opts(opts);
+	if (filter === undefined) {
+		yield* storage.query_rows(storage_opts);
+		return;
+	}
+	if (typeof filter !== "function") {
+		const versions = [...filter];
+		if (versions.length === 0) return;
+		yield* storage.query_rows({ ...storage_opts, source_version_in: versions });
+		return;
+	}
+	const { limit, ...unlimited } = storage_opts;
+	let matched = 0;
+	for await (const row of storage.query_rows(unlimited)) {
+		if (!(await filter(row.source_store_id, row.source_version))) continue;
+		yield row;
+		matched += 1;
+		if (limit && matched >= limit) return;
+	}
 }
 
 /**
@@ -117,25 +138,13 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
-			const storage_opts = to_storage_opts(opts);
-
-			for await (const row of storage.query_rows(storage_opts)) {
-				if (opts.version_filter !== undefined) {
-					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
-					if (!included) continue;
-				}
+			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_observation(row);
 			}
 		},
 
 		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
-			const storage_opts = to_storage_opts(opts);
-
-			for await (const row of storage.query_rows(storage_opts)) {
-				if (opts.version_filter !== undefined) {
-					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
-					if (!included) continue;
-				}
+			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_meta(row);
 			}
 		},

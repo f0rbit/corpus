@@ -18,6 +18,7 @@ export type StorageQueryOpts = {
 	source_store_id?: string;
 	source_version?: string;
 	exclude_source_version?: string;
+	source_version_in?: string[];
 	source_prefix?: string;
 	created_after?: string; // ISO string
 	created_before?: string; // ISO string
@@ -138,6 +139,7 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		{ key: "source_store_id", predicate: (r, id) => r.source_store_id === id },
 		{ key: "source_version", predicate: (r, version) => r.source_version === version },
 		{ key: "exclude_source_version", predicate: (r, version) => r.source_version !== version },
+		{ key: "source_version_in", predicate: (r, versions) => (versions as string[]).includes(r.source_version) },
 		{ key: "source_prefix", predicate: (r, prefix) => r.source_version.startsWith(prefix as string) },
 		{ key: "created_after", predicate: (r, after) => r.created_at > (after as string) },
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },

@@ -228,6 +228,9 @@ export type ObservationQueryOpts = {
 	 *
 	 * - Set<string> or string[]: Include if version is in the collection
 	 * - Function: Called with (store_id, version), return true to include
+	 *
+	 * Set/array filters run in storage, before `limit`. Function filters scan all
+	 * candidate rows (the storage limit is dropped) and stop after `limit` matches.
 	 */
 	version_filter?: VersionFilter;
 };

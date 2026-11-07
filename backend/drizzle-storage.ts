@@ -323,6 +323,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.exclude_source_version) {
 				conditions.push(ne(corpus_observations.source_version, opts.exclude_source_version));
 			}
+			if (opts.source_version_in !== undefined) {
+				conditions.push(inArray(corpus_observations.source_version, opts.source_version_in));
+			}
 			if (opts.source_prefix) {
 				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
 			}
