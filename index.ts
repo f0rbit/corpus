@@ -39,6 +39,7 @@ export type {
 	MetadataClient,
 	DataClient,
 	ListOpts,
+	LatestOpts,
 	Backend,
 	BatchOp,
 	Codec,

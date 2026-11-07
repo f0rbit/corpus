@@ -397,6 +397,7 @@ const snapshot_filter_pipeline = create_filter_pipeline<SnapshotMeta, ListOpts>(
 			key: "tags",
 			predicate: (m, tags) => (tags as string[]).every((tag) => m.tags?.includes(tag)),
 		},
+		{ key: "entity_key", predicate: (m, entity_key) => m.entity_key === (entity_key as string) },
 	],
 	sort: (a, b) => b.created_at.getTime() - a.created_at.getTime(),
 });
@@ -440,6 +441,7 @@ export const raw_snapshot_meta_schema = z.object({
 	content_hash: z.string().optional(),
 	content_type: z.string().optional(),
 	size_bytes: z.number().optional(),
+	entity_key: z.string().nullish(),
 });
 
 /**
@@ -470,6 +472,7 @@ export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema
 		content_hash: raw.content_hash ?? "",
 		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,
+		...(typeof raw.entity_key === "string" ? { entity_key: raw.entity_key } : {}),
 	};
 }
 

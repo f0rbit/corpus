@@ -130,9 +130,10 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+		async get_latest(store_id, opts): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 			for await (const meta of storage.list(store_id)) {
+				if (opts?.entity_key !== undefined && meta.entity_key !== opts.entity_key) continue;
 				// >= : on equal created_at the later-inserted snapshot wins (storage.list is insertion order)
 				if (!latest || meta.created_at >= latest.created_at) {
 					latest = meta;

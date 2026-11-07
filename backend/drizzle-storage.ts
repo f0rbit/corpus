@@ -62,6 +62,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 		size_bytes: meta.size_bytes,
 		data_key: meta.data_key,
 		tags: meta.tags ? JSON.stringify(meta.tags) : null,
+		entity_key: meta.entity_key ?? null,
 	};
 	return db
 		.insert(corpus_snapshots)
@@ -77,6 +78,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 				size_bytes: values.size_bytes,
 				data_key: values.data_key,
 				tags: values.tags,
+				entity_key: values.entity_key,
 			},
 		});
 }
@@ -164,6 +166,10 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				conditions.push(gt(corpus_snapshots.created_at, opts.after.toISOString()));
 			}
 
+			if (opts?.entity_key !== undefined) {
+				conditions.push(eq(corpus_snapshots.entity_key, opts.entity_key));
+			}
+
 			// Every filter must run in SQL: LIMIT applies before any JS-side filter,
 			// so a post-query tag check would under-return (or return nothing).
 			for (const tag of opts?.tags ?? []) {
@@ -196,12 +202,16 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id) {
+		async get_latest(store_id, opts) {
 			const lookup = await try_catch_async(async () => {
 				const rows = await db
 					.select()
 					.from(corpus_snapshots)
-					.where(eq(corpus_snapshots.store_id, store_id))
+					.where(
+						opts?.entity_key === undefined
+							? eq(corpus_snapshots.store_id, store_id)
+							: and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.entity_key, opts.entity_key)),
+					)
 					.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`))
 					.limit(1);
 

@@ -21,6 +21,7 @@ export type {
 	MetadataClient,
 	DataClient,
 	ListOpts,
+	LatestOpts,
 	Backend,
 	Codec,
 	Store,

@@ -172,6 +172,8 @@ export type SnapshotMeta = {
 	size_bytes: number;
 	data_key: string;
 	tags?: string[];
+	/** Optional entity this snapshot is about (e.g. one page in a shared crawl store). Unkeyed snapshots omit it. */
+	entity_key?: string;
 };
 
 export type Snapshot<T = unknown> = {
@@ -222,7 +224,7 @@ export type MetadataClient = {
 	put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>;
 	delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>;
 	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
-	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get_latest: (store_id: string, opts?: LatestOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
 	/**
 	 * Find any version of the store with this content hash. Searches the WHOLE
@@ -257,6 +259,13 @@ export type ListOpts = {
 	before?: Date;
 	after?: Date;
 	tags?: string[];
+	/** Exact match on `entity_key`. Unkeyed snapshots never match. */
+	entity_key?: string;
+};
+
+/** Options for `get_latest`: scope the lookup to one entity's snapshots. */
+export type LatestOpts = {
+	entity_key?: string;
 };
 
 /**
@@ -441,9 +450,11 @@ export type Store<T> = {
 	readonly codec: Codec<T>;
 	put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
-	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: (opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
-	get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
+	get_latest_handle: (
+		opts?: LatestOpts,
+	) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
 	get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	delete: (version: string) => Promise<Result<void, CorpusError>>;
@@ -478,6 +489,11 @@ export type PutOpts = {
 	 * ```
 	 */
 	if_changed?: boolean;
+	/**
+	 * Entity this snapshot is about. Persisted on the snapshot meta; with
+	 * `if_changed` the comparison is against that entity's latest snapshot.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -611,6 +627,7 @@ export type TransactionResult<R> = {
 export type TransactionHandle = {
 	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: <T>(store: Store<T>, opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
 	observe: <T>(
 		type: ObservationTypeDef<T>,
