@@ -306,7 +306,7 @@ Both migrations applied with <code>wrangler d1 migrations apply --local</code>; 
         </section>
 
         <section class="phase" id="phase-2">
-          <header><h3>Phase 2: Query correctness and API hardening</h3><span class="badge todo">todo</span></header>
+          <header><h3>Phase 2: Query correctness and API hardening</h3><span class="badge done">done</span></header>
           <p>Six independent fixes, each one commit.</p>
           <dl class="meta">
             <dt>Devpad task</dt><dd>see devpad (created on approval)</dd>
@@ -314,14 +314,14 @@ Both migrations applied with <code>wrangler d1 migrations apply --local</code>; 
           </dl>
 
           <article class="task" id="task-2-1">
-            <header><h3>Task 2.1: <code>version_filter</code> applied before <code>limit</code></h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.1: <code>version_filter</code> applied before <code>limit</code></h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>observations/{client,storage}.ts</code>, observation part of <code>backend/drizzle-storage.ts</code>, new <code>tests/integration/observations-version-filter.test.ts</code></dd><dt>Dependencies</dt><dd>Phase 1</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p>Set/array → <code>source_version_in</code> (<code>inArray</code> plus JS filter row); an empty set returns no rows without querying. A function filter drops the storage <code>limit</code> and limits client-side. Fixes devpad <code>task_b7361eee</code>.</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/observations-version-filter.test.ts</pre><p>Expected: 10 rows, a filter matching the 3 oldest, <code>limit: 2</code> → exactly 2 rows for set, array and function filters on memory, file and drizzle.</p></section>
           </article>
 
           <article class="task" id="task-2-2">
-            <header><h3>Task 2.2: Reject unknown observation query keys</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.2: Reject unknown observation query keys</h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>observations/types.ts</code>, <code>observations/client.ts</code>, <code>types.ts</code> (<code>ObservationsClient</code>), <code>tests/unit/observation-query-types.test.ts</code>, <code>tests/integration/observations-memory.test.ts</code></dd><dt>Dependencies</dt><dd>2.1 (integration order)</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p>Exact-keys generic on <code>query</code>/<code>query_meta</code> with a <code>@ts-expect-error</code> test using the issue's variable-passing repro. Runtime: strict <code>zod/v4</code> key check; on failure emit a <code>validation_error</code> event via <code>on_event</code> and yield nothing (D3).</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun run typecheck
@@ -329,7 +329,7 @@ bun test tests/integration/observations-memory.test.ts</pre><p>Expected: the ext
           </article>
 
           <article class="task" id="task-2-3">
-            <header><h3>Task 2.3: Immutable type-state builder</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.3: Immutable type-state builder</h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>corpus.ts</code>, <code>types.ts</code>, <code>index.ts</code>, <code>tests/unit/builder-types.test.ts</code>, <code>docs/src/content/docs/api/core/create-corpus.mdx</code></dd><dt>Dependencies</dt><dd>none</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p><code>CorpusBuilder&lt;S&gt;</code> without <code>build</code>; <code>CorpusBuilderWithBackend&lt;S&gt;</code> with it. Every step returns a new builder over copied state. Tests: <code>@ts-expect-error create_corpus().build()</code>; two branches from one base don't see each other's stores; store typing infers through any step order.</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun run typecheck
@@ -337,21 +337,21 @@ bun test tests/unit/builder-types.test.ts</pre><p>Expected: the type test passes
           </article>
 
           <article class="task" id="task-2-4">
-            <header><h3>Task 2.4: <code>create_data_client</code> maps throws to Results</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.4: <code>create_data_client</code> maps throws to Results</h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>backend/base.ts</code>, <code>tests/integration/data-client-errors.test.ts</code>, new throwing fake <code>DataStorage</code> in <code>tests/fakes/</code></dd><dt>Dependencies</dt><dd>none</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p>Wrap <code>put</code>/<code>delete</code>/<code>exists</code> (and the handle's <code>bytes()</code> if not already) in <code>try_catch_async</code> → <code>storage_error</code>. Fixes devpad <code>task_13966fd5</code>.</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/data-client-errors.test.ts</pre><p>Expected: every method returns <code>err({ kind: "storage_error" })</code> against the throwing fake; nothing rejects.</p></section>
           </article>
 
           <article class="task" id="task-2-5">
-            <header><h3>Task 2.5: Core <code>collect_listing</code> helper</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.5: Core <code>collect_listing</code> helper</h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd>new <code>listing.ts</code>, <code>index.ts</code>, <code>cloudflare.ts</code> shim, <code>cli/backend-errors.ts</code>, <code>copy.ts</code> JSDoc, <code>tests/integration/listing-errors.test.ts</code>, docs</dd><dt>Dependencies</dt><dd>none</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p><code>with_error_tracking(backend_config)</code> wraps <code>on_event</code>; <code>collect_listing(tracker, iterable)</code> → <code>Result&lt;T[], CorpusError&gt;</code>. The CLI switches to it. Fixes devpad <code>task_b9d317c7</code>.</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/listing-errors.test.ts tests/integration/cli-entrypoint.test.ts</pre><p>Expected: a failing fake-D1 listing yields <code>err</code> via the library helper; CLI bad-token behaviour unchanged (exit 1).</p></section>
           </article>
 
           <article class="task" id="task-2-6">
-            <header><h3>Task 2.6: Devpad manifest fields in <code>VersionSetManifestSchema</code></h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 2.6: Devpad manifest fields in <code>VersionSetManifestSchema</code></h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>version-set.ts</code>, <code>tests/integration/version-set*.test.ts</code>, version-set docs page</dd><dt>Dependencies</dt><dd>none</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p>Add optional <code>builds.worker.bundle_manifest_ref</code> and <code>builds.assets.manifest_ref</code>, shaped as devpad's local extension defines them (read <code>~/dev/devpad/packages/cli/src/pipelines-artifacts-helpers.ts:80-95</code> and <code>packages/pipelines/src/providers/corpus-providers.ts</code>; do not edit devpad). Keep <code>_assert_manifest_shape</code> holding. Round-trip tests with and without the fields; old manifests still parse.</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/version-set</pre><p>Expected: old manifests parse unchanged; new fields round-trip.</p></section>
@@ -371,7 +371,13 @@ bun run test:zod3</pre><p>Expected: both green after all six units are integrate
             </ul></div>
           </section>
 
-          <section data-kind="proof"><h4>Proof</h4><div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div></section>
+          <section data-kind="proof"><h4>Proof</h4><div class="proof">
+<p>Commits on <code>feat/entity-scoping</code> (worktree-gated, cherry-picked, gate re-run after each): <code>ecef116</code> (2.1), <code>8ec170d</code> (2.2), <code>4f15813</code> (2.3), <code>7740fcc</code> (2.4), <code>d913acf</code> (2.5), <code>f1be23b</code> (2.6), <code>eec1c32</code> (llms regen).</p>
+<p>Gate after all six: 0 fail, lint 0 errors; <code>bun run test:zod3</code>: 1164 pass, 0 fail; <code>docs:build</code> green (llms files regenerated).</p>
+<p>Non-vacuity: reverting 2.1 to the post-limit JS filter fails 9 of 15 new tests; removing the strict-key check fails the memory runtime test; the old builder fails both branching tests; unwrapped handle <code>bytes()</code> fails both new handle tests.</p>
+<p>Fixes en route: 2.2 zod keys needed <code>.optional()</code> (25 existing tests failed), and <code>StrictQueryOpts</code> was reshaped so a no-overlap typo key is rejected (the <code>Record</code> intersection defeated weak-type detection); 2.4 also wraps handle <code>bytes()</code> in corpus.ts and extracts <code>backend/errors.ts</code>.</p>
+<p>Adversary: typed variable and known-key spread tests pass type-check; function filter stops at <code>limit</code> and is covered with and without a limit; builder throw and eslint exemption intact; no new <code>CorpusError</code> variant; <code>collect_listing</code> without a tracker returns <code>ok([])</code> (tested); old manifest parses with no added keys (tested).</p>
+</div></section>
         </section>
 
         <section class="phase" id="phase-3">
