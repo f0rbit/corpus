@@ -29,6 +29,7 @@ export type {
 	PutOpts,
 	PutResult,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	Corpus,
 	CorpusError,
 	Result,

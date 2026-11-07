@@ -293,7 +293,7 @@ Corpus automatically deduplicates content by hash. If you store the same data tw
 Create the corpus once and reuse it across requests:
 
 ```typescript
-let corpus: ReturnType<typeof create_corpus>['build'] | null = null
+let corpus: Corpus<{ data: Store<z.infer<typeof DataSchema>> }> | null = null
 
 function getCorpus(env: Env) {
   if (corpus) return corpus

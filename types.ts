@@ -583,13 +583,29 @@ export function define_store<Id extends string, T>(
 	return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn };
 }
 
-/** @internal */
+/**
+ * Builder state before a backend is configured. Has no `build` — call `with_backend()` first.
+ * Every step returns a new, independent builder.
+ * @internal
+ */
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
-	with_backend: (backend: Backend) => CorpusBuilder<Stores>;
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
 	with_store: <Id extends string, T>(
 		definition: StoreDefinition<Id, T>,
 	) => CorpusBuilder<Stores & Record<Id, Store<T>>>;
 	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>;
+};
+
+/**
+ * Builder state once a backend is configured; adds `build`.
+ * @internal
+ */
+export type CorpusBuilderWithBackend<Stores extends Record<string, Store<any>> = {}> = {
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
+	with_store: <Id extends string, T>(
+		definition: StoreDefinition<Id, T>,
+	) => CorpusBuilderWithBackend<Stores & Record<Id, Store<T>>>;
+	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilderWithBackend<Stores>;
 	build: () => Corpus<Stores>;
 };
 

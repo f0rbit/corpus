@@ -8,6 +8,7 @@ import type {
 	BatchOp,
 	Corpus,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	StoreDefinition,
 	Store,
 	Snapshot,
@@ -355,39 +356,36 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
  * ```
  */
 export function create_corpus(): CorpusBuilder<{}> {
-	let backend: Backend | null = null;
-	const definitions: StoreDefinition<string, any>[] = [];
-	let observation_types: ObservationTypeDef<unknown>[] = [];
+	return make_builder<{}>({ backend: null, definitions: [], observation_types: [] });
+}
 
-	function make_builder<Stores extends Record<string, Store<any>>>(): CorpusBuilder<Stores> {
-		return {
-			with_backend(b) {
-				backend = b;
-				return make_builder<Stores>();
-			},
+type BuilderState = {
+	readonly backend: Backend | null;
+	readonly definitions: readonly StoreDefinition<string, any>[];
+	readonly observation_types: readonly ObservationTypeDef<unknown>[];
+};
 
-			with_store<Id extends string, T>(definition: StoreDefinition<Id, T>) {
-				definitions.push(definition);
-				return make_builder<Stores & Record<Id, Store<T>>>();
-			},
+function make_builder<Stores extends Record<string, Store<any>>>(
+	state: BuilderState,
+): CorpusBuilderWithBackend<Stores> {
+	return {
+		with_backend: (backend) => make_builder<Stores>({ ...state, backend }),
 
-			with_observations(types) {
-				observation_types = types;
-				return make_builder<Stores>();
-			},
+		with_store: <Id extends string, T>(definition: StoreDefinition<Id, T>) =>
+			make_builder<Stores & Record<Id, Store<T>>>({ ...state, definitions: [...state.definitions, definition] }),
 
-			build(): Corpus<Stores> {
-				if (!backend) {
-					throw new Error(
-						"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
-					);
-				}
-				return build_corpus<Stores>(backend, definitions, observation_types);
-			},
-		};
-	}
+		with_observations: (types) => make_builder<Stores>({ ...state, observation_types: [...types] }),
 
-	return make_builder<{}>();
+		build(): Corpus<Stores> {
+			// unreachable from typed code (CorpusBuilder has no `build`); guards untyped callers
+			if (!state.backend) {
+				throw new Error(
+					"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
+				);
+			}
+			return build_corpus<Stores>(state.backend, state.definitions, state.observation_types);
+		},
+	};
 }
 
 function meta_key(store_id: string, version: string): string {

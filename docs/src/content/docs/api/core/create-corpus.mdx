@@ -76,9 +76,29 @@ Returns a `CorpusBuilder` that provides:
 
 | Method | Description |
 |--------|-------------|
-| `with_backend(backend)` | Sets the storage backend (required) |
+| `with_backend(backend)` | Sets the storage backend (required); returns a `CorpusBuilderWithBackend` |
 | `with_store(definition)` | Adds a store definition |
-| `build()` | Creates the final Corpus instance |
+| `with_observations(types)` | Registers observation types |
+
+`build()` is only available on the `CorpusBuilderWithBackend` returned by `with_backend()`, so building without a backend is a compile error. Steps may be called in any order before `build()`:
+
+```ts
+const base = create_corpus().with_store(define_store('users', json_codec(UserSchema)))
+const corpus = base.with_backend(create_memory_backend()).build() // corpus.stores.users is typed
+```
+
+## Immutability
+
+Every builder step returns a **new** builder; the receiver is never modified. Branching from one base is safe:
+
+```ts
+const base = create_corpus().with_backend(create_memory_backend())
+const a = base.with_store(define_store('a', text_codec())).build()
+const b = base.with_store(define_store('b', text_codec())).build()
+// a has only store "a"; b has only store "b"
+```
+
+Untyped (plain JS) callers who invoke `build()` without a backend still get a runtime `Error`.
 
 ## See Also
 

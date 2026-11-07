@@ -21,14 +21,23 @@ type Corpus<Stores extends Record<string, Store<any>>> = {
 
 ## CorpusBuilder
 
-Builder interface for configuring a Corpus.
+Builder interface for configuring a Corpus. It has no `build` until a backend is set: `with_backend` returns `CorpusBuilderWithBackend`, which adds `build`. Every step returns a new builder; the original is never modified.
 
 ```ts
 type CorpusBuilder<Stores extends Record<string, Store<any>>> = {
-  with_backend: (backend: Backend) => CorpusBuilder<Stores>
+  with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>
   with_store: <Id extends string, T>(
     definition: StoreDefinition<Id, T>
   ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>
+}
+
+type CorpusBuilderWithBackend<Stores extends Record<string, Store<any>>> = {
+  with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>
+  with_store: <Id extends string, T>(
+    definition: StoreDefinition<Id, T>
+  ) => CorpusBuilderWithBackend<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilderWithBackend<Stores>
   build: () => Corpus<Stores>
 }
 ```
@@ -95,7 +104,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one exception is a config-time programmer-error guard: `create_corpus().build()` throws if no backend was configured.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one remaining throw is a guard for untyped callers: `build()` throws if no backend was configured, but typed code can't reach it because `build` only exists after `with_backend()`.
 
 ```ts
 type Result<T, E = CorpusError> =

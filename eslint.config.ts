@@ -45,7 +45,8 @@ export default define_lint_config({
 			rules: { "@typescript-eslint/no-unnecessary-type-parameters": "off" },
 		},
 		{
-			// create_corpus().build() throws by design: config-time programmer-error guard
+			// the builder's build() throws by design for untyped callers (typed code can't reach it:
+			// CorpusBuilder has no build until with_backend): config-time programmer-error guard
 			files: ["corpus.ts"],
 			rules: { "functional/no-throw-statements": "off" },
 		},
