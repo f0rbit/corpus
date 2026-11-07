@@ -1,10 +1,10 @@
-# @f0rbit/corpus v0.8.2 - Full Documentation
+# @f0rbit/corpus v0.9.0 - Full Documentation
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
 This document contains the compact reference, every documentation page, and the full public source code for LLM consumption.
 
-# @f0rbit/corpus v0.8.2
+# @f0rbit/corpus v0.9.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
