@@ -49,7 +49,7 @@
     <main>
       <header>
         <h1>Plan: corpus 0.9.0 — entity scoping and silent-wrong-result fixes</h1>
-        <span class="badge todo">todo</span>
+        <span class="badge done">done</span>
         <p>Closes the remaining items of <a href="https://github.com/f0rbit/corpus/issues/57">#57</a>. It adds a first-class <code>entity_key</code> to snapshots and observations, so a shared store can hold many entities. Querying by entity and <code>is_stale</code> then work per entity, without dynamic store ids. The release also fixes a family of APIs that return wrong results without any error: <code>version_filter</code> combined with <code>limit</code> returns too few rows, unknown query keys are ignored, <code>DataStorage</code> throws escape, and listing errors end iterators without an error. It replaces the throwing <code>build()</code> with a typed builder, removes the <code>include_stale</code> documentation for a feature that was never built, and adds devpad's two manifest fields. This is a minor release with one consumer migration (two nullable columns). Research: <code>/tmp/corpus-0.9.0-scoping.md</code>. <strong>Approved 2026-11-07, all recommendations accepted.</strong></p>
       </header>
 
@@ -215,7 +215,7 @@
         <p>Executed by the build stage: background coders write diffs only. Overlapping work uses per-coder worktrees, integrated linearly by the reviewer, one commit per fix. Verification, the adversary checklist and proof are captured once per phase. ONE PR, closing #57, opens at the end of phase 3.</p>
 
         <section class="phase" id="phase-1">
-          <header><h3>Phase 1: Entity scoping</h3><span class="badge done">todo</span></header>
+          <header><h3>Phase 1: Entity scoping</h3><span class="badge done">done</span></header>
           <p>Adds <code>entity_key</code> end to end. This is the only phase with a schema change.</p>
           <dl class="meta">
             <dt>Devpad task</dt><dd>see devpad (created on approval)</dd>
@@ -223,7 +223,7 @@
           </dl>
 
           <article class="task" id="task-1-1">
-            <header><h3>Task 1.1: Snapshot <code>entity_key</code></h3><span class="badge done">todo</span></header>
+            <header><h3>Task 1.1: Snapshot <code>entity_key</code></h3><span class="badge done">done</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>schema.ts</code>, <code>types.ts</code>, <code>utils.ts</code>, <code>corpus.ts</code>, <code>backend/{base,drizzle-storage,file,layered}.ts</code>, <code>tests/integration/backend-contract.test.ts</code>, <code>tests/integration/put-if-changed.test.ts</code></dd>
               <dt>Dependencies</dt><dd>none</dd>
@@ -239,7 +239,7 @@ bun run typecheck</pre>
           </article>
 
           <article class="task" id="task-1-2">
-            <header><h3>Task 1.2: Observation <code>entity_key</code> and entity-aware staleness</h3><span class="badge done">todo</span></header>
+            <header><h3>Task 1.2: Observation <code>entity_key</code> and entity-aware staleness</h3><span class="badge done">done</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>observations/{schema,types,client,storage}.ts</code>, observation part of <code>backend/drizzle-storage.ts</code>, observation parts of <code>backend/{file,cloudflare,layered}.ts</code>, <code>tests/integration/observations-*.test.ts</code></dd>
               <dt>Dependencies</dt><dd>1.1 committed</dd>
@@ -255,7 +255,7 @@ bun run typecheck</pre>
           </article>
 
           <article class="task" id="task-1-3">
-            <header><h3>Task 1.3: CLI, docs and migration guide</h3><span class="badge done">todo</span></header>
+            <header><h3>Task 1.3: CLI, docs and migration guide</h3><span class="badge done">done</span></header>
             <dl class="meta">
               <dt>Files</dt><dd><code>cli/meta.ts</code>, <code>cli/commands/versions.ts</code>, <code>tests/integration/cli-read.test.ts</code>, <code>docs/src/content/docs/guides/{observations,cloudflare}.mdx</code>, <code>docs/src/content/docs/api/core/observations.mdx</code>, new <code>docs/src/content/docs/guides/entities.mdx</code> plus sidebar entry</dd>
               <dt>Dependencies</dt><dd>1.1 API shape (parallel with 1.2)</dd>
@@ -381,12 +381,12 @@ bun run test:zod3</pre><p>Expected: both green after all six units are integrate
         </section>
 
         <section class="phase" id="phase-3">
-          <header><h3>Phase 3: Release 0.9.0</h3><span class="badge todo">todo</span></header>
+          <header><h3>Phase 3: Release 0.9.0</h3><span class="badge done">done</span></header>
           <p>Release notes with migration steps, the PR, publish, and consumer checks.</p>
           <dl class="meta"><dt>Devpad task</dt><dd>see devpad (created on approval)</dd><dt>Mode</dt><dd>Reviewer only, sequential.</dd></dl>
 
           <article class="task" id="task-3-1">
-            <header><h3>Task 3.1: Version bump, notes, PR, publish</h3><span class="badge todo">todo</span></header>
+            <header><h3>Task 3.1: Version bump, notes, PR, publish</h3><span class="badge done">done</span></header>
             <dl class="meta"><dt>Files</dt><dd><code>package.json</code>, <code>README.md</code>, <code>AGENTS.md</code>, <code>/tmp/corpus-release-0.9.0.md</code></dd><dt>Dependencies</dt><dd>Phases 1–2</dd></dl>
             <section data-kind="scope"><h4>Scope</h4><p>Bump to 0.9.0. Re-run the #57 repro on the packed tarball; every line inverts except item 5, which becomes a type error. PR body "Closes #57" (item 10 closed as won't-do with reasoning). Release notes lead with "migrate D1 before deploying" and list the BREAKING section. <code>release-preflight 0.9.0</code>, then ASK THE USER before <code>gh release create</code>, then <code>ship --release v0.9.0</code> (waits on npm).</p></section>
             <section data-kind="acceptance"><h4>Acceptance</h4><pre>~/.config/opencode/tools/release-preflight 0.9.0
@@ -404,7 +404,13 @@ npm view @f0rbit/corpus@0.9.0 version</pre><p>Expected: preflight passes; regist
             </ul></div>
           </section>
 
-          <section data-kind="proof"><h4>Proof</h4><div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div></section>
+          <section data-kind="proof"><h4>Proof</h4><div>
+Commits: c574598 (version bump, README pointer, llms regen); PR #59 squash-merged as 08a3bb5. Release v0.9.0: https://github.com/f0rbit/corpus/releases/tag/v0.9.0, publish run 42423549499 succeeded (https://github.com/f0rbit/corpus/actions/runs/42423549499).<br>
+Gate: green, lint 0 errors; bun run test:zod3: 1164 pass, 0 fail; docs:build green. release-preflight 0.9.0: all checks passed.<br>
+Registry: npm view @f0rbit/corpus version = 0.9.0 (peer zod &gt;=3.25.0, typescript &gt;=5; deps fast-check ^4.7.0, drizzle-orm &gt;=0.45.4); bunx --no-cache @f0rbit/corpus@0.9.0 --help exits 0 (first attempt failed with a registry-resolution lag, passed ~2 minutes later).<br>
+#57 repro on the packed tarball: item 1 deduplicated present, if_changed returns unchanged with one row; item 3 unknown key yields 0 rows (compile error too), entity_key query 1 of 2; item 4 a put about B no longer stales A; item 6 older-put 0 of 297 ties; item 7 exclude_source_version 1 of 2; item 5 build() is TS2339 on create_corpus().<br>
+Consumer smoke (scratch copies, packed tarball): groundwork and vault typecheck clean. Only groundwork uses D1 and needs the migration; vault, anthropic-search, anthropic-summarize use Result helpers only; budget-sync uses the file backend. #57 closed.
+</div></section>
         </section>
       </section>
 
