@@ -1,10 +1,10 @@
-# @f0rbit/corpus v0.8.1 - Full Documentation
+# @f0rbit/corpus v0.9.0 - Full Documentation
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
 This document contains the compact reference, every documentation page, and the full public source code for LLM consumption.
 
-# @f0rbit/corpus v0.8.1
+# @f0rbit/corpus v0.9.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -54,6 +54,7 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 ### Guides
 - [Storage Backends](https://f0rbit.github.io/corpus/guides/backends/): Learn about the different storage backends available in Corpus and when to use each one.
 - [Cloudflare Deployment](https://f0rbit.github.io/corpus/guides/cloudflare/): Deploy Corpus to Cloudflare Workers with D1 database and R2 object storage.
+- [Entities](https://f0rbit.github.io/corpus/guides/entities/): Hold many entities in one store with entity_key — latest-per-entity, entity-scoped observations and per-entity staleness.
 - [Events and Observability](https://f0rbit.github.io/corpus/guides/events-and-observability/): Wire event handlers into backends to observe storage operations for debugging, metrics, and auditing.
 - [Observations](https://f0rbit.github.io/corpus/guides/observations/): Extract and query structured facts from your versioned documents with automatic staleness detection.
 - [Pipeline Templates](https://f0rbit.github.io/corpus/guides/pipeline-templates/): Content-addressed snapshots of compiled pipeline templates via pipeline_template_store — serialised pipeline declarations stored once, deduped across packages, and rehydrated by the deployment orchestrator at run start.
@@ -123,6 +124,10 @@ Every public export, grouped by the source module that defines it.
 - Values: `copy`
 - Types: `CopyOpts`, `CopyProgressEvent`, `CopySummary`
 
+### listing.ts
+- Values: `with_error_tracking`, `collect_listing`
+- Types: `ErrorTracker`
+
 ### cli/config-schema.ts
 - Values: `define_config`
 - Types: `CorpusCliConfig`
@@ -162,7 +167,7 @@ Every public export, grouped by the source module that defines it.
 
 ### types.ts
 - Values: `ok`, `err`, `define_store`
-- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `PutResult`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
+- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `LatestOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `PutResult`, `CorpusBuilder`, `CorpusBuilderWithBackend`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`, `StrictQueryOpts`
 
 ### result.ts
 - Values: `match`, `unwrap_or`, `unwrap`, `unwrap_err`, `try_catch`, `try_catch_async`, `fetch_result`, `pipe`, `to_nullable`, `to_fallback`, `null_on`, `fallback_on`, `format_error`, `at`, `first`, `last`, `merge_deep`
@@ -1843,9 +1848,29 @@ Returns a `CorpusBuilder` that provides:
 
 | Method | Description |
 |--------|-------------|
-| `with_backend(backend)` | Sets the storage backend (required) |
+| `with_backend(backend)` | Sets the storage backend (required); returns a `CorpusBuilderWithBackend` |
 | `with_store(definition)` | Adds a store definition |
-| `build()` | Creates the final Corpus instance |
+| `with_observations(types)` | Registers observation types |
+
+`build()` is only available on the `CorpusBuilderWithBackend` returned by `with_backend()`, so building without a backend is a compile error. Steps may be called in any order before `build()`:
+
+```ts
+const base = create_corpus().with_store(define_store('users', json_codec(UserSchema)))
+const corpus = base.with_backend(create_memory_backend()).build() // corpus.stores.users is typed
+```
+
+## Immutability
+
+Every builder step returns a **new** builder; the receiver is never modified. Branching from one base is safe:
+
+```ts
+const base = create_corpus().with_backend(create_memory_backend())
+const a = base.with_store(define_store('a', text_codec())).build()
+const b = base.with_store(define_store('b', text_codec())).build()
+// a has only store "a"; b has only store "b"
+```
+
+Untyped (plain JS) callers who invoke `build()` without a backend still get a runtime `Error`.
 
 ## See Also
 
@@ -2271,14 +2296,31 @@ type ObservationQueryOpts = {
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date
   created_before?: Date        // created_at before this date
-  include_stale?: boolean      // Include stale observations (default: false)
+  entity_key?: string          // Filter by entity key
   limit?: number               // Max results to return
   cursor?: string              // Pagination cursor
 }
 ```
 
-<Aside type="caution" title="Unknown keys are ignored">
-Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+#### `entity_key`
+
+`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a source snapshot that isn't found stores no key and the put still succeeds; any other metadata error, such as a storage failure, fails the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
+
+`is_stale(pointer)` follows the **source snapshot's** entity: if that snapshot has an `entity_key`, it is stale only when a newer snapshot with the same key exists in the store; unkeyed snapshots use the store-wide rule. See the [Entities guide](/corpus/guides/entities/).
+
+#### Current observations only
+
+`query()` never filters by staleness. To keep only observations whose source is still current:
+
+```ts
+for await (const obs of observations.query({ type: 'entity_mention' })) {
+  if (await observations.is_stale(obs.source)) continue
+  // current
+}
+```
+
+<Aside type="caution" title="Unknown keys are rejected">
+`query` and `query_meta` reject keys that are not in `ObservationQueryOpts`. At compile time the options type is checked even when passed through a variable, so a typo like `source_stor` is a type error. At runtime (for example after a cast or from untyped input) the query yields nothing and the backend's `on_event` handler receives an `error` event carrying a `validation_error`, rather than silently returning unfiltered results.
 </Aside>
 
 Results are ordered newest-first by `created_at`; observations with an identical `created_at` are returned in reverse insertion order (later-inserted first) on every backend.
@@ -2580,14 +2622,23 @@ type Corpus<Stores extends Record<string, Store<any>>> = {
 
 ## CorpusBuilder
 
-Builder interface for configuring a Corpus.
+Builder interface for configuring a Corpus. It has no `build` until a backend is set: `with_backend` returns `CorpusBuilderWithBackend`, which adds `build`. Every step returns a new builder; the original is never modified.
 
 ```ts
 type CorpusBuilder<Stores extends Record<string, Store<any>>> = {
-  with_backend: (backend: Backend) => CorpusBuilder<Stores>
+  with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>
   with_store: <Id extends string, T>(
     definition: StoreDefinition<Id, T>
   ) => CorpusBuilder<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>
+}
+
+type CorpusBuilderWithBackend<Stores extends Record<string, Store<any>>> = {
+  with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>
+  with_store: <Id extends string, T>(
+    definition: StoreDefinition<Id, T>
+  ) => CorpusBuilderWithBackend<Stores & Record<Id, Store<T>>>
+  with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilderWithBackend<Stores>
   build: () => Corpus<Stores>
 }
 ```
@@ -2654,7 +2705,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 ## Result
 
-All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one exception is a config-time programmer-error guard: `create_corpus().build()` throws if no backend was configured.
+All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one remaining throw is a guard for untyped callers: `build()` throws if no backend was configured, but typed code can't reach it because `build` only exists after `with_backend()`.
 
 ```ts
 type Result<T, E = CorpusError> =
@@ -3276,6 +3327,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 | `size_bytes` | `integer` | Size of the stored data |
 | `data_key` | `text` | Key to retrieve binary data from storage (R2/filesystem) |
 | `tags` | `text` | Optional JSON array of string tags |
+| `entity_key` | `text` | Optional entity the snapshot is about (NULL when unkeyed) |
 
 **Primary Key:** `(store_id, version)`
 
@@ -3283,6 +3335,7 @@ import { corpus_snapshots } from '@f0rbit/corpus'
 - `idx_store_created` on `(store_id, created_at)` - efficient latest queries
 - `idx_content_hash` on `(store_id, content_hash)` - deduplication lookups
 - `idx_data_key` on `(data_key)` - data retrieval
+- `idx_store_entity` on `(store_id, entity_key)` - per-entity latest and list queries
 
 ---
 
@@ -3308,6 +3361,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 | `observed_at` | `text` | ISO 8601 timestamp when observation was made |
 | `created_at` | `text` | ISO 8601 timestamp when record was stored |
 | `derived_from` | `text` | Optional JSON array of source snapshot pointers |
+| `entity_key` | `text` | Optional entity the observation is about (NULL when unkeyed) |
 
 **Primary Key:** `id`
 
@@ -3316,6 +3370,7 @@ import { corpus_observations } from '@f0rbit/corpus'
 - `idx_obs_source` on `(source_store_id, source_version)` - find observations for a snapshot
 - `idx_obs_type_observed` on `(type, observed_at)` - temporal queries by type
 - `idx_obs_type_source` on `(type, source_store_id)` - type queries within a store
+- `idx_obs_type_entity` on `(type, entity_key)` - per-entity observation queries
 
 ---
 
@@ -5069,6 +5124,7 @@ List versions in a store with optional filtering.
 corpus versions <store>                    # All versions
 corpus versions <store> --limit 10         # First 10 versions
 corpus versions <store> --tag published    # Versions with tag "published"
+corpus versions <store> --entity acme       # Versions for one entity_key (adds an entity_key column when any row is keyed)
 corpus versions <store> --after 2025-01-01T00:00:00Z  # Versions created after date
 corpus versions <store> --before 2025-07-01T00:00:00Z # Versions created before date
 corpus versions <store> --json              # Machine-readable
@@ -5405,7 +5461,7 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
     <div class="step-content vertical-content">
       <div class="step-title">Handle errors with pattern matching</div>
       <div class="step-body">
-        Corpus uses `Result<T, E>` types instead of throwing exceptions (the only exception is `create_corpus().build()`, which throws if you forgot to configure a backend):
+        Corpus uses `Result<T, E>` types instead of throwing exceptions (`build()` only type-checks after `with_backend()`, so forgetting a backend is a compile error rather than a runtime throw):
 
         ```typescript
         const snapshot = await corpus.stores.posts.get('nonexistent-version')
@@ -5828,6 +5884,25 @@ Corpus does not ship migration SQL — you own your migration history. Run `bunx
 ### Upgrading corpus
 
 When a corpus release changes either table, the release notes will say so. After upgrading `@f0rbit/corpus`, rerun `bunx drizzle-kit generate` and apply the new migration; if nothing changed, drizzle-kit reports there is nothing to generate.
+
+#### Upgrading to 0.9.0
+
+0.9.0 adds a nullable `entity_key` column and an index to **both** `corpus_snapshots` and `corpus_observations`. Migrate **before** deploying a Worker on 0.9.0:
+
+```bash
+bun add @f0rbit/corpus@0.9.0
+bunx drizzle-kit generate          # two ADD COLUMN + two CREATE INDEX
+wrangler d1 migrations apply corpus-db
+wrangler deploy                    # only after the migration is applied
+```
+
+<Aside type="caution" title="Migrate before you deploy">
+Corpus selects columns explicitly, so a Worker on 0.9.0 against an un-migrated D1 database fails every snapshot and observation query. The new columns are nullable, so a 0.8.x Worker keeps working against the migrated database during the rollout.
+</Aside>
+
+File and memory backends need no migration — existing `_meta.json` files without `entity_key` read as unkeyed.
+
+`copy()` of entity-keyed snapshots into a destination whose D1 schema is still 0.8.x fails at the destination; migrate the destination first.
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -6007,7 +6082,7 @@ Corpus automatically deduplicates content by hash. If you store the same data tw
 Create the corpus once and reuse it across requests:
 
 ```typescript
-let corpus: ReturnType<typeof create_corpus>['build'] | null = null
+let corpus: Corpus<{ data: Store<z.infer<typeof DataSchema>> }> | null = null
 
 function getCorpus(env: Env) {
   if (corpus) return corpus
@@ -6068,6 +6143,115 @@ return new Response(JSON.stringify(result.value.data))
     <div class="card-description">Use the memory backend for fast, isolated tests.</div>
   </a>
 </div>
+
+---
+
+### Entities (guides/entities.mdx)
+
+> Hold many entities in one store with entity_key — latest-per-entity, entity-scoped observations and per-entity staleness.
+
+import { Aside } from '@astrojs/starlight/components';
+
+A store normally has one "latest" snapshot. A crawl → extract → diff pipeline needs more: one store per *source type* (say `pages`), holding the history of many entities (one per URL, company, repository…). Setting an `entity_key` on each snapshot makes "latest", `if_changed`, observation queries and `is_stale` all work **per entity**, without a store id per entity.
+
+## The pattern
+
+```typescript
+const corpus = create_corpus()
+  .with_backend(backend)
+  .with_store(define_store('pages', json_codec(PageSchema)))
+  .build()
+```
+
+### 1. Store snapshots with an entity key
+
+```typescript
+const put = await corpus.stores.pages.put(page, {
+  entity_key: 'https://example.com/pricing',
+  if_changed: true,
+})
+```
+
+`if_changed` compares against **that entity's** latest snapshot only. Re-crawling an unchanged page writes nothing; a change to a different entity never counts.
+
+### 2. Read the latest per entity
+
+```typescript
+const latest = await corpus.stores.pages.get_latest({
+  entity_key: 'https://example.com/pricing',
+})
+
+for await (const meta of corpus.stores.pages.list({ entity_key: 'https://example.com/pricing' })) {
+  // newest-first, this entity only
+}
+```
+
+`get_latest()` with no options is unchanged: the newest snapshot in the store, whatever its key.
+
+### 3. Extract observations — the key is inherited
+
+```typescript
+await corpus.observations.put(PriceObservation, {
+  source: corpus.create_pointer('pages', put.value.version),
+  content: { sku: 'pro', amount: 49 },
+})
+```
+
+When `entity_key` is omitted, the observation inherits the key from its source snapshot. Pass `entity_key` explicitly to override it — for example when one crawled page yields observations about several entities. If the source snapshot can't be found, the observation is stored without a key rather than failing. Any other metadata error (for example a storage failure) fails the put, so a key is never silently dropped.
+
+### 4. Query by entity
+
+```typescript
+for await (const obs of corpus.observations.query({
+  type: 'price',
+  entity_key: 'https://example.com/pricing',
+  limit: 10,
+})) {
+  // newest-first, this entity only
+}
+```
+
+### 5. Staleness per entity
+
+```typescript
+const stale = await corpus.observations.is_stale(obs.source)
+```
+
+If the source snapshot has an `entity_key`, the pointer is stale only when a **newer snapshot with the same key** exists in that store. A new crawl of entity B never stales observations extracted from entity A; a new crawl of A does — which is exactly the signal an extraction pipeline needs ("has this entity's source changed since I extracted?"). `corpus.is_superseded` follows the same rule.
+
+<Aside type="note">
+An observation with an explicit `entity_key` that differs from its source's still takes its staleness from the **source snapshot's** entity.
+</Aside>
+
+To work only with current observations, combine the two:
+
+```typescript
+for await (const obs of corpus.observations.query({ type: 'price', entity_key })) {
+  if (await corpus.observations.is_stale(obs.source)) continue
+  // current
+}
+```
+
+## Unkeyed data behaves as before
+
+Snapshots written without an `entity_key` have no key: `get_latest`, `list`, `if_changed` and `is_stale` use the whole store exactly as in 0.8.x. A keyed filter never matches an unkeyed snapshot. You can adopt entity keys per store, or even mid-history.
+
+## Inspecting from the CLI
+
+```bash
+corpus versions pages --entity https://example.com/pricing
+corpus versions pages --json | jq '.versions[0].entity_key'
+```
+
+`versions` shows an `entity_key` column only when at least one listed row has a key, and `--json` includes `entity_key` only on keyed snapshots.
+
+## Custom backends
+
+`MetadataClient.get_latest` takes optional `{ entity_key }` and `ListOpts` gains `entity_key`. A custom backend that ignores them still compiles but returns store-wide results — honour the option in your implementation.
+
+## Upgrading
+
+0.9.0 adds the `entity_key` column to both tables, so D1 users must migrate before deploying. See [Upgrading to 0.9.0](/corpus/guides/cloudflare/#upgrading-to-090).
 
 ---
 
@@ -6307,6 +6491,24 @@ on_event: (event) => {
 }
 ```
 
+## Detecting Listing Failures
+
+`metadata.list()` and `metadata.list_stores()` return an `AsyncIterable` with no error channel. When storage fails, the backend emits an `error` event and the iterator simply ends, so a bad token looks the same as an empty database. `with_error_tracking` records those events, and `collect_listing` turns them back into a failing `Result`:
+
+```typescript
+import { create_cloudflare_backend, with_error_tracking, collect_listing } from '@f0rbit/corpus/cloudflare'
+
+const { on_event, tracker } = with_error_tracking(/* optional handler to forward events to */)
+const backend = create_cloudflare_backend({ d1, r2, on_event })
+
+const ids = await collect_listing(tracker, backend.metadata.list_stores!())
+if (!ids.ok) {
+  console.error(ids.error.kind) // e.g. 'storage_error'
+}
+```
+
+Passing `undefined` as the tracker collects the iterable as-is. The same tracker is how you detect a failed source listing after `copy()`: check `tracker.errors`.
+
 ## See Also
 
 - [Backend Types](/corpus/api/backends/types) — Full CorpusEvent and EventHandler definitions
@@ -6359,7 +6561,7 @@ Without observations, you have two bad options:
 Observations solve this by making extracted facts a **first-class concept** with:
 
 - **Source pointers** — Every fact knows exactly where it came from (document, version, even JSONPath)
-- **Automatic staleness** — When a source document is updated, observations from the old version are automatically filtered out
+- **Staleness detection** — `is_stale` tells you whether an observation's source has been superseded, so you can skip or re-extract it
 - **Type-safe schemas** — Define observation types with Zod, get full TypeScript inference
 - **Efficient queries** — Filter by type, source, date range, and more
 
@@ -6525,18 +6727,11 @@ const updatedArticle = {
 
 await corpus.stores.articles.put(updatedArticle)
 
-// Old observations are automatically marked stale!
-// This query only returns observations from the LATEST version:
+// Observations from the old version are still returned by query() —
+// query never filters by staleness. To keep only current ones, check is_stale:
 for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
-  // Only observations from the new version appear here
-}
-
-// To include historical observations:
-for await (const obs of corpus.observations.query({ 
-  type: 'sentiment',
-  include_stale: true 
-})) {
-  // All observations, including from old versions
+  if (await corpus.observations.is_stale(obs.source)) continue
+  // Only observations whose source is still the latest version reach here
 }
 ```
       </div>
@@ -6618,7 +6813,7 @@ await corpus.observations.put(EntityObservation, {
 
 ### Staleness Detection
 
-Observations automatically track whether their source document has been superseded:
+`is_stale` reports whether an observation's source document has been superseded:
 
 ```typescript
 // Check if a specific observation's source is stale
@@ -6631,12 +6826,27 @@ const isSuperseded = await corpus.is_superseded(pointer)
 **How it works:**
 1. When you store a new version of a document, it becomes the "latest" version
 2. Observations pointing to older versions are considered "stale"
-3. By default, `query()` excludes stale observations
-4. Use `include_stale: true` to include them for historical analysis
+3. `query()` does **not** filter by staleness — it returns observations from every version
+
+If the source snapshot has an `entity_key`, it is superseded only when a newer snapshot with the **same key** exists in that store; otherwise any newer snapshot in the store supersedes it. See the [Entities guide](/corpus/guides/entities/).
 
 <Aside type="note">
 Staleness is determined per-version, not per-path. If any part of a document changes, all observations from that version become stale.
 </Aside>
+
+#### Current observations only
+
+`query()` has no staleness option. To work with only current observations, query and then check `is_stale`:
+
+```typescript
+async function* current(type: string) {
+  for await (const obs of corpus.observations.query({ type })) {
+    if (!(await corpus.observations.is_stale(obs.source))) yield obs
+  }
+}
+```
+
+Alternatively, `exclude_source_version` and `version_filter` narrow a query to specific source versions.
 
 ### Per-field citations
 
@@ -6716,7 +6926,7 @@ type ObservationQueryOpts = {
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date
   created_before?: Date        // created_at before this date
-  include_stale?: boolean      // Include stale observations (default: false)
+  entity_key?: string          // Filter by entity key (see the Entities guide)
   limit?: number               // Max results to return
 }
 ```
@@ -6815,7 +7025,7 @@ When you need to re-analyze documents (e.g., with an improved model), you have t
 <Tabs defaultValue="delete" client:load>
 <TabList client:load>
 <Tab value="delete" client:load>Option A: Delete and re-create</Tab>
-<Tab value="stale" client:load>Option B: Let staleness handle it</Tab>
+<Tab value="stale" client:load>Option B: Keep history</Tab>
 </TabList>
 <TabPanel value="delete" client:load>
 ```typescript
@@ -6851,8 +7061,8 @@ for (const fact of extract_facts(updated_data)) {
   })
 }
 
-// Old observations remain but are filtered out by default
-// Use include_stale: true for historical analysis
+// Old observations remain and are still returned by query().
+// Use is_stale(obs.source) to tell current from historical.
 ```
 </TabPanel>
 </Tabs>
@@ -7809,8 +8019,8 @@ import { VersionSetManifestSchema, type VersionSetManifest } from '@f0rbit/corpu
 //   git_sha: string                    // 40-char sha
 //   created_at: string                 // ISO-8601 datetime
 //   builds: {
-//     worker: { artifact_ref, size_bytes, compatibility_date }
-//     assets?: { artifact_ref?, version_affinity: 'pinned' | 'none' }
+//     worker: { artifact_ref, size_bytes, compatibility_date, bundle_manifest_ref? }
+//     assets?: { artifact_ref?, manifest_ref?, version_affinity: 'pinned' | 'none' }
 //   }
 //   migrations: {
 //     d1_plan_ref?: string
@@ -7823,6 +8033,8 @@ import { VersionSetManifestSchema, type VersionSetManifest } from '@f0rbit/corpu
 ```
 
 All cross-store references (`artifact_ref`, `d1_plan_ref`, `env_manifest_ref`, `infra_plan_ref`, `grants_ref`) are corpus versions in the form `<store>/<hash>` — the orchestrator resolves them at deploy time.
+
+`builds.worker.bundle_manifest_ref` and `builds.assets.manifest_ref` (added in 0.9.0, both optional) point at the directory-bundle and asset manifest blobs. Directory-bundle manifests still carry the required `artifact_ref` (devpad stamps `""` there), with `bundle_manifest_ref` as the authoritative reference. Manifests written before 0.9.0 parse unchanged.
 
 ## Creating a store
 
@@ -8899,7 +9111,8 @@ import type {
 } from "../types.js";
 import { ok, err } from "../types.js";
 import { to_bytes, filter_snapshots } from "../utils.js";
-import { first, to_fallback } from "../result.js";
+import { first, to_fallback, try_catch_async } from "../result.js";
+import { storage_error } from "./errors.js";
 
 export type MetadataStorage = {
 	get: (store_id: string, version: string) => Promise<SnapshotMeta | null>;
@@ -9014,9 +9227,10 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+		async get_latest(store_id, opts): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 			for await (const meta of storage.list(store_id)) {
+				if (opts?.entity_key !== undefined && meta.entity_key !== opts.entity_key) continue;
 				// >= : on equal created_at the later-inserted snapshot wins (storage.list is insertion order)
 				if (!latest || meta.created_at >= latest.created_at) {
 					latest = meta;
@@ -9042,10 +9256,17 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 	};
 }
 
+function emit_failure<T>(emit: Emit, result: Result<T, CorpusError>): Result<T, CorpusError> {
+	if (!result.ok) emit({ type: "error", error: result.error });
+	return result;
+}
+
 export function create_data_client(storage: DataStorage, emit: Emit): DataClient {
 	return {
 		async get(data_key): Promise<Result<DataHandle, CorpusError>> {
-			const handle = await storage.get(data_key);
+			const fetched = emit_failure(emit, await try_catch_async(() => storage.get(data_key), storage_error("data.get")));
+			if (!fetched.ok) return fetched;
+			const handle = fetched.value;
 			emit({
 				type: "data_get",
 				store_id: to_fallback(first(data_key.split("/")), data_key),
@@ -9064,18 +9285,24 @@ export function create_data_client(storage: DataStorage, emit: Emit): DataClient
 		},
 
 		async put(data_key, input): Promise<Result<void, CorpusError>> {
-			const bytes = await to_bytes(input);
-			await storage.put(data_key, bytes);
-			return ok(undefined);
+			return emit_failure(
+				emit,
+				await try_catch_async(async () => {
+					await storage.put(data_key, await to_bytes(input));
+				}, storage_error("data.put")),
+			);
 		},
 
 		async delete(data_key): Promise<Result<void, CorpusError>> {
-			await storage.delete(data_key);
-			return ok(undefined);
+			return emit_failure(emit, await try_catch_async(() => storage.delete(data_key), storage_error("data.delete")));
 		},
 
 		async exists(data_key): Promise<boolean> {
-			return storage.exists(data_key);
+			const checked = emit_failure(
+				emit,
+				await try_catch_async(() => storage.exists(data_key), storage_error("data.exists")),
+			);
+			return checked.ok && checked.value;
 		},
 	};
 }
@@ -9114,9 +9341,8 @@ import {
 	meta_insert_stmt,
 	obs_delete_stmt,
 	obs_insert_stmt,
-	storage_error,
-	to_error,
 } from "./drizzle-storage.js";
+import { storage_error, to_error } from "./errors.js";
 
 // Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
 // self-contained). Real bindings must assign to these: return types we never read are `unknown`
@@ -9241,7 +9467,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	};
 
 	const storage = create_drizzle_observations_storage(db);
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
 	 * Apply a batch of ops atomically.
@@ -9349,7 +9575,8 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
-import type { CorpusError, CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
+import { storage_error } from "./errors.js";
+import type { CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
 import { err, ok } from "../types.js";
 import { parse_snapshot_meta } from "../utils.js";
 
@@ -9365,14 +9592,6 @@ import { parse_snapshot_meta } from "../utils.js";
 export type DrizzleDb<TRunResult = unknown> = BaseSQLiteDatabase<"async", TRunResult, Record<string, never>>;
 
 type Emit = (event: CorpusEvent) => void;
-
-function to_error(cause: unknown): Error {
-	return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-function storage_error(operation: string): (cause: unknown) => CorpusError {
-	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
-}
 
 function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
 	return parse_snapshot_meta(row);
@@ -9391,6 +9610,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 		size_bytes: meta.size_bytes,
 		data_key: meta.data_key,
 		tags: meta.tags ? JSON.stringify(meta.tags) : null,
+		entity_key: meta.entity_key ?? null,
 	};
 	return db
 		.insert(corpus_snapshots)
@@ -9406,6 +9626,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 				size_bytes: values.size_bytes,
 				data_key: values.data_key,
 				tags: values.tags,
+				entity_key: values.entity_key,
 			},
 		});
 }
@@ -9493,6 +9714,10 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				conditions.push(gt(corpus_snapshots.created_at, opts.after.toISOString()));
 			}
 
+			if (opts?.entity_key !== undefined) {
+				conditions.push(eq(corpus_snapshots.entity_key, opts.entity_key));
+			}
+
 			// Every filter must run in SQL: LIMIT applies before any JS-side filter,
 			// so a post-query tag check would under-return (or return nothing).
 			for (const tag of opts?.tags ?? []) {
@@ -9525,12 +9750,16 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id) {
+		async get_latest(store_id, opts) {
 			const lookup = await try_catch_async(async () => {
 				const rows = await db
 					.select()
 					.from(corpus_snapshots)
-					.where(eq(corpus_snapshots.store_id, store_id))
+					.where(
+						opts?.entity_key === undefined
+							? eq(corpus_snapshots.store_id, store_id)
+							: and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.entity_key, opts.entity_key)),
+					)
 					.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`))
 					.limit(1);
 
@@ -9642,6 +9871,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.exclude_source_version) {
 				conditions.push(ne(corpus_observations.source_version, opts.exclude_source_version));
 			}
+			if (opts.source_version_in !== undefined) {
+				conditions.push(inArray(corpus_observations.source_version, opts.source_version_in));
+			}
 			if (opts.source_prefix) {
 				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
 			}
@@ -9656,6 +9888,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			}
 			if (opts.observed_before) {
 				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
+			}
+			if (opts.entity_key !== undefined) {
+				conditions.push(eq(corpus_observations.entity_key, opts.entity_key));
 			}
 
 			let query = db
@@ -9715,7 +9950,27 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 	};
 }
 
-export { storage_error, to_error };
+```
+
+---
+
+### backend/errors.ts
+
+```typescript
+/**
+ * @module backend/errors
+ * @description Shared error constructors for backend storage layers (no drizzle import — Workers-safe).
+ */
+
+import type { CorpusError } from "../types.js";
+
+export function to_error(cause: unknown): Error {
+	return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+export function storage_error(operation: string): (cause: unknown) => CorpusError {
+	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
+}
 
 ```
 
@@ -10063,7 +10318,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 				return true;
 			}),
 	});
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
 	 * Atomically apply a batch of ops via stage-and-rename.
@@ -10329,6 +10584,7 @@ import type {
 	DataHandle,
 	ObservationsClient,
 } from "../types.js";
+import type { ObservationQueryOpts } from "../observations/types.js";
 import { ok, err } from "../types.js";
 import { to_bytes } from "../utils.js";
 import { first, to_nullable } from "../result.js";
@@ -10438,11 +10694,11 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 			}
 		},
 
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+		async get_latest(store_id, opts): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 
 			for (const backend of read) {
-				const result = await backend.metadata.get_latest(store_id);
+				const result = await backend.metadata.get_latest(store_id, opts);
 				if (!result.ok) {
 					if (result.error.kind !== "not_found") return result;
 					continue;
@@ -10578,12 +10834,12 @@ function create_layered_observations_client(
 			return primary.get(id);
 		},
 
-		async *query(opts) {
+		async *query(opts?: ObservationQueryOpts) {
 			if (!primary) return;
 			yield* primary.query(opts);
 		},
 
-		async *query_meta(opts) {
+		async *query_meta(opts?: ObservationQueryOpts) {
 			if (!primary) return;
 			yield* primary.query_meta(opts);
 		},
@@ -10847,7 +11103,7 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 			return had;
 		},
 	});
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	return { metadata, data, observations, on_event, apply_batch };
 }
@@ -11339,7 +11595,7 @@ export function create_remote_backend(config: RemoteBackendConfig): Backend {
 	const data = create_data_client(create_r2_data_storage(r2_config), emit);
 
 	const observations_storage = create_drizzle_observations_storage(db);
-	const observations = create_observations_client(observations_storage, metadata);
+	const observations = create_observations_client(observations_storage, metadata, emit);
 
 	return { metadata, data, observations, on_event: config.on_event };
 }
@@ -11416,6 +11672,7 @@ export type {
 	MetadataClient,
 	DataClient,
 	ListOpts,
+	LatestOpts,
 	Backend,
 	Codec,
 	Store,
@@ -11423,6 +11680,7 @@ export type {
 	PutOpts,
 	PutResult,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	Corpus,
 	CorpusError,
 	Result,
@@ -11431,6 +11689,8 @@ export type {
 } from "./types.js";
 
 export { ok, err, define_store } from "./types.js";
+
+export { with_error_tracking, collect_listing, type ErrorTracker } from "./listing.js";
 
 export * from "./observations/index.js";
 
@@ -11953,6 +12213,11 @@ async function copy_version(
  * — the `on_progress` callback is the only channel that reports partial
  * progress made before the failure.
  *
+ * `copy()` cannot see source listing failures: a failed `list`/`list_stores`
+ * just ends the iterator and yields a "successful" 0-version summary. Build
+ * the source backend with `with_error_tracking()` and check
+ * `tracker.errors` after `copy()` to detect them.
+ *
  * @param source - Backend to read snapshots from
  * @param dest - Backend to write snapshots to
  * @param opts - Store/tag filters, dry-run, concurrency, progress callback
@@ -12065,6 +12330,7 @@ import type {
 	BatchOp,
 	Corpus,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	StoreDefinition,
 	Store,
 	Snapshot,
@@ -12074,6 +12340,7 @@ import type {
 	CorpusError,
 	DataKeyContext,
 	DataHandle,
+	LatestOpts,
 	PutOpts,
 	PutResult,
 	TransactionHandle,
@@ -12082,6 +12349,7 @@ import type {
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
+import { storage_error } from "./backend/errors.js";
 import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
@@ -12109,6 +12377,10 @@ function encode_error(cause: unknown): CorpusError {
 
 function decode_error(cause: unknown): CorpusError {
 	return { kind: "decode_error", cause: to_error(cause) };
+}
+
+function entity_opts(entity_key: string | undefined): LatestOpts | undefined {
+	return entity_key === undefined ? undefined : { entity_key };
 }
 
 /**
@@ -12164,7 +12436,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags };
 
 		if (opts?.if_changed) {
-			const latest = await backend.metadata.get_latest(id);
+			const latest = await backend.metadata.get_latest(id, entity_opts(opts.entity_key));
 			if (latest.ok && latest.value.content_hash === content_hash) {
 				return ok({ ...latest.value, deduplicated: true, unchanged: true });
 			}
@@ -12200,6 +12472,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 			size_bytes: bytes.length,
 			data_key,
 			tags: opts?.tags,
+			...(opts?.entity_key === undefined ? {} : { entity_key: opts.entity_key }),
 		};
 
 		const meta_result = await backend.metadata.put(meta);
@@ -12213,16 +12486,20 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 	}
 
 	function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
+		const read_bytes = async (): Promise<Result<Uint8Array, CorpusError>> => {
+			const bytes = await try_catch_async(() => data_handle.bytes(), storage_error("data.bytes"));
+			if (!bytes.ok) emit({ type: "error", error: bytes.error });
+			return bytes;
+		};
 		const handle: SnapshotHandleImpl<T> = {
 			async value(): Promise<Result<T, CorpusError>> {
-				const bytes = await data_handle.bytes();
-				const decoded = await try_catch_async(() => codec.decode(bytes), decode_error);
+				const bytes = await read_bytes();
+				if (!bytes.ok) return bytes;
+				const decoded = await try_catch_async(() => codec.decode(bytes.value), decode_error);
 				if (!decoded.ok) emit({ type: "error", error: decoded.error });
 				return decoded;
 			},
-			async bytes(): Promise<Result<Uint8Array, CorpusError>> {
-				return ok(await data_handle.bytes());
-			},
+			bytes: read_bytes,
 		};
 
 		if (codec.decode_stream) {
@@ -12259,10 +12536,10 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return ok({ meta, handle: build_handle(data_result.value) });
 	}
 
-	async function get_latest_handle_impl(): Promise<
-		Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>
-	> {
-		const meta_result = await backend.metadata.get_latest(id);
+	async function get_latest_handle_impl(
+		opts?: LatestOpts,
+	): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+		const meta_result = await backend.metadata.get_latest(id, opts);
 		if (!meta_result.ok) return meta_result;
 
 		const meta = meta_result.value;
@@ -12329,8 +12606,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 				.result();
 		},
 
-		async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-			return pipe(get_latest_handle_impl())
+		async get_latest(opts?: LatestOpts): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+			return pipe(get_latest_handle_impl(opts))
 				.flat_map(async ({ meta, handle }) => {
 					const value_result = await handle.value();
 					return value_result.ok ? ok({ meta, data: value_result.value }) : value_result;
@@ -12406,39 +12683,36 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
  * ```
  */
 export function create_corpus(): CorpusBuilder<{}> {
-	let backend: Backend | null = null;
-	const definitions: StoreDefinition<string, any>[] = [];
-	let observation_types: ObservationTypeDef<unknown>[] = [];
+	return make_builder<{}>({ backend: null, definitions: [], observation_types: [] });
+}
 
-	function make_builder<Stores extends Record<string, Store<any>>>(): CorpusBuilder<Stores> {
-		return {
-			with_backend(b) {
-				backend = b;
-				return make_builder<Stores>();
-			},
+type BuilderState = {
+	readonly backend: Backend | null;
+	readonly definitions: readonly StoreDefinition<string, any>[];
+	readonly observation_types: readonly ObservationTypeDef<unknown>[];
+};
 
-			with_store<Id extends string, T>(definition: StoreDefinition<Id, T>) {
-				definitions.push(definition);
-				return make_builder<Stores & Record<Id, Store<T>>>();
-			},
+function make_builder<Stores extends Record<string, Store<any>>>(
+	state: BuilderState,
+): CorpusBuilderWithBackend<Stores> {
+	return {
+		with_backend: (backend) => make_builder<Stores>({ ...state, backend }),
 
-			with_observations(types) {
-				observation_types = types;
-				return make_builder<Stores>();
-			},
+		with_store: <Id extends string, T>(definition: StoreDefinition<Id, T>) =>
+			make_builder<Stores & Record<Id, Store<T>>>({ ...state, definitions: [...state.definitions, definition] }),
 
-			build(): Corpus<Stores> {
-				if (!backend) {
-					throw new Error(
-						"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
-					);
-				}
-				return build_corpus<Stores>(backend, definitions, observation_types);
-			},
-		};
-	}
+		with_observations: (types) => make_builder<Stores>({ ...state, observation_types: [...types] }),
 
-	return make_builder<{}>();
+		build(): Corpus<Stores> {
+			// unreachable from typed code (CorpusBuilder has no `build`); guards untyped callers
+			if (!state.backend) {
+				throw new Error(
+					"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
+				);
+			}
+			return build_corpus<Stores>(state.backend, state.definitions, state.observation_types);
+		},
+	};
 }
 
 function meta_key(store_id: string, version: string): string {
@@ -12490,20 +12764,27 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 		// and versions must never be compared), then live versions minus in-tx deletes.
 		// Limitation: a failed backend `list` (only reached when this tx deleted a version of the store) ends the
 		// iterator silently, so a listing error looks like "no surviving versions" and `if_changed` writes.
-		async function find_tx_latest(store_id: string): Promise<Result<SnapshotMeta | null, CorpusError>> {
+		// With an entity_key, only that entity's snapshots are candidates.
+		async function find_tx_latest(
+			store_id: string,
+			entity_key?: string,
+		): Promise<Result<SnapshotMeta | null, CorpusError>> {
 			const prefix = `${store_id}:`;
-			const buffered = [...buffered_meta].filter(([k]) => k.startsWith(prefix) && !tombstoned_meta.has(k));
+			const in_scope = (m: SnapshotMeta) => entity_key === undefined || m.entity_key === entity_key;
+			const buffered = [...buffered_meta].filter(
+				([k, m]) => k.startsWith(prefix) && !tombstoned_meta.has(k) && in_scope(m),
+			);
 			const newest_buffered = buffered.at(-1);
 			if (newest_buffered) return ok(newest_buffered[1]);
 
 			if (![...tombstoned_meta].some((k) => k.startsWith(prefix))) {
-				const live = await b.metadata.get_latest(store_id);
+				const live = await b.metadata.get_latest(store_id, entity_opts(entity_key));
 				if (live.ok) return ok(live.value);
 				return live.error.kind === "not_found" ? ok(null) : live;
 			}
 
 			// list is newest-first (insertion-order tie-break), so the first non-tombstoned entry is the latest
-			for await (const m of b.metadata.list(store_id)) {
+			for await (const m of b.metadata.list(store_id, entity_key === undefined ? undefined : { entity_key })) {
 				if (!tombstoned_meta.has(meta_key(store_id, m.version))) return ok(m);
 			}
 			return ok(null);
@@ -12524,7 +12805,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 				const content_hash = await compute_hash(bytes);
 
 				if (opts?.if_changed) {
-					const latest = await find_tx_latest(store.id);
+					const latest = await find_tx_latest(store.id, opts.entity_key);
 					if (!latest.ok) return latest;
 					if (latest.value?.content_hash === content_hash) {
 						return ok({ ...latest.value, deduplicated: true, unchanged: true });
@@ -12560,6 +12841,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 					size_bytes: bytes.length,
 					data_key,
 					tags: opts?.tags,
+					...(opts?.entity_key === undefined ? {} : { entity_key: opts.entity_key }),
 				};
 
 				ops.push({ type: "meta_put", meta });
@@ -12591,6 +12873,13 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 					);
 				}
 				return store.get(version);
+			},
+
+			async get_latest<T>(store: Store<T>, opts?: LatestOpts): Promise<Result<Snapshot<T>, CorpusError>> {
+				const latest = await find_tx_latest(store.id, opts?.entity_key);
+				if (!latest.ok) return latest;
+				if (!latest.value) return err({ kind: "not_found", store_id: store.id, version: "latest" });
+				return handle.get(store, latest.value.version);
 			},
 
 			async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {
@@ -12866,6 +13155,7 @@ export { create_file_backend, recover, type FileBackendConfig } from "./backend/
 export { create_corpus, create_store } from "./corpus.js";
 
 export { copy, type CopyOpts, type CopyProgressEvent, type CopySummary } from "./copy.js";
+export { with_error_tracking, collect_listing, type ErrorTracker } from "./listing.js";
 
 export { define_config, type CorpusCliConfig } from "./cli/config-schema.js";
 
@@ -12904,6 +13194,7 @@ export type {
 	MetadataClient,
 	DataClient,
 	ListOpts,
+	LatestOpts,
 	Backend,
 	BatchOp,
 	Codec,
@@ -12918,6 +13209,7 @@ export type {
 	PutOpts,
 	PutResult,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	Corpus,
 	CorpusError,
 	Result,
@@ -12967,6 +13259,71 @@ export * as testing from "./testing/index.js";
 
 ---
 
+### listing.ts
+
+```typescript
+import type { CorpusError, CorpusEvent, EventHandler, Result } from "./types.js";
+import { err, ok } from "./types.js";
+
+/**
+ * Backends report listing failures (`list`, `list_stores`) as an `error`
+ * event and then end the AsyncIterable — the signature has no error channel.
+ * An `ErrorTracker` records those events so `collect_listing` can turn them
+ * back into a failing Result instead of a silently empty listing.
+ * @category Core
+ * @group Listing
+ */
+export type ErrorTracker = {
+	errors: CorpusError[];
+};
+
+/**
+ * Build an `on_event` handler that records every `error` event into a tracker,
+ * forwarding each event to `on_event` when one is given.
+ * @category Core
+ * @group Listing
+ *
+ * @example
+ * ```ts
+ * const { on_event, tracker } = with_error_tracking()
+ * const backend = create_cloudflare_backend({ d1, r2, on_event })
+ * const stores = await collect_listing(tracker, backend.metadata.list_stores!())
+ * ```
+ */
+export function with_error_tracking(on_event?: EventHandler): { on_event: EventHandler; tracker: ErrorTracker } {
+	const errors: CorpusError[] = [];
+	return {
+		tracker: { errors },
+		on_event: (event: CorpusEvent) => {
+			if (event.type === "error") errors.push(event.error);
+			on_event?.(event);
+		},
+	};
+}
+
+/**
+ * Collect an async listing, failing with the first error the tracker recorded
+ * while iterating. With no tracker this is plain collection.
+ * @category Core
+ * @group Listing
+ */
+export async function collect_listing<T>(
+	tracker: ErrorTracker | undefined,
+	items: AsyncIterable<T>,
+): Promise<Result<T[], CorpusError>> {
+	const seen = tracker?.errors.length ?? 0;
+
+	const collected: T[] = [];
+	for await (const item of items) collected.push(item);
+
+	const failure = tracker?.errors.slice(seen)[0];
+	return failure ? err(failure) : ok(collected);
+}
+
+```
+
+---
+
 ### observations/client.ts
 
 ```typescript
@@ -12975,7 +13332,8 @@ export * as testing from "./testing/index.js";
  * @description Centralized business logic for observations, built on storage adapters.
  */
 
-import type { Result, CorpusError, MetadataClient, ObservationsClient } from "../types.js";
+import { z } from "zod/v4";
+import type { Result, CorpusError, CorpusEvent, MetadataClient, ObservationsClient } from "../types.js";
 import type {
 	Observation,
 	ObservationMeta,
@@ -12983,18 +13341,44 @@ import type {
 	ObservationPutOpts,
 	ObservationQueryOpts,
 	SnapshotPointer,
-	VersionFilter,
 } from "./types.js";
+import type { ObservationRow } from "./schema.js";
 import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
 import { generate_observation_id } from "./utils.js";
 import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
 
-async function apply_version_filter(filter: VersionFilter, store_id: string, version: string): Promise<boolean> {
-	if (typeof filter === "function") return filter(store_id, version);
-	if (filter instanceof Set) return filter.has(version);
-	return filter.includes(version);
+const query_keys = {
+	entity_key: true,
+	type: true,
+	source_store: true,
+	source_version: true,
+	exclude_source_version: true,
+	source_prefix: true,
+	after: true,
+	before: true,
+	created_after: true,
+	created_before: true,
+	limit: true,
+	cursor: true,
+	version_filter: true,
+} as const satisfies Record<keyof ObservationQueryOpts, true>;
+
+const query_keys_schema = z.strictObject(
+	Object.fromEntries(Object.keys(query_keys).map((key) => [key, z.unknown().optional()])),
+);
+
+type Emit = (event: CorpusEvent) => void;
+
+function check_query_keys(opts: ObservationQueryOpts, emit: Emit): boolean {
+	const parsed = query_keys_schema.safeParse(opts);
+	if (parsed.success) return true;
+	emit({
+		type: "error",
+		error: { kind: "validation_error", cause: as_error(parsed.error), message: parsed.error.message },
+	});
+	return false;
 }
 
 /**
@@ -13012,18 +13396,56 @@ function to_storage_opts(opts: ObservationQueryOpts): StorageQueryOpts {
 		created_before: opts.created_before?.toISOString(),
 		observed_after: opts.after?.toISOString(),
 		observed_before: opts.before?.toISOString(),
+		entity_key: opts.entity_key,
 		limit: opts.limit,
 	};
+}
+
+/**
+ * Rows matching opts including version_filter. Set/array filters run in storage (before LIMIT);
+ * function filters scan all candidate rows and stop after `limit` matches.
+ */
+async function* filtered_rows(storage: ObservationsStorage, opts: ObservationQueryOpts): AsyncIterable<ObservationRow> {
+	const filter = opts.version_filter;
+	const storage_opts = to_storage_opts(opts);
+	if (filter === undefined) {
+		yield* storage.query_rows(storage_opts);
+		return;
+	}
+	if (typeof filter !== "function") {
+		const versions = [...filter];
+		if (versions.length === 0) return;
+		yield* storage.query_rows({ ...storage_opts, source_version_in: versions });
+		return;
+	}
+	const { limit, ...unlimited } = storage_opts;
+	let matched = 0;
+	for await (const row of storage.query_rows(unlimited)) {
+		if (!(await filter(row.source_store_id, row.source_version))) continue;
+		yield row;
+		matched += 1;
+		if (limit && matched >= limit) return;
+	}
 }
 
 /**
  * Creates an ObservationsClient from a storage adapter.
  * All business logic (validation, staleness, etc.) is centralized here.
  */
-export function create_observations_client(storage: ObservationsStorage, metadata: MetadataClient): ObservationsClient {
+export function create_observations_client(
+	storage: ObservationsStorage,
+	metadata: MetadataClient,
+	emit: Emit = () => undefined,
+): ObservationsClient {
 	async function get_latest_version(store_id: string): Promise<string | null> {
 		const result = await metadata.get_latest(store_id);
 		return result.ok ? result.value.version : null;
+	}
+
+	async function source_entity_key(source: SnapshotPointer): Promise<Result<string | undefined, CorpusError>> {
+		const meta = await metadata.get(source.store_id, source.version);
+		if (meta.ok) return ok(meta.value.entity_key);
+		return meta.error.kind === "not_found" ? ok(undefined) : meta;
 	}
 
 	return {
@@ -13040,11 +13462,16 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				});
 			}
 
+			const inherited = opts.entity_key === undefined ? await source_entity_key(opts.source) : ok(opts.entity_key);
+			if (!inherited.ok) return inherited;
+			const entity_key = inherited.value;
+
 			const id = generate_observation_id();
 			const row = create_observation_row(id, type.name, opts.source, validation.data, {
 				confidence: opts.confidence,
 				observed_at: opts.observed_at,
 				derived_from: opts.derived_from,
+				entity_key,
 			});
 
 			const result = await storage.put_row(row);
@@ -13059,6 +13486,7 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 				...(opts.observed_at && { observed_at: opts.observed_at }),
 				created_at: new Date(row.created_at),
 				...(opts.derived_from && { derived_from: opts.derived_from }),
+				...(entity_key !== undefined && { entity_key }),
 			};
 
 			return ok(observation);
@@ -13076,25 +13504,15 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async *query(opts: ObservationQueryOpts = {}): AsyncIterable<Observation> {
-			const storage_opts = to_storage_opts(opts);
-
-			for await (const row of storage.query_rows(storage_opts)) {
-				if (opts.version_filter !== undefined) {
-					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
-					if (!included) continue;
-				}
+			if (!check_query_keys(opts, emit)) return;
+			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_observation(row);
 			}
 		},
 
 		async *query_meta(opts: ObservationQueryOpts = {}): AsyncIterable<ObservationMeta> {
-			const storage_opts = to_storage_opts(opts);
-
-			for await (const row of storage.query_rows(storage_opts)) {
-				if (opts.version_filter !== undefined) {
-					const included = await apply_version_filter(opts.version_filter, row.source_store_id, row.source_version);
-					if (!included) continue;
-				}
+			if (!check_query_keys(opts, emit)) return;
+			for await (const row of filtered_rows(storage, opts)) {
 				yield row_to_meta(row);
 			}
 		},
@@ -13115,6 +13533,12 @@ export function create_observations_client(storage: ObservationsStorage, metadat
 		},
 
 		async is_stale(pointer: SnapshotPointer): Promise<boolean> {
+			const source = await metadata.get(pointer.store_id, pointer.version);
+			const entity_key = source.ok ? source.value.entity_key : undefined;
+			if (entity_key !== undefined) {
+				const scoped = await metadata.get_latest(pointer.store_id, { entity_key });
+				return scoped.ok && pointer.version !== scoped.value.version;
+			}
 			const latest = await get_latest_version(pointer.store_id);
 			if (!latest) return false;
 			return pointer.version !== latest;
@@ -13189,6 +13613,7 @@ import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
  * - `observed_at` - When the observation was made (ISO 8601)
  * - `created_at` - When the record was stored (ISO 8601)
  * - `derived_from` - Optional JSON array of SnapshotPointers for provenance
+ * - `entity_key` - Optional entity the observation is about (NULL when unkeyed)
  *
  * @example
  * ```ts
@@ -13222,12 +13647,16 @@ export const corpus_observations = sqliteTable(
 
 		// Derivation lineage
 		derived_from: text("derived_from"),
+
+		// Entity the observation is about (NULL when unkeyed)
+		entity_key: text("entity_key"),
 	},
 	(table) => [
 		index("idx_obs_type").on(table.type),
 		index("idx_obs_source").on(table.source_store_id, table.source_version),
 		index("idx_obs_type_observed").on(table.type, table.observed_at),
 		index("idx_obs_type_source").on(table.type, table.source_store_id),
+		index("idx_obs_type_entity").on(table.type, table.entity_key),
 	],
 );
 
@@ -13261,11 +13690,13 @@ export type StorageQueryOpts = {
 	source_store_id?: string;
 	source_version?: string;
 	exclude_source_version?: string;
+	source_version_in?: string[];
 	source_prefix?: string;
 	created_after?: string; // ISO string
 	created_before?: string; // ISO string
 	observed_after?: string; // ISO string
 	observed_before?: string; // ISO string
+	entity_key?: string;
 	limit?: number;
 };
 
@@ -13314,6 +13745,7 @@ function row_to_base(row: ObservationRow) {
 		...(row.observed_at && { observed_at: new Date(row.observed_at) }),
 		created_at: new Date(row.created_at),
 		...(row.derived_from && { derived_from: JSON.parse(row.derived_from) as SnapshotPointer[] }),
+		...(row.entity_key && { entity_key: row.entity_key }),
 	};
 }
 
@@ -13346,6 +13778,7 @@ export function create_observation_row(
 		confidence?: number;
 		observed_at?: Date;
 		derived_from?: SnapshotPointer[];
+		entity_key?: string;
 	},
 ): ObservationRow {
 	const now = new Date();
@@ -13362,6 +13795,7 @@ export function create_observation_row(
 		observed_at: opts.observed_at?.toISOString() ?? null,
 		created_at: now.toISOString(),
 		derived_from: opts.derived_from ? JSON.stringify(opts.derived_from) : null,
+		entity_key: opts.entity_key ?? null,
 	};
 }
 
@@ -13377,11 +13811,13 @@ const observation_filter_pipeline = create_filter_pipeline<ObservationRow, Stora
 		{ key: "source_store_id", predicate: (r, id) => r.source_store_id === id },
 		{ key: "source_version", predicate: (r, version) => r.source_version === version },
 		{ key: "exclude_source_version", predicate: (r, version) => r.source_version !== version },
+		{ key: "source_version_in", predicate: (r, versions) => (versions as string[]).includes(r.source_version) },
 		{ key: "source_prefix", predicate: (r, prefix) => r.source_version.startsWith(prefix as string) },
 		{ key: "created_after", predicate: (r, after) => r.created_at > (after as string) },
 		{ key: "created_before", predicate: (r, before) => r.created_at < (before as string) },
 		{ key: "observed_after", predicate: (r, after) => r.observed_at !== null && r.observed_at > (after as string) },
 		{ key: "observed_before", predicate: (r, before) => r.observed_at !== null && r.observed_at < (before as string) },
+		{ key: "entity_key", predicate: (r, entity_key) => r.entity_key === (entity_key as string) },
 	],
 	sort: (a, b) => b.created_at.localeCompare(a.created_at),
 });
@@ -13610,6 +14046,8 @@ export type Observation<T = unknown> = {
 	observed_at?: Date;
 	created_at: Date;
 	derived_from?: SnapshotPointer[];
+	/** Entity the observation is about. Inherited from the source snapshot unless set explicitly on put. */
+	entity_key?: string;
 };
 
 /**
@@ -13634,6 +14072,11 @@ export type ObservationPutOpts<T> = {
 	confidence?: number;
 	observed_at?: Date;
 	derived_from?: SnapshotPointer[];
+	/**
+	 * Entity the observation is about. When omitted, inherited from the source
+	 * snapshot's `entity_key`; stored unkeyed if the source is missing or unkeyed.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -13695,9 +14138,18 @@ export type VersionFilter =
  *   exclude_source_version: 'v3',
  *   limit: 1
  * }
+ *
+ * // Newest price observations for one entity
+ * const for_entity: ObservationQueryOpts = {
+ *   type: 'price',
+ *   entity_key: 'https://example.com/pricing',
+ *   limit: 10
+ * }
  * ```
  */
 export type ObservationQueryOpts = {
+	/** Exact match on `entity_key`. Unkeyed observations never match. */
+	entity_key?: string;
 	type?: string | string[];
 	source_store?: string;
 	source_version?: string;
@@ -13722,6 +14174,9 @@ export type ObservationQueryOpts = {
 	 *
 	 * - Set<string> or string[]: Include if version is in the collection
 	 * - Function: Called with (store_id, version), return true to include
+	 *
+	 * Set/array filters run in storage, before `limit`. Function filters scan all
+	 * candidate rows (the storage limit is dropped) and stop after `limit` matches.
 	 */
 	version_filter?: VersionFilter;
 };
@@ -14761,6 +15216,7 @@ import { sqliteTable, text, integer, primaryKey, index } from "drizzle-orm/sqlit
  * - `content_hash` - SHA-256 hash for deduplication
  * - `data_key` - Key to retrieve binary data from R2
  * - `tags` - Optional JSON array of tags
+ * - `entity_key` - Optional entity the snapshot is about (NULL for unkeyed snapshots)
  *
  * @example
  * ```ts
@@ -14784,12 +15240,14 @@ export const corpus_snapshots = sqliteTable(
 		size_bytes: integer("size_bytes").notNull(),
 		data_key: text("data_key").notNull(),
 		tags: text("tags"),
+		entity_key: text("entity_key"),
 	},
 	(table) => [
 		primaryKey({ columns: [table.store_id, table.version] }),
 		index("idx_store_created").on(table.store_id, table.created_at),
 		index("idx_content_hash").on(table.store_id, table.content_hash),
 		index("idx_data_key").on(table.data_key),
+		index("idx_store_entity").on(table.store_id, table.entity_key),
 	],
 );
 
@@ -17648,6 +18106,8 @@ export type SnapshotMeta = {
 	size_bytes: number;
 	data_key: string;
 	tags?: string[];
+	/** Optional entity this snapshot is about (e.g. one page in a shared crawl store). Unkeyed snapshots omit it. */
+	entity_key?: string;
 };
 
 export type Snapshot<T = unknown> = {
@@ -17698,7 +18158,7 @@ export type MetadataClient = {
 	put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>;
 	delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>;
 	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
-	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get_latest: (store_id: string, opts?: LatestOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
 	/**
 	 * Find any version of the store with this content hash. Searches the WHOLE
@@ -17733,6 +18193,13 @@ export type ListOpts = {
 	before?: Date;
 	after?: Date;
 	tags?: string[];
+	/** Exact match on `entity_key`. Unkeyed snapshots never match. */
+	entity_key?: string;
+};
+
+/** Options for `get_latest`: scope the lookup to one entity's snapshots. */
+export type LatestOpts = {
+	entity_key?: string;
 };
 
 /**
@@ -17917,9 +18384,11 @@ export type Store<T> = {
 	readonly codec: Codec<T>;
 	put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
-	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: (opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
-	get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
+	get_latest_handle: (
+		opts?: LatestOpts,
+	) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
 	get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	delete: (version: string) => Promise<Result<void, CorpusError>>;
@@ -17954,6 +18423,11 @@ export type PutOpts = {
 	 * ```
 	 */
 	if_changed?: boolean;
+	/**
+	 * Entity this snapshot is about. Persisted on the snapshot meta; with
+	 * `if_changed` the comparison is against that entity's latest snapshot.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -18043,13 +18517,29 @@ export function define_store<Id extends string, T>(
 	return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn };
 }
 
-/** @internal */
+/**
+ * Builder state before a backend is configured. Has no `build` — call `with_backend()` first.
+ * Every step returns a new, independent builder.
+ * @internal
+ */
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
-	with_backend: (backend: Backend) => CorpusBuilder<Stores>;
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
 	with_store: <Id extends string, T>(
 		definition: StoreDefinition<Id, T>,
 	) => CorpusBuilder<Stores & Record<Id, Store<T>>>;
 	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>;
+};
+
+/**
+ * Builder state once a backend is configured; adds `build`.
+ * @internal
+ */
+export type CorpusBuilderWithBackend<Stores extends Record<string, Store<any>> = {}> = {
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
+	with_store: <Id extends string, T>(
+		definition: StoreDefinition<Id, T>,
+	) => CorpusBuilderWithBackend<Stores & Record<Id, Store<T>>>;
+	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilderWithBackend<Stores>;
 	build: () => Corpus<Stores>;
 };
 
@@ -18087,6 +18577,7 @@ export type TransactionResult<R> = {
 export type TransactionHandle = {
 	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: <T>(store: Store<T>, opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
 	observe: <T>(
 		type: ObservationTypeDef<T>,
@@ -18157,11 +18648,16 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
  * }
  * ```
  */
+export type StrictQueryOpts<O extends ObservationQueryOpts> = O &
+	([Exclude<keyof O, keyof ObservationQueryOpts>] extends [never]
+		? unknown
+		: { [K in Exclude<keyof O, keyof ObservationQueryOpts>]: never });
+
 export type ObservationsClient = {
 	put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>;
 	get: (id: string) => Promise<Result<Observation, CorpusError>>;
-	query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>;
-	query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>;
+	query: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<Observation>;
+	query_meta: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<ObservationMeta>;
 	delete: (id: string) => Promise<Result<void, CorpusError>>;
 	delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>;
 	is_stale: (pointer: SnapshotPointer) => Promise<boolean>;
@@ -18196,9 +18692,13 @@ export type VersionSetManifest = {
 			artifact_ref: string;
 			size_bytes: number;
 			compatibility_date: string;
+			/** Corpus ref of the directory-bundle manifest blob (directory-bundle workers). */
+			bundle_manifest_ref?: string;
 		};
 		assets?: {
 			artifact_ref?: string;
+			/** Corpus ref of the asset manifest blob. */
+			manifest_ref?: string;
 			version_affinity: "pinned" | "none";
 		};
 	};
@@ -18649,6 +19149,7 @@ const snapshot_filter_pipeline = create_filter_pipeline<SnapshotMeta, ListOpts>(
 			key: "tags",
 			predicate: (m, tags) => (tags as string[]).every((tag) => m.tags?.includes(tag)),
 		},
+		{ key: "entity_key", predicate: (m, entity_key) => m.entity_key === (entity_key as string) },
 	],
 	sort: (a, b) => b.created_at.getTime() - a.created_at.getTime(),
 });
@@ -18692,6 +19193,7 @@ export const raw_snapshot_meta_schema = z.object({
 	content_hash: z.string().optional(),
 	content_type: z.string().optional(),
 	size_bytes: z.number().optional(),
+	entity_key: z.string().nullish(),
 });
 
 /**
@@ -18722,6 +19224,7 @@ export function parse_snapshot_meta(raw: z.infer<typeof raw_snapshot_meta_schema
 		content_hash: raw.content_hash ?? "",
 		content_type: raw.content_type ?? "application/octet-stream",
 		size_bytes: raw.size_bytes ?? 0,
+		...(typeof raw.entity_key === "string" ? { entity_key: raw.entity_key } : {}),
 	};
 }
 
@@ -18781,10 +19284,12 @@ export const VersionSetManifestSchema = z.object({
 			artifact_ref: z.string(),
 			size_bytes: z.number().int(),
 			compatibility_date: z.string(),
+			bundle_manifest_ref: z.string().optional(),
 		}),
 		assets: z
 			.object({
 				artifact_ref: z.string().optional(),
+				manifest_ref: z.string().optional(),
 				version_affinity: z.enum(["pinned", "none"]).default("pinned"),
 			})
 			.optional(),

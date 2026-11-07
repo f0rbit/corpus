@@ -43,7 +43,7 @@ Without observations, you have two bad options:
 Observations solve this by making extracted facts a **first-class concept** with:
 
 - **Source pointers** — Every fact knows exactly where it came from (document, version, even JSONPath)
-- **Automatic staleness** — When a source document is updated, observations from the old version are automatically filtered out
+- **Staleness detection** — `is_stale` tells you whether an observation's source has been superseded, so you can skip or re-extract it
 - **Type-safe schemas** — Define observation types with Zod, get full TypeScript inference
 - **Efficient queries** — Filter by type, source, date range, and more
 
@@ -209,18 +209,11 @@ const updatedArticle = {
 
 await corpus.stores.articles.put(updatedArticle)
 
-// Old observations are automatically marked stale!
-// This query only returns observations from the LATEST version:
+// Observations from the old version are still returned by query() —
+// query never filters by staleness. To keep only current ones, check is_stale:
 for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
-  // Only observations from the new version appear here
-}
-
-// To include historical observations:
-for await (const obs of corpus.observations.query({ 
-  type: 'sentiment',
-  include_stale: true 
-})) {
-  // All observations, including from old versions
+  if (await corpus.observations.is_stale(obs.source)) continue
+  // Only observations whose source is still the latest version reach here
 }
 ```
       </div>
@@ -302,7 +295,7 @@ await corpus.observations.put(EntityObservation, {
 
 ### Staleness Detection
 
-Observations automatically track whether their source document has been superseded:
+`is_stale` reports whether an observation's source document has been superseded:
 
 ```typescript
 // Check if a specific observation's source is stale
@@ -315,12 +308,27 @@ const isSuperseded = await corpus.is_superseded(pointer)
 **How it works:**
 1. When you store a new version of a document, it becomes the "latest" version
 2. Observations pointing to older versions are considered "stale"
-3. By default, `query()` excludes stale observations
-4. Use `include_stale: true` to include them for historical analysis
+3. `query()` does **not** filter by staleness — it returns observations from every version
+
+If the source snapshot has an `entity_key`, it is superseded only when a newer snapshot with the **same key** exists in that store; otherwise any newer snapshot in the store supersedes it. See the [Entities guide](/corpus/guides/entities/).
 
 <Aside type="note">
 Staleness is determined per-version, not per-path. If any part of a document changes, all observations from that version become stale.
 </Aside>
+
+#### Current observations only
+
+`query()` has no staleness option. To work with only current observations, query and then check `is_stale`:
+
+```typescript
+async function* current(type: string) {
+  for await (const obs of corpus.observations.query({ type })) {
+    if (!(await corpus.observations.is_stale(obs.source))) yield obs
+  }
+}
+```
+
+Alternatively, `exclude_source_version` and `version_filter` narrow a query to specific source versions.
 
 ### Per-field citations
 
@@ -400,7 +408,7 @@ type ObservationQueryOpts = {
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date
   created_before?: Date        // created_at before this date
-  include_stale?: boolean      // Include stale observations (default: false)
+  entity_key?: string          // Filter by entity key (see the Entities guide)
   limit?: number               // Max results to return
 }
 ```
@@ -499,7 +507,7 @@ When you need to re-analyze documents (e.g., with an improved model), you have t
 <Tabs defaultValue="delete" client:load>
 <TabList client:load>
 <Tab value="delete" client:load>Option A: Delete and re-create</Tab>
-<Tab value="stale" client:load>Option B: Let staleness handle it</Tab>
+<Tab value="stale" client:load>Option B: Keep history</Tab>
 </TabList>
 <TabPanel value="delete" client:load>
 ```typescript
@@ -535,8 +543,8 @@ for (const fact of extract_facts(updated_data)) {
   })
 }
 
-// Old observations remain but are filtered out by default
-// Use include_stale: true for historical analysis
+// Old observations remain and are still returned by query().
+// Use is_stale(obs.source) to tell current from historical.
 ```
 </TabPanel>
 </Tabs>

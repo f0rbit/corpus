@@ -164,6 +164,49 @@ for (const suite of suites) {
 			expect(result.value.value.version).toBe(older.value.version);
 		});
 
+		it("compares against the entity's latest when entity_key is set", async () => {
+			const corpus = make_corpus(suite.make());
+			const first = await corpus.stores.items.put(A, { if_changed: true, entity_key: "A" });
+			await corpus.stores.items.put(B, { if_changed: true, entity_key: "B" });
+			const third = await corpus.stores.items.put(A, { if_changed: true, entity_key: "A" });
+
+			expect(third.ok && third.value.unchanged).toBe(true);
+			if (!first.ok || !third.ok) return;
+			expect(third.value.version).toBe(first.value.version);
+			expect(await list_versions(corpus.stores.items)).toHaveLength(2);
+		});
+
+		it("tx.put with entity_key compares against that entity's tx-visible latest", async () => {
+			const corpus = make_corpus(suite.make());
+			const live_a = await corpus.stores.items.put(A, { entity_key: "A" });
+			await corpus.stores.items.put(B, { entity_key: "B" });
+			if (!live_a.ok) return;
+
+			const result = await corpus.transaction(async (tx) => {
+				const same_as_live = await tx.put(corpus.stores.items, A, { if_changed: true, entity_key: "A" });
+				if (!same_as_live.ok) return same_as_live;
+				const other_entity = await tx.put(corpus.stores.items, A, { if_changed: true, entity_key: "C" });
+				if (!other_entity.ok) return other_entity;
+				const same_as_buffered = await tx.put(corpus.stores.items, A, { if_changed: true, entity_key: "C" });
+				if (!same_as_buffered.ok) return same_as_buffered;
+				return ok({
+					same_as_live: same_as_live.value,
+					other_entity: other_entity.value,
+					same_as_buffered: same_as_buffered.value,
+				});
+			});
+
+			expect(result.ok).toBe(true);
+			if (!result.ok) return;
+			const { same_as_live, other_entity, same_as_buffered } = result.value.value;
+			expect(same_as_live.unchanged).toBe(true);
+			expect(same_as_live.version).toBe(live_a.value.version);
+			expect(other_entity.unchanged).toBe(false);
+			expect(other_entity.entity_key).toBe("C");
+			expect(same_as_buffered.unchanged).toBe(true);
+			expect(same_as_buffered.version).toBe(other_entity.version);
+		});
+
 		it("put_stream reports deduplicated/unchanged and honours if_changed", async () => {
 			const corpus = create_corpus().with_backend(suite.make()).with_store(define_store("lines", text_codec())).build();
 			const first = await corpus.stores.lines.put_stream(chunks(), { if_changed: true });

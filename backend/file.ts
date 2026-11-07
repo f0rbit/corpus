@@ -337,7 +337,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 				return true;
 			}),
 	});
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
 	 * Atomically apply a batch of ops via stage-and-rename.

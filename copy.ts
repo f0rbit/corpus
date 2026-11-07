@@ -222,6 +222,11 @@ async function copy_version(
  * — the `on_progress` callback is the only channel that reports partial
  * progress made before the failure.
  *
+ * `copy()` cannot see source listing failures: a failed `list`/`list_stores`
+ * just ends the iterator and yields a "successful" 0-version summary. Build
+ * the source backend with `with_error_tracking()` and check
+ * `tracker.errors` after `copy()` to detect them.
+ *
  * @param source - Backend to read snapshots from
  * @param dest - Backend to write snapshots to
  * @param opts - Store/tag filters, dry-run, concurrency, progress callback

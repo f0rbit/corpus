@@ -24,6 +24,7 @@ const make_row = (id: string, version: string, created_at: string): ObservationR
 	observed_at: null,
 	created_at,
 	derived_from: null,
+	entity_key: null,
 });
 
 const backends: [string, () => Backend][] = [

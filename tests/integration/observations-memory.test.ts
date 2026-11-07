@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { z } from "zod";
 import { create_memory_backend } from "../../backend/memory.js";
 import { define_observation_type, create_pointer } from "../../observations/index.js";
-import type { ObservationsClient } from "../../types";
+import type { CorpusEvent, ObservationsClient } from "../../types";
 
 const sentiment_type = define_observation_type(
 	"sentiment",
@@ -326,6 +326,24 @@ describe("observations integration - memory backend", () => {
 				expect(meta.type).toBe("sentiment");
 				expect(meta).not.toHaveProperty("content");
 			}
+		});
+
+		it("rejects unknown query keys: yields nothing and emits a validation_error", async () => {
+			const events: CorpusEvent[] = [];
+			const watched = create_memory_backend({ on_event: (e) => events.push(e) }).observations!;
+			await watched.put(simple_type, { source: create_pointer("docs", "v1"), content: { value: "x" } });
+			events.length = 0;
+
+			const bad = { type: "simple", content: { value: "x" } };
+			const rows: unknown[] = [];
+			// @ts-expect-error `content` is not a query key
+			for await (const obs of watched.query(bad)) rows.push(obs);
+
+			expect(rows.length).toBe(0);
+			const errors = events.filter((e) => e.type === "error");
+			expect(errors.length).toBe(1);
+			const [first] = errors;
+			expect(first?.type === "error" && first.error.kind).toBe("validation_error");
 		});
 
 		it("query_meta respects filters", async () => {

@@ -21,6 +21,7 @@ export type {
 	MetadataClient,
 	DataClient,
 	ListOpts,
+	LatestOpts,
 	Backend,
 	Codec,
 	Store,
@@ -28,6 +29,7 @@ export type {
 	PutOpts,
 	PutResult,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	Corpus,
 	CorpusError,
 	Result,
@@ -36,5 +38,7 @@ export type {
 } from "./types.js";
 
 export { ok, err, define_store } from "./types.js";
+
+export { with_error_tracking, collect_listing, type ErrorTracker } from "./listing.js";
 
 export * from "./observations/index.js";

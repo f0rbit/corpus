@@ -8,6 +8,7 @@ import type {
 	BatchOp,
 	Corpus,
 	CorpusBuilder,
+	CorpusBuilderWithBackend,
 	StoreDefinition,
 	Store,
 	Snapshot,
@@ -17,6 +18,7 @@ import type {
 	CorpusError,
 	DataKeyContext,
 	DataHandle,
+	LatestOpts,
 	PutOpts,
 	PutResult,
 	TransactionHandle,
@@ -25,6 +27,7 @@ import type {
 import type { ObservationTypeDef, ObservationPutOpts, Observation, SnapshotPointer } from "./observations/types.js";
 import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
+import { storage_error } from "./backend/errors.js";
 import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
 import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
 import { create_observation_row } from "./observations/storage.js";
@@ -52,6 +55,10 @@ function encode_error(cause: unknown): CorpusError {
 
 function decode_error(cause: unknown): CorpusError {
 	return { kind: "decode_error", cause: to_error(cause) };
+}
+
+function entity_opts(entity_key: string | undefined): LatestOpts | undefined {
+	return entity_key === undefined ? undefined : { entity_key };
 }
 
 /**
@@ -107,7 +114,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		const key_ctx: DataKeyContext = { store_id: id, version, content_hash, tags: opts?.tags };
 
 		if (opts?.if_changed) {
-			const latest = await backend.metadata.get_latest(id);
+			const latest = await backend.metadata.get_latest(id, entity_opts(opts.entity_key));
 			if (latest.ok && latest.value.content_hash === content_hash) {
 				return ok({ ...latest.value, deduplicated: true, unchanged: true });
 			}
@@ -143,6 +150,7 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 			size_bytes: bytes.length,
 			data_key,
 			tags: opts?.tags,
+			...(opts?.entity_key === undefined ? {} : { entity_key: opts.entity_key }),
 		};
 
 		const meta_result = await backend.metadata.put(meta);
@@ -156,16 +164,20 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 	}
 
 	function build_handle(data_handle: DataHandle): SnapshotHandle<T> {
+		const read_bytes = async (): Promise<Result<Uint8Array, CorpusError>> => {
+			const bytes = await try_catch_async(() => data_handle.bytes(), storage_error("data.bytes"));
+			if (!bytes.ok) emit({ type: "error", error: bytes.error });
+			return bytes;
+		};
 		const handle: SnapshotHandleImpl<T> = {
 			async value(): Promise<Result<T, CorpusError>> {
-				const bytes = await data_handle.bytes();
-				const decoded = await try_catch_async(() => codec.decode(bytes), decode_error);
+				const bytes = await read_bytes();
+				if (!bytes.ok) return bytes;
+				const decoded = await try_catch_async(() => codec.decode(bytes.value), decode_error);
 				if (!decoded.ok) emit({ type: "error", error: decoded.error });
 				return decoded;
 			},
-			async bytes(): Promise<Result<Uint8Array, CorpusError>> {
-				return ok(await data_handle.bytes());
-			},
+			bytes: read_bytes,
 		};
 
 		if (codec.decode_stream) {
@@ -202,10 +214,10 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 		return ok({ meta, handle: build_handle(data_result.value) });
 	}
 
-	async function get_latest_handle_impl(): Promise<
-		Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>
-	> {
-		const meta_result = await backend.metadata.get_latest(id);
+	async function get_latest_handle_impl(
+		opts?: LatestOpts,
+	): Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>> {
+		const meta_result = await backend.metadata.get_latest(id, opts);
 		if (!meta_result.ok) return meta_result;
 
 		const meta = meta_result.value;
@@ -272,8 +284,8 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
 				.result();
 		},
 
-		async get_latest(): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
-			return pipe(get_latest_handle_impl())
+		async get_latest(opts?: LatestOpts): Promise<Result<{ meta: SnapshotMeta; data: T }, CorpusError>> {
+			return pipe(get_latest_handle_impl(opts))
 				.flat_map(async ({ meta, handle }) => {
 					const value_result = await handle.value();
 					return value_result.ok ? ok({ meta, data: value_result.value }) : value_result;
@@ -349,39 +361,36 @@ export function create_store<T>(backend: Backend, definition: StoreDefinition<st
  * ```
  */
 export function create_corpus(): CorpusBuilder<{}> {
-	let backend: Backend | null = null;
-	const definitions: StoreDefinition<string, any>[] = [];
-	let observation_types: ObservationTypeDef<unknown>[] = [];
+	return make_builder<{}>({ backend: null, definitions: [], observation_types: [] });
+}
 
-	function make_builder<Stores extends Record<string, Store<any>>>(): CorpusBuilder<Stores> {
-		return {
-			with_backend(b) {
-				backend = b;
-				return make_builder<Stores>();
-			},
+type BuilderState = {
+	readonly backend: Backend | null;
+	readonly definitions: readonly StoreDefinition<string, any>[];
+	readonly observation_types: readonly ObservationTypeDef<unknown>[];
+};
 
-			with_store<Id extends string, T>(definition: StoreDefinition<Id, T>) {
-				definitions.push(definition);
-				return make_builder<Stores & Record<Id, Store<T>>>();
-			},
+function make_builder<Stores extends Record<string, Store<any>>>(
+	state: BuilderState,
+): CorpusBuilderWithBackend<Stores> {
+	return {
+		with_backend: (backend) => make_builder<Stores>({ ...state, backend }),
 
-			with_observations(types) {
-				observation_types = types;
-				return make_builder<Stores>();
-			},
+		with_store: <Id extends string, T>(definition: StoreDefinition<Id, T>) =>
+			make_builder<Stores & Record<Id, Store<T>>>({ ...state, definitions: [...state.definitions, definition] }),
 
-			build(): Corpus<Stores> {
-				if (!backend) {
-					throw new Error(
-						"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
-					);
-				}
-				return build_corpus<Stores>(backend, definitions, observation_types);
-			},
-		};
-	}
+		with_observations: (types) => make_builder<Stores>({ ...state, observation_types: [...types] }),
 
-	return make_builder<{}>();
+		build(): Corpus<Stores> {
+			// unreachable from typed code (CorpusBuilder has no `build`); guards untyped callers
+			if (!state.backend) {
+				throw new Error(
+					"create_corpus().build() called without a backend — chain .with_backend(<backend>) before .build()",
+				);
+			}
+			return build_corpus<Stores>(state.backend, state.definitions, state.observation_types);
+		},
+	};
 }
 
 function meta_key(store_id: string, version: string): string {
@@ -433,20 +442,27 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 		// and versions must never be compared), then live versions minus in-tx deletes.
 		// Limitation: a failed backend `list` (only reached when this tx deleted a version of the store) ends the
 		// iterator silently, so a listing error looks like "no surviving versions" and `if_changed` writes.
-		async function find_tx_latest(store_id: string): Promise<Result<SnapshotMeta | null, CorpusError>> {
+		// With an entity_key, only that entity's snapshots are candidates.
+		async function find_tx_latest(
+			store_id: string,
+			entity_key?: string,
+		): Promise<Result<SnapshotMeta | null, CorpusError>> {
 			const prefix = `${store_id}:`;
-			const buffered = [...buffered_meta].filter(([k]) => k.startsWith(prefix) && !tombstoned_meta.has(k));
+			const in_scope = (m: SnapshotMeta) => entity_key === undefined || m.entity_key === entity_key;
+			const buffered = [...buffered_meta].filter(
+				([k, m]) => k.startsWith(prefix) && !tombstoned_meta.has(k) && in_scope(m),
+			);
 			const newest_buffered = buffered.at(-1);
 			if (newest_buffered) return ok(newest_buffered[1]);
 
 			if (![...tombstoned_meta].some((k) => k.startsWith(prefix))) {
-				const live = await b.metadata.get_latest(store_id);
+				const live = await b.metadata.get_latest(store_id, entity_opts(entity_key));
 				if (live.ok) return ok(live.value);
 				return live.error.kind === "not_found" ? ok(null) : live;
 			}
 
 			// list is newest-first (insertion-order tie-break), so the first non-tombstoned entry is the latest
-			for await (const m of b.metadata.list(store_id)) {
+			for await (const m of b.metadata.list(store_id, entity_key === undefined ? undefined : { entity_key })) {
 				if (!tombstoned_meta.has(meta_key(store_id, m.version))) return ok(m);
 			}
 			return ok(null);
@@ -467,7 +483,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 				const content_hash = await compute_hash(bytes);
 
 				if (opts?.if_changed) {
-					const latest = await find_tx_latest(store.id);
+					const latest = await find_tx_latest(store.id, opts.entity_key);
 					if (!latest.ok) return latest;
 					if (latest.value?.content_hash === content_hash) {
 						return ok({ ...latest.value, deduplicated: true, unchanged: true });
@@ -503,6 +519,7 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 					size_bytes: bytes.length,
 					data_key,
 					tags: opts?.tags,
+					...(opts?.entity_key === undefined ? {} : { entity_key: opts.entity_key }),
 				};
 
 				ops.push({ type: "meta_put", meta });
@@ -534,6 +551,13 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 					);
 				}
 				return store.get(version);
+			},
+
+			async get_latest<T>(store: Store<T>, opts?: LatestOpts): Promise<Result<Snapshot<T>, CorpusError>> {
+				const latest = await find_tx_latest(store.id, opts?.entity_key);
+				if (!latest.ok) return latest;
+				if (!latest.value) return err({ kind: "not_found", store_id: store.id, version: "latest" });
+				return handle.get(store, latest.value.version);
 			},
 
 			async delete<T>(store: Store<T>, version: string): Promise<Result<void, CorpusError>> {

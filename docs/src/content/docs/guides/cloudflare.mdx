@@ -95,6 +95,25 @@ Corpus does not ship migration SQL — you own your migration history. Run `bunx
 ### Upgrading corpus
 
 When a corpus release changes either table, the release notes will say so. After upgrading `@f0rbit/corpus`, rerun `bunx drizzle-kit generate` and apply the new migration; if nothing changed, drizzle-kit reports there is nothing to generate.
+
+#### Upgrading to 0.9.0
+
+0.9.0 adds a nullable `entity_key` column and an index to **both** `corpus_snapshots` and `corpus_observations`. Migrate **before** deploying a Worker on 0.9.0:
+
+```bash
+bun add @f0rbit/corpus@0.9.0
+bunx drizzle-kit generate          # two ADD COLUMN + two CREATE INDEX
+wrangler d1 migrations apply corpus-db
+wrangler deploy                    # only after the migration is applied
+```
+
+<Aside type="caution" title="Migrate before you deploy">
+Corpus selects columns explicitly, so a Worker on 0.9.0 against an un-migrated D1 database fails every snapshot and observation query. The new columns are nullable, so a 0.8.x Worker keeps working against the migrated database during the rollout.
+</Aside>
+
+File and memory backends need no migration — existing `_meta.json` files without `entity_key` read as unkeyed.
+
+`copy()` of entity-keyed snapshots into a destination whose D1 schema is still 0.8.x fails at the destination; migrate the destination first.
       </div>
     </div>
     <div class="step-connector vertical-connector" />
@@ -274,7 +293,7 @@ Corpus automatically deduplicates content by hash. If you store the same data tw
 Create the corpus once and reuse it across requests:
 
 ```typescript
-let corpus: ReturnType<typeof create_corpus>['build'] | null = null
+let corpus: Corpus<{ data: Store<z.infer<typeof DataSchema>> }> | null = null
 
 function getCorpus(env: Env) {
   if (corpus) return corpus

@@ -222,7 +222,7 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 			return had;
 		},
 	});
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	return { metadata, data, observations, on_event, apply_batch };
 }

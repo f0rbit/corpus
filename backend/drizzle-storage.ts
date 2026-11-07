@@ -20,7 +20,8 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
-import type { CorpusError, CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
+import { storage_error } from "./errors.js";
+import type { CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
 import { err, ok } from "../types.js";
 import { parse_snapshot_meta } from "../utils.js";
 
@@ -36,14 +37,6 @@ import { parse_snapshot_meta } from "../utils.js";
 export type DrizzleDb<TRunResult = unknown> = BaseSQLiteDatabase<"async", TRunResult, Record<string, never>>;
 
 type Emit = (event: CorpusEvent) => void;
-
-function to_error(cause: unknown): Error {
-	return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-function storage_error(operation: string): (cause: unknown) => CorpusError {
-	return (cause) => ({ kind: "storage_error", cause: to_error(cause), operation });
-}
 
 function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
 	return parse_snapshot_meta(row);
@@ -62,6 +55,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 		size_bytes: meta.size_bytes,
 		data_key: meta.data_key,
 		tags: meta.tags ? JSON.stringify(meta.tags) : null,
+		entity_key: meta.entity_key ?? null,
 	};
 	return db
 		.insert(corpus_snapshots)
@@ -77,6 +71,7 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 				size_bytes: values.size_bytes,
 				data_key: values.data_key,
 				tags: values.tags,
+				entity_key: values.entity_key,
 			},
 		});
 }
@@ -164,6 +159,10 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				conditions.push(gt(corpus_snapshots.created_at, opts.after.toISOString()));
 			}
 
+			if (opts?.entity_key !== undefined) {
+				conditions.push(eq(corpus_snapshots.entity_key, opts.entity_key));
+			}
+
 			// Every filter must run in SQL: LIMIT applies before any JS-side filter,
 			// so a post-query tag check would under-return (or return nothing).
 			for (const tag of opts?.tags ?? []) {
@@ -196,12 +195,16 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id) {
+		async get_latest(store_id, opts) {
 			const lookup = await try_catch_async(async () => {
 				const rows = await db
 					.select()
 					.from(corpus_snapshots)
-					.where(eq(corpus_snapshots.store_id, store_id))
+					.where(
+						opts?.entity_key === undefined
+							? eq(corpus_snapshots.store_id, store_id)
+							: and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.entity_key, opts.entity_key)),
+					)
 					.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`))
 					.limit(1);
 
@@ -313,6 +316,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			if (opts.exclude_source_version) {
 				conditions.push(ne(corpus_observations.source_version, opts.exclude_source_version));
 			}
+			if (opts.source_version_in !== undefined) {
+				conditions.push(inArray(corpus_observations.source_version, opts.source_version_in));
+			}
 			if (opts.source_prefix) {
 				conditions.push(like(corpus_observations.source_version, `${opts.source_prefix}%`));
 			}
@@ -327,6 +333,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 			}
 			if (opts.observed_before) {
 				conditions.push(lt(corpus_observations.observed_at, opts.observed_before));
+			}
+			if (opts.entity_key !== undefined) {
+				conditions.push(eq(corpus_observations.entity_key, opts.entity_key));
 			}
 
 			let query = db
@@ -385,5 +394,3 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 		},
 	};
 }
-
-export { storage_error, to_error };

@@ -299,6 +299,41 @@ function run_version_set_tests(name: string, factory: BackendFactory, cleanup?: 
 				expect(parsed.builds.assets?.version_affinity).toBe("pinned");
 			});
 
+			it("parses a manifest without bundle refs unchanged (no added keys)", () => {
+				const manifest = make_manifest("pkg-a");
+				const parsed = VersionSetManifestSchema.parse(manifest);
+				expect(parsed).toEqual(manifest);
+				expect("bundle_manifest_ref" in parsed.builds.worker).toBe(false);
+				expect(parsed.builds.assets).toBeUndefined();
+			});
+
+			it("round-trips bundle_manifest_ref and assets.manifest_ref through put/get", async () => {
+				const manifest = make_manifest("pkg-a", {
+					builds: {
+						worker: {
+							artifact_ref: "",
+							size_bytes: 10,
+							compatibility_date: "2025-05-01",
+							bundle_manifest_ref: "bundle-manifests/dir-001",
+						},
+						assets: {
+							version_affinity: "pinned",
+							manifest_ref: "asset-manifests/assets-001",
+						},
+					},
+				});
+				const put = await version_sets.put(manifest);
+				expect(put.ok).toBe(true);
+				if (!put.ok) return;
+
+				const fetched = await version_sets.store.get(put.value.version);
+				expect(fetched.ok).toBe(true);
+				if (!fetched.ok) return;
+				expect(fetched.value.data).toEqual(manifest);
+				expect(fetched.value.data.builds.worker.bundle_manifest_ref).toBe("bundle-manifests/dir-001");
+				expect(fetched.value.data.builds.assets?.manifest_ref).toBe("asset-manifests/assets-001");
+			});
+
 			it("VersionSetManifestSchema defaults do_migrations to []", () => {
 				const parsed = VersionSetManifestSchema.parse({
 					...make_manifest("pkg-a"),

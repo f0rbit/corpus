@@ -16,9 +16,8 @@ import {
 	meta_insert_stmt,
 	obs_delete_stmt,
 	obs_insert_stmt,
-	storage_error,
-	to_error,
 } from "./drizzle-storage.js";
+import { storage_error, to_error } from "./errors.js";
 
 // Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
 // self-contained). Real bindings must assign to these: return types we never read are `unknown`
@@ -143,7 +142,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 	};
 
 	const storage = create_drizzle_observations_storage(db);
-	const observations = create_observations_client(storage, metadata);
+	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
 	 * Apply a batch of ops atomically.

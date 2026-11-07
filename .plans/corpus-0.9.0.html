@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Plan: corpus 0.9.0 — entity scoping and silent-wrong-result fixes</title>
+    <style>
+      :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff; --todo:#6e7681; --doing:#d29922; --done:#2ea043; --blocked:#f85149; --decision:#db61a2; }
+      html, body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 2rem; }
+      main { max-width: 1100px; margin: 0 auto; }
+      h1, h2, h3 { color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+      h1 { font-size: 1.8rem; } h2 { font-size: 1.4rem; margin-top: 2.5rem; }
+      h3 { font-size: 1.1rem; border: none; padding: 0; margin-top: 1.5rem; }
+      h4 { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 0.3em 0; }
+      code, pre { font-family: "SF Mono", Menlo, monospace; font-size: 0.9em; }
+      code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
+      pre { background: var(--panel); padding: 12px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+      .badge.todo { background: var(--todo); color: #fff; } .badge.doing { background: var(--doing); color: #000; }
+      .badge.done { background: var(--done); color: #fff; } .badge.blocked { background: var(--blocked); color: #fff; }
+      .badge.decision { background: var(--decision); color: #fff; } .badge.recommended { background: var(--accent); color: #000; }
+      .root-cause { background: var(--panel); border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0; }
+      .root-cause p { margin: 0.4em 0; }
+      .option { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; opacity: 0.85; }
+      .option.recommended { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+      .option > header { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
+      .option h3 { margin: 0; flex: 1; } .option h4 { margin-top: 0.9rem; }
+      .philosophy-score th:first-child, .philosophy-score td:first-child { width: 35%; }
+      .philosophy-score td:nth-child(2) { font-family: "SF Mono", Menlo, monospace; font-weight: 600; width: 60px; text-align: center; }
+      .recommendation { background: rgba(88,166,255,0.08); border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; margin: 1.5rem 0; }
+      .recommendation h3 { margin-top: 0; border: none; padding: 0; }
+      .task { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+      .task > header { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; }
+      .task h3 { margin: 0; flex: 1; }
+      .meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.4em 1em; font-size: 0.85em; color: var(--muted); margin: 0 0 0.75rem 0; }
+      .meta dt { font-weight: 600; color: var(--text); } .meta dd { margin: 0; }
+      .task section { margin-top: 0.75rem; }
+      .proof { background: rgba(46,160,67,0.08); border-left: 3px solid var(--done); padding: 0.5rem 0.75rem; border-radius: 0 6px 6px 0; }
+      .empty-proof { background: rgba(110,118,129,0.08); border-left: 3px solid var(--todo); padding: 0.5rem 0.75rem; color: var(--muted); font-style: italic; border-radius: 0 6px 6px 0; }
+      .adversary { background: rgba(219,97,162,0.08); border-left: 3px solid var(--decision); padding: 0.5rem 0.75rem; border-radius: 0 6px 6px 0; }
+      .adversary ul { margin: 0.3em 0; padding-left: 1.5em; }
+      table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+      th, td { padding: 0.5em 0.75em; text-align: left; border-bottom: 1px solid var(--border); }
+      th { font-weight: 600; color: var(--muted); font-size: 0.8em; text-transform: uppercase; }
+      a { color: var(--accent); }
+      .phase { margin: 2rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Plan: corpus 0.9.0 — entity scoping and silent-wrong-result fixes</h1>
+        <span class="badge todo">todo</span>
+        <p>Closes the remaining items of <a href="https://github.com/f0rbit/corpus/issues/57">#57</a>. It adds a first-class <code>entity_key</code> to snapshots and observations, so a shared store can hold many entities. Querying by entity and <code>is_stale</code> then work per entity, without dynamic store ids. The release also fixes a family of APIs that return wrong results without any error: <code>version_filter</code> combined with <code>limit</code> returns too few rows, unknown query keys are ignored, <code>DataStorage</code> throws escape, and listing errors end iterators without an error. It replaces the throwing <code>build()</code> with a typed builder, removes the <code>include_stale</code> documentation for a feature that was never built, and adds devpad's two manifest fields. This is a minor release with one consumer migration (two nullable columns). Research: <code>/tmp/corpus-0.9.0-scoping.md</code>. <strong>Approved 2026-11-07, all recommendations accepted.</strong></p>
+      </header>
+
+      <section id="root-cause">
+        <h2>Root cause</h2>
+        <div class="root-cause">
+          <p><strong>Stated goal:</strong> ship the #57 items deferred from 0.8.2 (entity-scoped query and staleness, typed builder, per-field provenance), the <code>version_filter</code>/<code>limit</code> bug and the <code>create_data_client</code> throw mapping.</p>
+          <p><strong>Underlying need:</strong> a crawl → extract → diff pipeline needs one store per <em>source type</em> holding many entities. Corpus's unit of "current" today is the whole store, which forces either one store per entity (losing static store typing) or hand-rolled filtering in JS. Separately, several query paths return incomplete or unfiltered results without saying so. That is worse than an error for a library that promises Results everywhere.</p>
+          <p><strong>Why this matters:</strong> an observation-only <code>entity_key</code> (what #57 literally asks for) can't answer "is my extraction for entity A out of date?". Only the snapshots know which entity a new crawl is about. Scoping entities on observations alone would leave <code>is_stale</code> as wrong as it is today.</p>
+        </div>
+      </section>
+
+      <section id="alternatives">
+        <h2>Alternatives considered</h2>
+        <p>The architectural choice is how to model the entity. The other items are bounded fixes with one clear design each, covered in the phases.</p>
+
+        <article class="option recommended" id="option-1">
+          <header><h3>Option 1: First-class <code>entity_key</code> on snapshots and observations</h3><span class="badge recommended">recommended</span></header>
+          <p>Add a nullable <code>entity_key</code> column (indexed with <code>store_id</code>) to <code>corpus_snapshots</code>, and a nullable <code>entity_key</code> column (indexed with <code>type</code>) to <code>corpus_observations</code>. API changes:</p>
+          <ul>
+            <li><code>store.put(data, { entity_key })</code>, <code>store.get_latest({ entity_key })</code> and <code>store.list({ entity_key })</code>.</li>
+            <li><code>observations.put({ entity_key? })</code>. When omitted, the key is inherited from the source snapshot.</li>
+            <li><code>query({ entity_key })</code>.</li>
+            <li><code>is_stale(pointer)</code> becomes entity-aware without a signature change. If the source snapshot has an <code>entity_key</code>, the pointer is stale when a newer snapshot with the same key exists in that store. Otherwise the current store-wide rule applies.</li>
+          </ul>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Kafka log compaction</strong>: one topic holds many keys, and "latest" is per message key, not per topic. <a href="https://kafka.apache.org/documentation/#compaction">source</a></li>
+            <li><strong>S3 object versioning</strong>: one bucket, version history and "current" per object key. <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html">source</a></li>
+            <li><strong>dbt snapshots</strong>: rows are versioned per <code>unique_key</code> in one table, and validity is scoped per key. <a href="https://docs.getdbt.com/docs/build/snapshots">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul>
+            <li><code>is_stale</code> becomes correct for the issue's case, and existing data with no <code>entity_key</code> keeps today's behaviour exactly.</li>
+            <li>0.8.2's insertion-order tie-break and newest-first <code>list</code> make "latest per entity" a single indexed <code>LIMIT 1</code> query on every backend.</li>
+            <li>One <code>drizzle-kit generate</code> covers both columns, so consumers pay one migration.</li>
+            <li>Inheriting the key at <code>observations.put</code> means the entity is defined once, on the snapshot.</li>
+          </ul>
+          <h4>Cons</h4>
+          <ul>
+            <li>Changes <code>SnapshotMeta</code>, which ripples to <code>raw_snapshot_meta_schema</code> (<code>utils.ts</code>), the file backend's <code>_meta.json</code>, CLI <code>serialize_meta</code> (an additive <code>--json</code> field), <code>copy()</code> (verbatim) and the fake D1 DDL.</li>
+            <li>A 0.9.0 Worker against an un-migrated D1 fails, because drizzle selects columns explicitly. This needs to be loud in the release notes.</li>
+            <li>Inheritance costs one <code>metadata.get</code> per <code>observations.put</code> when the key is omitted.</li>
+            <li>Custom <code>MetadataClient</code> implementations that ignore the new option still compile but return store-wide results.</li>
+          </ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score"><thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>Single source of truth</td><td>5/5</td><td>The entity lives on the snapshot; observations inherit it.</td></tr>
+            <tr><td>Strictest types possible</td><td>4/5</td><td>A typed optional field instead of a tag convention; plain <code>string</code> because consumers own the key space.</td></tr>
+            <tr><td>Compiler catches bugs</td><td>4/5</td><td>The custom-backend gap is runtime-only, so it's documented and contract-tested.</td></tr>
+            <tr><td>Inferred types propagate</td><td>5/5</td><td>Flows through <code>PutResult</code>, the CLI and <code>copy</code> without new annotations.</td></tr>
+            <tr><td>In-memory repositories</td><td>5/5</td><td>Shared filters plus the contract suite cover every backend.</td></tr>
+          </tbody></table>
+        </article>
+
+        <article class="option" id="option-2">
+          <header><h3>Option 2: Reuse snapshot <code>tags</code> for the entity; observation-only column</h3></header>
+          <p>Callers tag snapshots <code>entity:A</code>; <code>is_stale(pointer, { tag })</code> runs <code>list({ tags: [tag], limit: 1 })</code>.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Kubernetes label selectors</strong>. <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/">source</a></li>
+            <li><strong>Prometheus labels</strong>. <a href="https://prometheus.io/docs/practices/naming/#labels">source</a></li>
+          </ul>
+          <h4>Pros</h4><ul><li>No snapshots migration; reuses SQL tag filtering.</li></ul>
+          <h4>Cons</h4><ul><li>Stringly-typed; the entity is stated twice; the caller must restate the tag for <code>is_stale</code>.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score"><thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>Single source of truth</td><td>2/5</td><td>Tag plus column.</td></tr>
+            <tr><td>Strictest types possible</td><td>2/5</td><td><code>string[]</code> convention.</td></tr>
+            <tr><td>Compiler catches bugs</td><td>2/5</td><td>A wrong tag silently falls back to store-wide.</td></tr>
+            <tr><td>Inferred types propagate</td><td>4/5</td><td>Nothing new.</td></tr>
+            <tr><td>In-memory repositories</td><td>5/5</td><td>Already tested.</td></tr>
+          </tbody></table>
+        </article>
+
+        <article class="option" id="option-3">
+          <header><h3>Option 3: Observation-only <code>entity_key</code>, staleness relative to newer observations</h3></header>
+          <p>An observation is stale when a newer observation of the same <code>(type, entity_key)</code> exists.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Event-sourced projections</strong> (EventStoreDB per-stream versions). <a href="https://developers.eventstore.com/server/v24.10/features/streams.html">source</a></li>
+            <li><strong>Prometheus staleness markers</strong>. <a href="https://prometheus.io/docs/prometheus/latest/querying/basics/#staleness">source</a></li>
+          </ul>
+          <h4>Pros</h4><ul><li>One migration, on the observations table only.</li></ul>
+          <h4>Cons</h4><ul><li>Circular: an extraction becomes "stale" only after you've re-extracted, so it can't tell a pipeline that a new crawl needs extracting.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score"><thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>Single source of truth</td><td>3/5</td><td>Two staleness definitions.</td></tr>
+            <tr><td>Strictest types possible</td><td>4/5</td><td>A typed field.</td></tr>
+            <tr><td>Compiler catches bugs</td><td>3/5</td><td>Wrong semantics the types can't catch.</td></tr>
+            <tr><td>Inferred types propagate</td><td>4/5</td><td>Localised.</td></tr>
+            <tr><td>In-memory repositories</td><td>5/5</td><td>Shared pipeline.</td></tr>
+          </tbody></table>
+        </article>
+
+        <article class="option" id="option-4">
+          <header><h3>Option 4 (contrarian): Keep one store per entity, fix dynamic-store typing instead</h3></header>
+          <p>A typed "store family" helper keeps codec typing for dynamic store ids.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Turso database-per-tenant</strong>. <a href="https://turso.tech/multi-tenancy">source</a></li>
+            <li><strong>CouchDB database-per-user</strong>. <a href="https://docs.couchdb.org/en/stable/config/couch-peruser.html">source</a></li>
+          </ul>
+          <h4>Pros</h4><ul><li>No schema change; <code>is_stale</code> already correct per store.</li></ul>
+          <h4>Cons</h4><ul><li>Store ids explode; still no per-entity observation index, so item 3 isn't solved.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score"><thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>Single source of truth</td><td>3/5</td><td>The entity is encoded in a store-id string.</td></tr>
+            <tr><td>Strictest types possible</td><td>4/5</td><td>Typed helper.</td></tr>
+            <tr><td>Compiler catches bugs</td><td>4/5</td><td>The codec stays typed.</td></tr>
+            <tr><td>Inferred types propagate</td><td>4/5</td><td>Fine.</td></tr>
+            <tr><td>In-memory repositories</td><td>4/5</td><td>Operational cost doesn't show in tests.</td></tr>
+          </tbody></table>
+        </article>
+
+        <section class="recommendation">
+          <h3>Recommendation: Option 1 (approved)</h3>
+          <p>Option 1 averages 4.6/5 against 3.0, 3.8 and 3.8. It is the only option where <code>is_stale</code> answers the pipeline's real question ("has entity A's source changed since I extracted?"). Its main cost is a second nullable column in the same migration.</p>
+        </section>
+      </section>
+
+      <section id="affected-areas">
+        <h2>Affected areas</h2>
+        <table>
+          <thead><tr><th>Path</th><th>Change</th></tr></thead>
+          <tbody>
+            <tr><td><code>schema.ts</code>, <code>observations/schema.ts</code></td><td>Nullable <code>entity_key</code> text column plus a plain composite index on each: <code>(store_id, entity_key)</code> and <code>(type, entity_key)</code>. No defaults.</td></tr>
+            <tr><td><code>types.ts</code></td><td><code>SnapshotMeta.entity_key?</code>, <code>PutOpts.entity_key?</code>, <code>ListOpts.entity_key?</code>, <code>MetadataClient.get_latest(store_id, opts?)</code>, <code>Store.get_latest(opts?)</code>. Type-state <code>CorpusBuilder</code>/<code>CorpusBuilderWithBackend</code>. Exact-key generic for query options.</td></tr>
+            <tr><td><code>utils.ts</code></td><td><code>raw_snapshot_meta_schema</code> plus <code>parse_snapshot_meta</code> handle <code>entity_key</code>; <code>filter_snapshots</code> gets an entity filter.</td></tr>
+            <tr><td><code>corpus.ts</code></td><td><code>do_put</code>/<code>tx.put</code> persist <code>entity_key</code>; entity-scoped <code>if_changed</code>; immutable type-state builder.</td></tr>
+            <tr><td><code>backend/base.ts</code></td><td>Entity-aware <code>get_latest</code>/<code>list</code>; <code>create_data_client</code> wraps <code>put</code>/<code>delete</code>/<code>exists</code> in <code>try_catch_async</code>.</td></tr>
+            <tr><td><code>backend/drizzle-storage.ts</code></td><td>Snapshot and observation SQL on <code>entity_key</code>; <code>inArray</code> for set/array <code>version_filter</code>; insert statements include the column.</td></tr>
+            <tr><td><code>backend/{file,memory,layered,cloudflare,remote}.ts</code></td><td>Thread the new option through. File rows without the field read as absent.</td></tr>
+            <tr><td><code>observations/{types,client,storage}.ts</code></td><td>Put inheritance, <code>entity_key</code> filter, entity-aware <code>is_stale</code>, <code>source_version_in</code>, client-side limit for function filters, unknown-key rejection.</td></tr>
+            <tr><td><code>cli/backend-errors.ts</code> → new root <code>listing.ts</code></td><td>Core <code>collect_listing</code> helper; the CLI imports it.</td></tr>
+            <tr><td><code>cli/meta.ts</code>, <code>cli/commands/versions.ts</code></td><td><code>serialize_meta</code> emits <code>entity_key</code> when set; <code>versions --entity &lt;key&gt;</code>.</td></tr>
+            <tr><td><code>version-set.ts</code></td><td>Optional <code>builds.worker.bundle_manifest_ref</code> and <code>builds.assets.manifest_ref</code> (D5).</td></tr>
+            <tr><td><code>tests/fakes/cloudflare.ts</code></td><td>No change expected; confirm <code>table_ddl</code> accepts the new indexes.</td></tr>
+            <tr><td><code>docs/**</code>, <code>README.md</code>, <code>AGENTS.md</code></td><td>Entities guide; <code>include_stale</code> claims removed; upgrade guide; builder; <code>collect_listing</code>.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture-decisions">
+        <h2>Architecture decisions</h2>
+        <ul>
+          <li><strong>Entity staleness is source-driven and automatic for keyed data</strong> (D2). <code>is_stale(pointer)</code> keeps its signature: it reads the source snapshot's meta, and if that meta has an <code>entity_key</code> it compares against <code>get_latest(store, { entity_key })</code>. Unkeyed snapshots behave exactly as in 0.8.x. <code>Corpus.is_superseded</code> follows automatically.</li>
+          <li><strong>Explicit observation <code>entity_key</code> may differ from the source's</strong> (D1): it overrides inheritance, so one page can yield per-entity observations. <code>is_stale</code> still keys off the source snapshot's entity; the JSDoc says so.</li>
+          <li><strong><code>if_changed</code> with an <code>entity_key</code></strong> compares against that entity's latest.</li>
+          <li><strong><code>include_stale</code>: delete the claims.</strong> It never existed; building it would change default query semantics. The guide gets a "current observations only" recipe instead.</li>
+          <li><strong><code>version_filter</code> with <code>limit</code>.</strong> Set/array → <code>StorageQueryOpts.source_version_in</code> (SQL <code>inArray</code>, shared JS filter), before <code>LIMIT</code>. Function filter → the client drops the storage limit and applies it after filtering; the JSDoc notes the scan cost.</li>
+          <li><strong>Unknown query keys</strong> (D3): exact-keys generic at compile time; at runtime a strict <code>zod/v4</code> key check emits a <code>validation_error</code> event through the backend's <code>on_event</code> and yields nothing (matches <code>list()</code>). No new throw site.</li>
+          <li><strong>Typed builder.</strong> <code>create_corpus()</code> returns a builder without <code>build</code>; <code>with_backend</code> returns <code>CorpusBuilderWithBackend&lt;Stores&gt;</code>. Each step returns a new builder over copied state (today <code>definitions.push</code> at <code>corpus.ts:364</code> shares one closure, so branches leak). The runtime throw stays for untyped callers.</li>
+          <li><strong>Listing errors.</strong> <code>collect_listing(tracker, iterable)</code> → <code>Result&lt;T[]&gt;</code>, built on <code>on_event</code>; the CLI switches to it.</li>
+          <li><strong>Per-field provenance (#57 item 10): won't-do.</strong> The content-schema pattern from the 0.8.2 docs already covers it.</li>
+          <li><strong>File-backend layout fix stays deferred</strong> (D4).</li>
+          <li><strong>Devpad manifest fields</strong> (D5): add both as optional, additive fields.</li>
+        </ul>
+      </section>
+
+      <section id="phases">
+        <h2>Phases</h2>
+        <p>Executed by the build stage: background coders write diffs only. Overlapping work uses per-coder worktrees, integrated linearly by the reviewer, one commit per fix. Verification, the adversary checklist and proof are captured once per phase. ONE PR, closing #57, opens at the end of phase 3.</p>
+
+        <section class="phase" id="phase-1">
+          <header><h3>Phase 1: Entity scoping</h3><span class="badge done">todo</span></header>
+          <p>Adds <code>entity_key</code> end to end. This is the only phase with a schema change.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt><dd>see devpad (created on approval)</dd>
+            <dt>Mode</dt><dd>1.1 first (worktree). 1.2 starts after 1.1 is committed, because <code>is_stale</code> and inheritance depend on the snapshot API. 1.3 runs in parallel with 1.2 on disjoint files.</dd>
+          </dl>
+
+          <article class="task" id="task-1-1">
+            <header><h3>Task 1.1: Snapshot <code>entity_key</code></h3><span class="badge done">todo</span></header>
+            <dl class="meta">
+              <dt>Files</dt><dd><code>schema.ts</code>, <code>types.ts</code>, <code>utils.ts</code>, <code>corpus.ts</code>, <code>backend/{base,drizzle-storage,file,layered}.ts</code>, <code>tests/integration/backend-contract.test.ts</code>, <code>tests/integration/put-if-changed.test.ts</code></dd>
+              <dt>Dependencies</dt><dd>none</dd>
+            </dl>
+            <section data-kind="scope"><h4>Scope</h4>
+              <p>Column plus <code>(store_id, entity_key)</code> index. <code>PutOpts.entity_key</code> persisted by <code>do_put</code>/<code>tx.put</code>. <code>ListOpts.entity_key</code> and <code>get_latest(store_id, { entity_key }?)</code> on <code>MetadataClient</code>, <code>Store</code> and the tx handle; the tx-visible latest respects the entity. SQL condition before <code>LIMIT</code>; JS via <code>filter_snapshots</code>. Entity-scoped <code>if_changed</code>. Contract tests: interleaved A/B puts, so latest-per-entity is correct with insertion-order ties; a null key never matches a keyed filter; store-wide <code>get_latest</code> unchanged. Covers memory, file, cloudflare-fake and remote-fake.</p>
+            </section>
+            <section data-kind="acceptance"><h4>Acceptance</h4>
+              <pre>bun test tests/integration/backend-contract.test.ts tests/integration/put-if-changed.test.ts
+bun run typecheck</pre>
+              <p>Expected: new entity tests pass on all four backends; existing tests pass unmodified.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-2">
+            <header><h3>Task 1.2: Observation <code>entity_key</code> and entity-aware staleness</h3><span class="badge done">todo</span></header>
+            <dl class="meta">
+              <dt>Files</dt><dd><code>observations/{schema,types,client,storage}.ts</code>, observation part of <code>backend/drizzle-storage.ts</code>, observation parts of <code>backend/{file,cloudflare,layered}.ts</code>, <code>tests/integration/observations-*.test.ts</code></dd>
+              <dt>Dependencies</dt><dd>1.1 committed</dd>
+            </dl>
+            <section data-kind="scope"><h4>Scope</h4>
+              <p>Column plus <code>(type, entity_key)</code> index, threaded through <code>to_storage_opts</code> → <code>StorageQueryOpts</code> plus the filter table → SQL. <code>put</code> inherits the source snapshot's key when omitted; a missing source stores no key and doesn't fail. An explicit key overrides inheritance (D1). <code>Observation</code>/<code>ObservationMeta</code> expose the field. <code>is_stale</code> as in Architecture decisions. Tests: the #57 item 4 repro (a put about B doesn't stale A; a put about A does), unkeyed fallback, inheritance, override, and <code>query({ entity_key })</code> with <code>limit</code>.</p>
+            </section>
+            <section data-kind="acceptance"><h4>Acceptance</h4>
+              <pre>bun test tests/integration/observations-
+bun run typecheck</pre>
+              <p>Expected: the #57 item 3 and 4 repro lines invert; observation suites green on memory, file and drizzle.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-3">
+            <header><h3>Task 1.3: CLI, docs and migration guide</h3><span class="badge done">todo</span></header>
+            <dl class="meta">
+              <dt>Files</dt><dd><code>cli/meta.ts</code>, <code>cli/commands/versions.ts</code>, <code>tests/integration/cli-read.test.ts</code>, <code>docs/src/content/docs/guides/{observations,cloudflare}.mdx</code>, <code>docs/src/content/docs/api/core/observations.mdx</code>, new <code>docs/src/content/docs/guides/entities.mdx</code> plus sidebar entry</dd>
+              <dt>Dependencies</dt><dd>1.1 API shape (parallel with 1.2)</dd>
+            </dl>
+            <section data-kind="scope"><h4>Scope</h4>
+              <p><code>serialize_meta</code> emits <code>entity_key</code> only when set, so <code>--json</code> is byte-identical for unkeyed data. <code>versions --entity</code>. Entities guide covering the #57 shared-store crawl pattern. Delete every <code>include_stale</code> and "excluded by default" claim (guide lines 46, 212–224, 318–319, 403, 539; API page line 210) and replace them with the recipe. "Upgrading to 0.9.0" in the cloudflare guide: generate and apply the migration BEFORE deploying a Worker on 0.9.0.</p>
+            </section>
+            <section data-kind="acceptance"><h4>Acceptance</h4>
+              <pre>bun test tests/integration/cli-read.test.ts
+bun run docs:build
+grep -rn "include_stale" docs/src README.md *.ts observations</pre>
+              <p>Expected: CLI tests pass, docs build clean, the grep finds nothing.</p>
+            </section>
+          </article>
+
+          <section data-kind="verification"><h4>Phase verification</h4>
+            <pre>bun run gate
+bun run test:zod3
+# migration proof: pack the tarball; in a scratch app generate a drizzle-kit migration for 0.8.2,
+# then for this build; the second diff has exactly two ADD COLUMN plus two CREATE INDEX; apply via
+# wrangler d1 execute --local, then put/get_latest/is_stale against wrangler dev
+# compat: open a 0.8.2-written file-backend directory; reads and entity-less get_latest unchanged</pre>
+            <p>Expected: all green; additive-only migration diff; old file-backend data reads cleanly.</p>
+          </section>
+
+          <section data-kind="adversary"><h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary"><ul>
+              <li>No <code>any</code>; <code>entity_key</code> is omitted rather than <code>undefined</code> in file-backend JSON and <code>--json</code> output.</li>
+              <li>The entity filter is SQL before <code>LIMIT</code> on drizzle; a <code>limit: 1</code> interleaved-entities test proves it.</li>
+              <li>Unkeyed data: <code>is_stale</code>, <code>get_latest</code>, <code>list</code> identical to 0.8.2; no old test expectation modified.</li>
+              <li><code>is_stale</code> on a pointer whose source snapshot was deleted behaves as in 0.8.2, not an error.</li>
+              <li>Tx path: <code>if_changed</code> plus <code>entity_key</code> inside <code>corpus.transaction</code> sees in-tx puts for that entity only.</li>
+              <li>Remote backend (no <code>apply_batch</code>): insert statements include the column via the shared drizzle layer.</li>
+            </ul></div>
+          </section>
+
+          <section data-kind="proof"><h4>Proof</h4><div class="proof">
+<p>Commits on <code>feat/entity-scoping</code>: <code>7f86d18</code> (1.1 snapshot entity_key), <code>53426cd</code> (1.3 CLI + docs), <code>0056e5a</code> (1.2 observation entity_key + is_stale), <code>7cdfbaa</code> (AGENTS.md + schema docs).</p>
+<p>Gate: 1117 tests pass, 0 fail, lint 0 errors; <code>bun run test:zod3</code>: 1117 pass; <code>docs:build</code> green. Mutation checks: moving the snapshot entity filter and the observation entity filter from SQL to JS makes the <code>limit: 1</code> interleaved tests fail on drizzle backends.</p>
+<p>Migration (0.8.2 to this build, drizzle-kit generate in a scratch app): exactly
+<pre>ALTER TABLE `corpus_observations` ADD `entity_key` text;
+CREATE INDEX `idx_obs_type_entity` ON `corpus_observations` (`type`,`entity_key`);
+ALTER TABLE `corpus_snapshots` ADD `entity_key` text;
+CREATE INDEX `idx_store_entity` ON `corpus_snapshots` (`store_id`,`entity_key`);</pre>
+Both migrations applied with <code>wrangler d1 migrations apply --local</code>; a Worker under <code>wrangler dev --local</code> on the packed tarball: keyed puts, <code>if_changed</code> unchanged per entity, <code>get_latest({entity_key})</code> A=a2 / B=b1 / store-wide=a2, observation inherited key A, <code>is_stale</code> a1=true / b1=false, <code>query({entity_key:"A"})</code> returned only A.</p>
+<p>File-backend compat: data and observations written by npm 0.8.2, read by this build: list, get_latest, observation query and is_stale output byte-identical; no <code>entity_key</code> property on unkeyed records.</p>
+</div></section>
+        </section>
+
+        <section class="phase" id="phase-2">
+          <header><h3>Phase 2: Query correctness and API hardening</h3><span class="badge done">done</span></header>
+          <p>Six independent fixes, each one commit.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt><dd>see devpad (created on approval)</dd>
+            <dt>Mode</dt><dd>Parallel worktrees, one per task. 2.1 and 2.2 both touch <code>observations/client.ts</code>/<code>types.ts</code>; integrate 2.1 → 2.2.</dd>
+          </dl>
+
+          <article class="task" id="task-2-1">
+            <header><h3>Task 2.1: <code>version_filter</code> applied before <code>limit</code></h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>observations/{client,storage}.ts</code>, observation part of <code>backend/drizzle-storage.ts</code>, new <code>tests/integration/observations-version-filter.test.ts</code></dd><dt>Dependencies</dt><dd>Phase 1</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p>Set/array → <code>source_version_in</code> (<code>inArray</code> plus JS filter row); an empty set returns no rows without querying. A function filter drops the storage <code>limit</code> and limits client-side. Fixes devpad <code>task_b7361eee</code>.</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/observations-version-filter.test.ts</pre><p>Expected: 10 rows, a filter matching the 3 oldest, <code>limit: 2</code> → exactly 2 rows for set, array and function filters on memory, file and drizzle.</p></section>
+          </article>
+
+          <article class="task" id="task-2-2">
+            <header><h3>Task 2.2: Reject unknown observation query keys</h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>observations/types.ts</code>, <code>observations/client.ts</code>, <code>types.ts</code> (<code>ObservationsClient</code>), <code>tests/unit/observation-query-types.test.ts</code>, <code>tests/integration/observations-memory.test.ts</code></dd><dt>Dependencies</dt><dd>2.1 (integration order)</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p>Exact-keys generic on <code>query</code>/<code>query_meta</code> with a <code>@ts-expect-error</code> test using the issue's variable-passing repro. Runtime: strict <code>zod/v4</code> key check; on failure emit a <code>validation_error</code> event via <code>on_event</code> and yield nothing (D3).</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun run typecheck
+bun test tests/integration/observations-memory.test.ts</pre><p>Expected: the extra-key type test errors as expected; the runtime case emits the event and yields 0 rows; the #57 repro no longer prints "2 of 2".</p></section>
+          </article>
+
+          <article class="task" id="task-2-3">
+            <header><h3>Task 2.3: Immutable type-state builder</h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>corpus.ts</code>, <code>types.ts</code>, <code>index.ts</code>, <code>tests/unit/builder-types.test.ts</code>, <code>docs/src/content/docs/api/core/create-corpus.mdx</code></dd><dt>Dependencies</dt><dd>none</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p><code>CorpusBuilder&lt;S&gt;</code> without <code>build</code>; <code>CorpusBuilderWithBackend&lt;S&gt;</code> with it. Every step returns a new builder over copied state. Tests: <code>@ts-expect-error create_corpus().build()</code>; two branches from one base don't see each other's stores; store typing infers through any step order.</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun run typecheck
+bun test tests/unit/builder-types.test.ts</pre><p>Expected: the type test passes; the branching test fails against the old builder and passes now.</p></section>
+          </article>
+
+          <article class="task" id="task-2-4">
+            <header><h3>Task 2.4: <code>create_data_client</code> maps throws to Results</h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>backend/base.ts</code>, <code>tests/integration/data-client-errors.test.ts</code>, new throwing fake <code>DataStorage</code> in <code>tests/fakes/</code></dd><dt>Dependencies</dt><dd>none</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p>Wrap <code>put</code>/<code>delete</code>/<code>exists</code> (and the handle's <code>bytes()</code> if not already) in <code>try_catch_async</code> → <code>storage_error</code>. Fixes devpad <code>task_13966fd5</code>.</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/data-client-errors.test.ts</pre><p>Expected: every method returns <code>err({ kind: "storage_error" })</code> against the throwing fake; nothing rejects.</p></section>
+          </article>
+
+          <article class="task" id="task-2-5">
+            <header><h3>Task 2.5: Core <code>collect_listing</code> helper</h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd>new <code>listing.ts</code>, <code>index.ts</code>, <code>cloudflare.ts</code> shim, <code>cli/backend-errors.ts</code>, <code>copy.ts</code> JSDoc, <code>tests/integration/listing-errors.test.ts</code>, docs</dd><dt>Dependencies</dt><dd>none</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p><code>with_error_tracking(backend_config)</code> wraps <code>on_event</code>; <code>collect_listing(tracker, iterable)</code> → <code>Result&lt;T[], CorpusError&gt;</code>. The CLI switches to it. Fixes devpad <code>task_b9d317c7</code>.</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/listing-errors.test.ts tests/integration/cli-entrypoint.test.ts</pre><p>Expected: a failing fake-D1 listing yields <code>err</code> via the library helper; CLI bad-token behaviour unchanged (exit 1).</p></section>
+          </article>
+
+          <article class="task" id="task-2-6">
+            <header><h3>Task 2.6: Devpad manifest fields in <code>VersionSetManifestSchema</code></h3><span class="badge done">done</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>version-set.ts</code>, <code>tests/integration/version-set*.test.ts</code>, version-set docs page</dd><dt>Dependencies</dt><dd>none</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p>Add optional <code>builds.worker.bundle_manifest_ref</code> and <code>builds.assets.manifest_ref</code>, shaped as devpad's local extension defines them (read <code>~/dev/devpad/packages/cli/src/pipelines-artifacts-helpers.ts:80-95</code> and <code>packages/pipelines/src/providers/corpus-providers.ts</code>; do not edit devpad). Keep <code>_assert_manifest_shape</code> holding. Round-trip tests with and without the fields; old manifests still parse.</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>bun test tests/integration/version-set</pre><p>Expected: old manifests parse unchanged; new fields round-trip.</p></section>
+          </article>
+
+          <section data-kind="verification"><h4>Phase verification</h4><pre>bun run gate
+bun run test:zod3</pre><p>Expected: both green after all six units are integrated.</p></section>
+
+          <section data-kind="adversary"><h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary"><ul>
+              <li>The exact-keys generic still accepts a fully-typed <code>ObservationQueryOpts</code> variable and spread objects with only known keys.</li>
+              <li>The client-side limit for function filters stops pulling rows once it has <code>limit</code> matches and doesn't over-return.</li>
+              <li>The builder runtime throw remains and is documented in the <code>eslint.config.ts</code> override.</li>
+              <li>No new <code>CorpusError</code> variant; reuse <code>validation_error</code>/<code>storage_error</code>.</li>
+              <li><code>collect_listing</code> without a tracker degrades like <code>_test_backend</code> today.</li>
+              <li>Manifest fields are optional; devpad's existing manifests validate.</li>
+            </ul></div>
+          </section>
+
+          <section data-kind="proof"><h4>Proof</h4><div class="proof">
+<p>Commits on <code>feat/entity-scoping</code> (worktree-gated, cherry-picked, gate re-run after each): <code>ecef116</code> (2.1), <code>8ec170d</code> (2.2), <code>4f15813</code> (2.3), <code>7740fcc</code> (2.4), <code>d913acf</code> (2.5), <code>f1be23b</code> (2.6), <code>eec1c32</code> (llms regen).</p>
+<p>Gate after all six: 0 fail, lint 0 errors; <code>bun run test:zod3</code>: 1164 pass, 0 fail; <code>docs:build</code> green (llms files regenerated).</p>
+<p>Non-vacuity: reverting 2.1 to the post-limit JS filter fails 9 of 15 new tests; removing the strict-key check fails the memory runtime test; the old builder fails both branching tests; unwrapped handle <code>bytes()</code> fails both new handle tests.</p>
+<p>Fixes en route: 2.2 zod keys needed <code>.optional()</code> (25 existing tests failed), and <code>StrictQueryOpts</code> was reshaped so a no-overlap typo key is rejected (the <code>Record</code> intersection defeated weak-type detection); 2.4 also wraps handle <code>bytes()</code> in corpus.ts and extracts <code>backend/errors.ts</code>.</p>
+<p>Adversary: typed variable and known-key spread tests pass type-check; function filter stops at <code>limit</code> and is covered with and without a limit; builder throw and eslint exemption intact; no new <code>CorpusError</code> variant; <code>collect_listing</code> without a tracker returns <code>ok([])</code> (tested); old manifest parses with no added keys (tested).</p>
+</div></section>
+        </section>
+
+        <section class="phase" id="phase-3">
+          <header><h3>Phase 3: Release 0.9.0</h3><span class="badge todo">todo</span></header>
+          <p>Release notes with migration steps, the PR, publish, and consumer checks.</p>
+          <dl class="meta"><dt>Devpad task</dt><dd>see devpad (created on approval)</dd><dt>Mode</dt><dd>Reviewer only, sequential.</dd></dl>
+
+          <article class="task" id="task-3-1">
+            <header><h3>Task 3.1: Version bump, notes, PR, publish</h3><span class="badge todo">todo</span></header>
+            <dl class="meta"><dt>Files</dt><dd><code>package.json</code>, <code>README.md</code>, <code>AGENTS.md</code>, <code>/tmp/corpus-release-0.9.0.md</code></dd><dt>Dependencies</dt><dd>Phases 1–2</dd></dl>
+            <section data-kind="scope"><h4>Scope</h4><p>Bump to 0.9.0. Re-run the #57 repro on the packed tarball; every line inverts except item 5, which becomes a type error. PR body "Closes #57" (item 10 closed as won't-do with reasoning). Release notes lead with "migrate D1 before deploying" and list the BREAKING section. <code>release-preflight 0.9.0</code>, then ASK THE USER before <code>gh release create</code>, then <code>ship --release v0.9.0</code> (waits on npm).</p></section>
+            <section data-kind="acceptance"><h4>Acceptance</h4><pre>~/.config/opencode/tools/release-preflight 0.9.0
+npm view @f0rbit/corpus@0.9.0 version</pre><p>Expected: preflight passes; registry shows 0.9.0; <code>bunx @f0rbit/corpus@0.9.0 --help</code> exits 0.</p></section>
+          </article>
+
+          <section data-kind="verification"><h4>Phase verification</h4><pre>bun run gate
+# consumer smoke, read-only: typecheck groundwork and vault against the packed tarball</pre><p>Expected: both consumers typecheck, or each break is listed in the notes with its fix.</p></section>
+
+          <section data-kind="adversary"><h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary"><ul>
+              <li>Release notes give exact migration commands and their order.</li>
+              <li>Consumers on <code>latest</code> using D1 (vault, anthropic-search, anthropic-summarize, budget-sync) are named as needing a migration.</li>
+              <li>The "<code>copy()</code> into a 0.8.x-schema destination fails" note is present.</li>
+            </ul></div>
+          </section>
+
+          <section data-kind="proof"><h4>Proof</h4><div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div></section>
+        </section>
+      </section>
+
+      <section id="breaking">
+        <h2>Breaking changes</h2>
+        <ul>
+          <li><strong>BREAKING (database):</strong> both tables gain a nullable <code>entity_key</code> column plus an index. D1 consumers must run <code>drizzle-kit generate</code> and apply the migration <em>before</em> deploying 0.9.0. File and memory backends need no migration.</li>
+          <li><strong>BREAKING (types):</strong> <code>create_corpus()</code> doesn't expose <code>build</code> until <code>with_backend</code>; code annotated <code>CorpusBuilder&lt;S&gt;</code> that calls <code>build()</code> must use <code>CorpusBuilderWithBackend&lt;S&gt;</code>.</li>
+          <li><strong>BREAKING (types):</strong> <code>observations.query</code>/<code>query_meta</code> reject extra keys at compile time, even through a variable.</li>
+          <li><strong>BREAKING (custom backends):</strong> <code>MetadataClient.get_latest</code> gains optional <code>opts</code>; <code>ListOpts</code> gains <code>entity_key</code>. Third-party clients compile but must honour the option.</li>
+          <li><strong>Behaviour:</strong> branching one builder no longer leaks stores between branches.</li>
+          <li><strong>Behaviour:</strong> <code>copy()</code> of keyed data into a 0.8.x-schema destination fails at the destination.</li>
+          <li><strong>Docs only:</strong> <code>include_stale</code> and "stale excluded by default" claims removed; neither ever worked.</li>
+        </ul>
+      </section>
+
+      <section id="out-of-scope">
+        <h2>Out of scope</h2>
+        <ul>
+          <li><strong>Per-field provenance (#57 item 10):</strong> won't-do; close devpad <code>task_56fac109</code>.</li>
+          <li><strong>File-backend collision-free data-key layout</strong> (<code>task_b3439360</code>): deferred (D4).</li>
+          <li><strong>Automatic stale filtering in <code>query</code></strong>: deliberately not built.</li>
+          <li><strong><code>MetadataClient.count</code></strong> for <code>stores --counts</code>.</li>
+          <li><strong>Coverage 80% CI gate</strong> (<code>task_c453a4e2</code>).</li>
+          <li><strong>Live R2 validation</strong> (<code>task_db6fd04e</code>, <code>task_a8b27eac</code>).</li>
+        </ul>
+      </section>
+
+      <section id="agents-md-updates">
+        <h2>AGENTS.md updates</h2>
+        <ul>
+          <li>Entity scoping: defined on the snapshot; observations inherit (explicit override allowed); <code>is_stale</code> entity-aware only for keyed sources; new snapshot filter options must be SQL before <code>LIMIT</code>.</li>
+          <li>Migration-order rule for any future column: release notes must say "migrate before deploy".</li>
+          <li>Builder: immutable and type-state; why the runtime throw remains.</li>
+          <li>How to add an <code>ObservationQueryOpts</code> key: type, exact-keys generic, runtime strict schema, storage, SQL.</li>
+          <li>Replace the CLI-only <code>collect_list</code> gotcha with the core <code>collect_listing</code> helper.</li>
+          <li>Update "Schema / migrations": tables do change across releases; point at the upgrade guide.</li>
+        </ul>
+      </section>
+
+      <section id="open-questions">
+        <h2>Resolved decisions (2026-11-07)</h2>
+        <ol>
+          <li><strong>D1:</strong> explicit observation <code>entity_key</code> overrides inheritance; staleness follows the source snapshot.</li>
+          <li><strong>D2:</strong> entity-aware <code>is_stale</code> is automatic for keyed sources.</li>
+          <li><strong>D3:</strong> unknown runtime query keys → <code>validation_error</code> event, zero rows.</li>
+          <li><strong>D4:</strong> file-backend layout fix deferred.</li>
+          <li><strong>D5:</strong> devpad manifest fields added (task 2.6).</li>
+          <li>Per-field provenance closed as won't-do.</li>
+          <li><code>include_stale</code> docs deleted.</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

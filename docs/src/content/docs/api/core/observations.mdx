@@ -207,14 +207,31 @@ type ObservationQueryOpts = {
   before?: Date                // observed_at before this date
   created_after?: Date         // created_at after this date
   created_before?: Date        // created_at before this date
-  include_stale?: boolean      // Include stale observations (default: false)
+  entity_key?: string          // Filter by entity key
   limit?: number               // Max results to return
   cursor?: string              // Pagination cursor
 }
 ```
 
-<Aside type="caution" title="Unknown keys are ignored">
-Unrecognised keys in `ObservationQueryOpts` are silently ignored at runtime. TypeScript's excess-property check only catches them on inline object literals — passing options through a variable bypasses it, so a typo like `source_stor` returns unfiltered results instead of an error.
+#### `entity_key`
+
+`Observation` and `ObservationMeta` carry an optional `entity_key`. On `put`, when `entity_key` is omitted it is inherited from the source snapshot's `entity_key` (observations about unkeyed snapshots stay unkeyed; a source snapshot that isn't found stores no key and the put still succeeds; any other metadata error, such as a storage failure, fails the put). An explicit `entity_key` overrides inheritance. `query({ entity_key })` returns only observations with that key.
+
+`is_stale(pointer)` follows the **source snapshot's** entity: if that snapshot has an `entity_key`, it is stale only when a newer snapshot with the same key exists in the store; unkeyed snapshots use the store-wide rule. See the [Entities guide](/corpus/guides/entities/).
+
+#### Current observations only
+
+`query()` never filters by staleness. To keep only observations whose source is still current:
+
+```ts
+for await (const obs of observations.query({ type: 'entity_mention' })) {
+  if (await observations.is_stale(obs.source)) continue
+  // current
+}
+```
+
+<Aside type="caution" title="Unknown keys are rejected">
+`query` and `query_meta` reject keys that are not in `ObservationQueryOpts`. At compile time the options type is checked even when passed through a variable, so a typo like `source_stor` is a type error. At runtime (for example after a cast or from untyped input) the query yields nothing and the backend's `on_event` handler receives an `error` event carrying a `validation_error`, rather than silently returning unfiltered results.
 </Aside>
 
 Results are ordered newest-first by `created_at`; observations with an identical `created_at` are returned in reverse insertion order (later-inserted first) on every backend.

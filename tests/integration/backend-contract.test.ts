@@ -348,6 +348,101 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 				});
 			});
 
+			describe("entity_key", () => {
+				const created_at = new Date("2024-01-01T00:00:00.000Z");
+				const put_interleaved = async () => {
+					await backend.metadata.put(make_meta("test-store", "a1", { created_at, entity_key: "A" }));
+					await backend.metadata.put(make_meta("test-store", "b1", { created_at, entity_key: "B" }));
+					await backend.metadata.put(make_meta("test-store", "a2", { created_at, entity_key: "A" }));
+					await backend.metadata.put(make_meta("test-store", "b2", { created_at, entity_key: "B" }));
+					await backend.metadata.put(make_meta("test-store", "u1", { created_at }));
+				};
+				const versions_of = async (opts: Parameters<Backend["metadata"]["list"]>[1]) => {
+					const versions: string[] = [];
+					for await (const meta of backend.metadata.list("test-store", opts)) versions.push(meta.version);
+					return versions;
+				};
+
+				it("round-trips entity_key and omits the key when unset", async () => {
+					await put_interleaved();
+
+					const keyed = await backend.metadata.get("test-store", "a1");
+					const unkeyed = await backend.metadata.get("test-store", "u1");
+					expect(keyed.ok && keyed.value.entity_key).toBe("A");
+					expect(unkeyed.ok && "entity_key" in unkeyed.value).toBe(false);
+				});
+
+				it("get_latest per entity follows insertion order on created_at ties", async () => {
+					await put_interleaved();
+
+					const a = await backend.metadata.get_latest("test-store", { entity_key: "A" });
+					const b = await backend.metadata.get_latest("test-store", { entity_key: "B" });
+					expect(a.ok && a.value.version).toBe("a2");
+					expect(b.ok && b.value.version).toBe("b2");
+				});
+
+				it("get_latest for an unknown entity is not_found", async () => {
+					await put_interleaved();
+
+					const result = await backend.metadata.get_latest("test-store", { entity_key: "nope" });
+					expect(result.ok).toBe(false);
+					if (result.ok) return;
+					expect(result.error.kind).toBe("not_found");
+				});
+
+				it("store-wide get_latest is unchanged by keyed snapshots", async () => {
+					await put_interleaved();
+
+					const result = await backend.metadata.get_latest("test-store");
+					expect(result.ok && result.value.version).toBe("u1");
+				});
+
+				it("list filters by entity_key and unkeyed rows never match", async () => {
+					await put_interleaved();
+
+					expect(await versions_of({ entity_key: "A" })).toEqual(["a2", "a1"]);
+					expect(await versions_of({ entity_key: "B" })).toEqual(["b2", "b1"]);
+					expect(await versions_of({})).toEqual(["u1", "b2", "a2", "b1", "a1"]);
+				});
+
+				it("applies the entity filter before limit", async () => {
+					for (const n of Array.from({ length: 6 }, (_, i) => i + 1)) {
+						await backend.metadata.put(
+							make_meta("test-store", `v${String(n)}`, {
+								created_at: new Date(Date.UTC(2024, 0, n)),
+								...(n === 2 ? { entity_key: "A" } : { entity_key: "B" }),
+							}),
+						);
+					}
+
+					expect(await versions_of({ entity_key: "A", limit: 1 })).toEqual(["v2"]);
+				});
+
+				it("combines entity_key with tags", async () => {
+					await backend.metadata.put(make_meta("test-store", "v1", { entity_key: "A", tags: ["t"] }));
+					await backend.metadata.put(make_meta("test-store", "v2", { entity_key: "B", tags: ["t"] }));
+					await backend.metadata.put(make_meta("test-store", "v3", { entity_key: "A" }));
+
+					expect(await versions_of({ entity_key: "A", tags: ["t"] })).toEqual(["v1"]);
+				});
+
+				it("store.put persists entity_key and store.get_latest scopes by it", async () => {
+					const corpus = create_corpus()
+						.with_backend(backend)
+						.with_store(define_store("pages", json_codec(z.object({ n: z.number() }))))
+						.build();
+
+					const a = await corpus.stores.pages.put({ n: 1 }, { entity_key: "A" });
+					await corpus.stores.pages.put({ n: 2 }, { entity_key: "B" });
+					expect(a.ok && a.value.entity_key).toBe("A");
+
+					const latest_a = await corpus.stores.pages.get_latest({ entity_key: "A" });
+					expect(latest_a.ok && latest_a.value.data.n).toBe(1);
+					const latest_any = await corpus.stores.pages.get_latest();
+					expect(latest_any.ok && latest_any.value.data.n).toBe(2);
+				});
+			});
+
 			describe("get_children", () => {
 				it("returns empty when no children exist", async () => {
 					await backend.metadata.put(make_meta("test-store", "parent"));

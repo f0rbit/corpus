@@ -15,7 +15,8 @@ import type {
 } from "../types.js";
 import { ok, err } from "../types.js";
 import { to_bytes, filter_snapshots } from "../utils.js";
-import { first, to_fallback } from "../result.js";
+import { first, to_fallback, try_catch_async } from "../result.js";
+import { storage_error } from "./errors.js";
 
 export type MetadataStorage = {
 	get: (store_id: string, version: string) => Promise<SnapshotMeta | null>;
@@ -130,9 +131,10 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 			emit({ type: "meta_list", store_id, count });
 		},
 
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+		async get_latest(store_id, opts): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 			for await (const meta of storage.list(store_id)) {
+				if (opts?.entity_key !== undefined && meta.entity_key !== opts.entity_key) continue;
 				// >= : on equal created_at the later-inserted snapshot wins (storage.list is insertion order)
 				if (!latest || meta.created_at >= latest.created_at) {
 					latest = meta;
@@ -158,10 +160,17 @@ export function create_metadata_client(storage: MetadataStorage, emit: Emit): Me
 	};
 }
 
+function emit_failure<T>(emit: Emit, result: Result<T, CorpusError>): Result<T, CorpusError> {
+	if (!result.ok) emit({ type: "error", error: result.error });
+	return result;
+}
+
 export function create_data_client(storage: DataStorage, emit: Emit): DataClient {
 	return {
 		async get(data_key): Promise<Result<DataHandle, CorpusError>> {
-			const handle = await storage.get(data_key);
+			const fetched = emit_failure(emit, await try_catch_async(() => storage.get(data_key), storage_error("data.get")));
+			if (!fetched.ok) return fetched;
+			const handle = fetched.value;
 			emit({
 				type: "data_get",
 				store_id: to_fallback(first(data_key.split("/")), data_key),
@@ -180,18 +189,24 @@ export function create_data_client(storage: DataStorage, emit: Emit): DataClient
 		},
 
 		async put(data_key, input): Promise<Result<void, CorpusError>> {
-			const bytes = await to_bytes(input);
-			await storage.put(data_key, bytes);
-			return ok(undefined);
+			return emit_failure(
+				emit,
+				await try_catch_async(async () => {
+					await storage.put(data_key, await to_bytes(input));
+				}, storage_error("data.put")),
+			);
 		},
 
 		async delete(data_key): Promise<Result<void, CorpusError>> {
-			await storage.delete(data_key);
-			return ok(undefined);
+			return emit_failure(emit, await try_catch_async(() => storage.delete(data_key), storage_error("data.delete")));
 		},
 
 		async exists(data_key): Promise<boolean> {
-			return storage.exists(data_key);
+			const checked = emit_failure(
+				emit,
+				await try_catch_async(() => storage.exists(data_key), storage_error("data.exists")),
+			);
+			return checked.ok && checked.value;
 		},
 	};
 }

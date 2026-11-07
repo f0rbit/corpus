@@ -107,7 +107,7 @@ export function create_remote_backend(config: RemoteBackendConfig): Backend {
 	const data = create_data_client(create_r2_data_storage(r2_config), emit);
 
 	const observations_storage = create_drizzle_observations_storage(db);
-	const observations = create_observations_client(observations_storage, metadata);
+	const observations = create_observations_client(observations_storage, metadata, emit);
 
 	return { metadata, data, observations, on_event: config.on_event };
 }

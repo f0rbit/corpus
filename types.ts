@@ -172,6 +172,8 @@ export type SnapshotMeta = {
 	size_bytes: number;
 	data_key: string;
 	tags?: string[];
+	/** Optional entity this snapshot is about (e.g. one page in a shared crawl store). Unkeyed snapshots omit it. */
+	entity_key?: string;
 };
 
 export type Snapshot<T = unknown> = {
@@ -222,7 +224,7 @@ export type MetadataClient = {
 	put: (meta: SnapshotMeta) => Promise<Result<void, CorpusError>>;
 	delete: (store_id: string, version: string) => Promise<Result<void, CorpusError>>;
 	list: (store_id: string, opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
-	get_latest: (store_id: string) => Promise<Result<SnapshotMeta, CorpusError>>;
+	get_latest: (store_id: string, opts?: LatestOpts) => Promise<Result<SnapshotMeta, CorpusError>>;
 	get_children: (parent_store_id: string, parent_version: string) => AsyncIterable<SnapshotMeta>;
 	/**
 	 * Find any version of the store with this content hash. Searches the WHOLE
@@ -257,6 +259,13 @@ export type ListOpts = {
 	before?: Date;
 	after?: Date;
 	tags?: string[];
+	/** Exact match on `entity_key`. Unkeyed snapshots never match. */
+	entity_key?: string;
+};
+
+/** Options for `get_latest`: scope the lookup to one entity's snapshots. */
+export type LatestOpts = {
+	entity_key?: string;
 };
 
 /**
@@ -441,9 +450,11 @@ export type Store<T> = {
 	readonly codec: Codec<T>;
 	put: (data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: (version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
-	get_latest: () => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: (opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	get_handle: (version: string) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
-	get_latest_handle: () => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
+	get_latest_handle: (
+		opts?: LatestOpts,
+	) => Promise<Result<{ meta: SnapshotMeta; handle: SnapshotHandle<T> }, CorpusError>>;
 	get_meta: (version: string) => Promise<Result<SnapshotMeta, CorpusError>>;
 	list: (opts?: ListOpts) => AsyncIterable<SnapshotMeta>;
 	delete: (version: string) => Promise<Result<void, CorpusError>>;
@@ -478,6 +489,11 @@ export type PutOpts = {
 	 * ```
 	 */
 	if_changed?: boolean;
+	/**
+	 * Entity this snapshot is about. Persisted on the snapshot meta; with
+	 * `if_changed` the comparison is against that entity's latest snapshot.
+	 */
+	entity_key?: string;
 };
 
 /**
@@ -567,13 +583,29 @@ export function define_store<Id extends string, T>(
 	return { id, codec, description: opts?.description, data_key_fn: opts?.data_key_fn };
 }
 
-/** @internal */
+/**
+ * Builder state before a backend is configured. Has no `build` — call `with_backend()` first.
+ * Every step returns a new, independent builder.
+ * @internal
+ */
 export type CorpusBuilder<Stores extends Record<string, Store<any>> = {}> = {
-	with_backend: (backend: Backend) => CorpusBuilder<Stores>;
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
 	with_store: <Id extends string, T>(
 		definition: StoreDefinition<Id, T>,
 	) => CorpusBuilder<Stores & Record<Id, Store<T>>>;
 	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilder<Stores>;
+};
+
+/**
+ * Builder state once a backend is configured; adds `build`.
+ * @internal
+ */
+export type CorpusBuilderWithBackend<Stores extends Record<string, Store<any>> = {}> = {
+	with_backend: (backend: Backend) => CorpusBuilderWithBackend<Stores>;
+	with_store: <Id extends string, T>(
+		definition: StoreDefinition<Id, T>,
+	) => CorpusBuilderWithBackend<Stores & Record<Id, Store<T>>>;
+	with_observations: (types: ObservationTypeDef<unknown>[]) => CorpusBuilderWithBackend<Stores>;
 	build: () => Corpus<Stores>;
 };
 
@@ -611,6 +643,7 @@ export type TransactionResult<R> = {
 export type TransactionHandle = {
 	put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>;
 	get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>;
+	get_latest: <T>(store: Store<T>, opts?: LatestOpts) => Promise<Result<Snapshot<T>, CorpusError>>;
 	delete: <T>(store: Store<T>, version: string) => Promise<Result<void, CorpusError>>;
 	observe: <T>(
 		type: ObservationTypeDef<T>,
@@ -681,11 +714,16 @@ export type Corpus<Stores extends Record<string, Store<any>> = Record<string, St
  * }
  * ```
  */
+export type StrictQueryOpts<O extends ObservationQueryOpts> = O &
+	([Exclude<keyof O, keyof ObservationQueryOpts>] extends [never]
+		? unknown
+		: { [K in Exclude<keyof O, keyof ObservationQueryOpts>]: never });
+
 export type ObservationsClient = {
 	put: <T>(type: ObservationTypeDef<T>, opts: ObservationPutOpts<T>) => Promise<Result<Observation<T>, CorpusError>>;
 	get: (id: string) => Promise<Result<Observation, CorpusError>>;
-	query: (opts?: ObservationQueryOpts) => AsyncIterable<Observation>;
-	query_meta: (opts?: ObservationQueryOpts) => AsyncIterable<ObservationMeta>;
+	query: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<Observation>;
+	query_meta: <O extends ObservationQueryOpts>(opts?: StrictQueryOpts<O>) => AsyncIterable<ObservationMeta>;
 	delete: (id: string) => Promise<Result<void, CorpusError>>;
 	delete_by_source: (source: SnapshotPointer) => Promise<Result<number, CorpusError>>;
 	is_stale: (pointer: SnapshotPointer) => Promise<boolean>;
@@ -720,9 +758,13 @@ export type VersionSetManifest = {
 			artifact_ref: string;
 			size_bytes: number;
 			compatibility_date: string;
+			/** Corpus ref of the directory-bundle manifest blob (directory-bundle workers). */
+			bundle_manifest_ref?: string;
 		};
 		assets?: {
 			artifact_ref?: string;
+			/** Corpus ref of the asset manifest blob. */
+			manifest_ref?: string;
 			version_affinity: "pinned" | "none";
 		};
 	};

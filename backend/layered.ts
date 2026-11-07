@@ -14,6 +14,7 @@ import type {
 	DataHandle,
 	ObservationsClient,
 } from "../types.js";
+import type { ObservationQueryOpts } from "../observations/types.js";
 import { ok, err } from "../types.js";
 import { to_bytes } from "../utils.js";
 import { first, to_nullable } from "../result.js";
@@ -123,11 +124,11 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 			}
 		},
 
-		async get_latest(store_id): Promise<Result<SnapshotMeta, CorpusError>> {
+		async get_latest(store_id, opts): Promise<Result<SnapshotMeta, CorpusError>> {
 			let latest: SnapshotMeta | null = null;
 
 			for (const backend of read) {
-				const result = await backend.metadata.get_latest(store_id);
+				const result = await backend.metadata.get_latest(store_id, opts);
 				if (!result.ok) {
 					if (result.error.kind !== "not_found") return result;
 					continue;
@@ -263,12 +264,12 @@ function create_layered_observations_client(
 			return primary.get(id);
 		},
 
-		async *query(opts) {
+		async *query(opts?: ObservationQueryOpts) {
 			if (!primary) return;
 			yield* primary.query(opts);
 		},
 
-		async *query_meta(opts) {
+		async *query_meta(opts?: ObservationQueryOpts) {
 			if (!primary) return;
 			yield* primary.query_meta(opts);
 		},

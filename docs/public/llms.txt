@@ -1,4 +1,4 @@
-# @f0rbit/corpus v0.8.1
+# @f0rbit/corpus v0.9.0
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -48,6 +48,7 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 ### Guides
 - [Storage Backends](https://f0rbit.github.io/corpus/guides/backends/): Learn about the different storage backends available in Corpus and when to use each one.
 - [Cloudflare Deployment](https://f0rbit.github.io/corpus/guides/cloudflare/): Deploy Corpus to Cloudflare Workers with D1 database and R2 object storage.
+- [Entities](https://f0rbit.github.io/corpus/guides/entities/): Hold many entities in one store with entity_key — latest-per-entity, entity-scoped observations and per-entity staleness.
 - [Events and Observability](https://f0rbit.github.io/corpus/guides/events-and-observability/): Wire event handlers into backends to observe storage operations for debugging, metrics, and auditing.
 - [Observations](https://f0rbit.github.io/corpus/guides/observations/): Extract and query structured facts from your versioned documents with automatic staleness detection.
 - [Pipeline Templates](https://f0rbit.github.io/corpus/guides/pipeline-templates/): Content-addressed snapshots of compiled pipeline templates via pipeline_template_store — serialised pipeline declarations stored once, deduped across packages, and rehydrated by the deployment orchestrator at run start.
@@ -117,6 +118,10 @@ Every public export, grouped by the source module that defines it.
 - Values: `copy`
 - Types: `CopyOpts`, `CopyProgressEvent`, `CopySummary`
 
+### listing.ts
+- Values: `with_error_tracking`, `collect_listing`
+- Types: `ErrorTracker`
+
 ### cli/config-schema.ts
 - Values: `define_config`
 - Types: `CorpusCliConfig`
@@ -156,7 +161,7 @@ Every public export, grouped by the source module that defines it.
 
 ### types.ts
 - Values: `ok`, `err`, `define_store`
-- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `PutResult`, `CorpusBuilder`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`
+- Types: `ContentType`, `ParentRef`, `SnapshotMeta`, `Snapshot`, `SnapshotHandle`, `StreamableValue`, `DataHandle`, `MetadataClient`, `DataClient`, `ListOpts`, `LatestOpts`, `Backend`, `BatchOp`, `Codec`, `BytesCodec`, `Parser`, `SchemaLike`, `ParseResult`, `Store`, `StoreDefinition`, `DefineStoreOpts`, `DataKeyContext`, `PutOpts`, `PutResult`, `CorpusBuilder`, `CorpusBuilderWithBackend`, `Corpus`, `CorpusError`, `Result`, `CorpusEvent`, `EventHandler`, `ObservationsClient`, `TransactionHandle`, `TransactionResult`, `VersionSetManifest`, `VersionSetRef`, `StrictQueryOpts`
 
 ### result.ts
 - Values: `match`, `unwrap_or`, `unwrap`, `unwrap_err`, `try_catch`, `try_catch_async`, `fetch_result`, `pipe`, `to_nullable`, `to_fallback`, `null_on`, `fallback_on`, `format_error`, `at`, `first`, `last`, `merge_deep`
