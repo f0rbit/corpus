@@ -668,7 +668,7 @@ bun run mutate tests/mutations/guards.ts</pre>
         <section class="phase" id="phase-2">
           <header>
             <h3>Phase 2: Pure-function clusters → laws and properties</h3>
-            <span class="badge todo">todo</span>
+            <span class="badge done">done</span>
           </header>
           <p>The audit's §5.1. Each cluster replaces example tables with properties over the <code>testing.*</code> substrate, deletes the subsumed examples, and keeps every KEEP-list guard. Each cluster ships with its mutation manifest. One commit per cluster (C1-C7). Rollback is per cluster: revert one commit.</p>
           <p><strong>Phase 2 deletion rule</strong>, which is the operational form of AD-1. A cluster commits only if all of the following hold:</p>
@@ -696,7 +696,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <article class="task" id="task-2-1">
             <header>
               <h3>Task 2.1 (C1): Result laws, plus <code>merge_deep</code>/<code>at</code></h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -729,7 +729,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/r
           <article class="task" id="task-2-2">
             <header>
               <h3>Task 2.2 (C2): Observation-utils properties</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -760,7 +760,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/o
           <article class="task" id="task-2-3">
             <header>
               <h3>Task 2.3 (C3): Codec laws</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -790,7 +790,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/c
           <article class="task" id="task-2-4">
             <header>
               <h3>Task 2.4 (C4): <code>parallel_map</code>/Semaphore properties</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -820,7 +820,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/c
           <article class="task" id="task-2-5">
             <header>
               <h3>Task 2.5 (C5): CLI policy properties</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -848,7 +848,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/c
           <article class="task" id="task-2-6">
             <header>
               <h3>Task 2.6 (C6): Substrate self-tests, table-driven, plus "law fails when violated"</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -876,7 +876,7 @@ bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/s
           <article class="task" id="task-2-7">
             <header>
               <h3>Task 2.7 (C7): Version-set</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -926,7 +926,24 @@ bun run mutate tests/mutations/guards.ts</pre>
 
           <section data-kind="proof">
             <h4>Proof</h4>
-            <div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div>
+            <div class="proof">
+              <p>Reviewer pass over C1-C7 (commits f8c3c39, 4be97a3, 5f9b378, dfc6c87, 106bfc6, ee5cded, b64f537). The earlier reviewer session died before reporting, so every gate was re-run on the integrated tip. Gate green (typecheck, build, 991 tests, lint 0 errors, fmt). <code>test:zod3</code>: 991 pass / 0 fail. 4 concurrent <code>bun test</code>: 991 pass / 0 fail each. <code>coverage:diff --base 6171c87</code>: "no lost lines" (gains in codecs/encrypt, codecs/gzip, result, testing/arb-v3, testing/laws/functor, testing/laws/idempotent). <code>mutate guards.ts</code>: 4/4 KILLED, 0 regressions. Total tests 1164 → 991. Coverage 87.2% → 91.94% lines; functions 91.5% → 91.33% (bun report; the small function-% dip comes from fewer, larger function denominators, not lost hits, since coverage:diff shows no lost function hits).</p>
+              <p>Test registrations (<code>test(</code>/<code>it(</code>) before → after: C1 result 79 → 32 (12 + 20 in result-laws); C2 observation-utils 64 → 21; C3 codecs 28 → 15 (4 laws + 11 kept examples; the old suite had ~119 expanded cases); C4 concurrency 18 → 11; C5 cli-policy 71 → 56; C6 substrate 66 → 32; C7 version-set 40 → 18.</p>
+              <p>Mutation checks (<code>--base 75ee6da</code>, old = Phase 1 tests): 0 regressions and 0 new-side survivors in all seven clusters.</p>
+              <table>
+                <thead><tr><th>Cluster</th><th>mutants</th><th>killed old</th><th>killed new</th><th>new-only kills</th></tr></thead>
+                <tbody>
+                  <tr><td>result</td><td>13</td><td>9</td><td>13</td><td>merge-deep-recurses-into-arrays, merge-deep-undefined-overwrites, at-rejects-last-index, last-returns-first</td></tr>
+                  <tr><td>observation-utils</td><td>8</td><td>8</td><td>8</td><td>none</td></tr>
+                  <tr><td>codecs</td><td>8</td><td>5</td><td>8</td><td>compose-decode-stream-not-reversed, text-decode-stream-per-chunk, gzip-encode-stream-decompresses</td></tr>
+                  <tr><td>concurrency</td><td>6</td><td>5</td><td>6</td><td>release-mints-permit-on-handoff</td></tr>
+                  <tr><td>cli-policy</td><td>8</td><td>8</td><td>8</td><td>none</td></tr>
+                  <tr><td>substrate</td><td>10</td><td>6</td><td>10</td><td>arb-v3-tuple-one-short, functor-identity-check-skipped, functor-composition-check-skipped, idempotent-op-applied-once</td></tr>
+                  <tr><td>version-set</td><td>7</td><td>7</td><td>7</td><td>none</td></tr>
+                </tbody>
+              </table>
+              <p>Dropped equivalent mutants: none. No mutant survived on both sides, so none needed a why-comment drop. No fixup commits were needed: all seven cluster commits already passed on review. Found already done: every deletion (observation-utils, gzip/encrypt/codecs/compose unit tests, composed-codec integration test), the collapsed codec-laws (4 properties, not ~119 entries) and all seven mutation manifests.</p>
+            </div>
           </section>
         </section>
 
