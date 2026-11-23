@@ -1,13 +1,44 @@
 import { describe, test, expect } from "bun:test";
 import { Semaphore, parallel_map } from "../../concurrency.js";
+import * as testing from "../../testing/index.js";
+
+const fc = testing.fc;
+
+const flush = async (rounds = 10): Promise<void> => {
+	if (rounds <= 0) return;
+	await Promise.resolve();
+	return flush(rounds - 1);
+};
+
+const yield_times = async (k: number): Promise<void> => flush(k);
+
+const items_arb = fc.array(fc.integer(), { maxLength: 40 });
+const n_arb = fc.integer({ min: 1, max: 8 });
+const yields_arb = fc.array(fc.integer({ min: 1, max: 5 }), { minLength: 1, maxLength: 40 });
+
+const yields_at = (yields: number[], index: number): number => yields[index % yields.length] ?? 1;
+
+const transform = (x: number, index: number): number => x * 31 + index;
+
+const run_options = { numRuns: 100 };
+
+const by_index = (a: [number, number], b: [number, number]) => a[1] - b[1];
 
 describe("Concurrency Utilities", () => {
 	describe("Semaphore", () => {
 		test("allows immediate acquire when permits available", async () => {
 			const semaphore = new Semaphore(2);
-			await semaphore.acquire();
-			await semaphore.acquire();
-			expect(true).toBe(true);
+			let acquired = 0;
+			const pending = (async () => {
+				await semaphore.acquire();
+				acquired++;
+				await semaphore.acquire();
+				acquired++;
+			})();
+
+			await flush();
+			expect(acquired).toBe(2);
+			await pending;
 		});
 
 		test("blocks when no permits available", async () => {
@@ -19,7 +50,7 @@ describe("Concurrency Utilities", () => {
 				acquired = true;
 			});
 
-			await new Promise((r) => setTimeout(r, 10));
+			await flush();
 			expect(acquired).toBe(false);
 
 			semaphore.release();
@@ -77,17 +108,36 @@ describe("Concurrency Utilities", () => {
 			const semaphore = new Semaphore(1);
 			semaphore.release();
 
-			let blocked = false;
-			await Promise.race([
-				(async () => {
-					await semaphore.acquire();
-					await semaphore.acquire();
-				})(),
-				new Promise((r) => setTimeout(r, 10)).then(() => {
-					blocked = true;
-				}),
-			]);
-			expect(blocked).toBe(false);
+			let done = false;
+			const pending = (async () => {
+				await semaphore.acquire();
+				await semaphore.acquire();
+				done = true;
+			})();
+
+			await flush();
+			expect(done).toBe(true);
+			await pending;
+		});
+
+		test("release handing off to a waiter does not mint an extra permit", async () => {
+			const semaphore = new Semaphore(1);
+			await semaphore.acquire();
+
+			const woken = semaphore.acquire();
+			semaphore.release();
+			await woken;
+
+			let extra = false;
+			const pending = semaphore.acquire().then(() => {
+				extra = true;
+			});
+
+			await flush();
+			expect(extra).toBe(false);
+
+			semaphore.release();
+			await pending;
 		});
 
 		test("works with zero initial permits", async () => {
@@ -98,155 +148,98 @@ describe("Concurrency Utilities", () => {
 				acquired = true;
 			});
 
-			await new Promise((r) => setTimeout(r, 10));
+			await flush();
 			expect(acquired).toBe(false);
 
 			semaphore.release();
 			await pending;
 			expect(acquired).toBe(true);
 		});
-
-		test("handles high concurrency", async () => {
-			const semaphore = new Semaphore(3);
-			const concurrent: number[] = [];
-			let max_concurrent = 0;
-
-			const tasks = Array.from({ length: 10 }, async (_, i) => {
-				await semaphore.acquire();
-				concurrent.push(i);
-				max_concurrent = Math.max(max_concurrent, concurrent.length);
-				await new Promise((r) => setTimeout(r, 5));
-				concurrent.splice(concurrent.indexOf(i), 1);
-				semaphore.release();
-			});
-
-			await Promise.all(tasks);
-			expect(max_concurrent).toBeLessThanOrEqual(3);
-		});
 	});
 
 	describe("parallel_map", () => {
-		test("processes all items", async () => {
-			const items = [1, 2, 3, 4, 5];
-			const results = await parallel_map(items, async (x) => x * 2, 2);
-			expect(results).toEqual([2, 4, 6, 8, 10]);
-		});
-
-		test("respects concurrency limit", async () => {
-			const concurrent: number[] = [];
-			let max_concurrent = 0;
-
-			const items = Array.from({ length: 10 }, (_, i) => i);
-			await parallel_map(
-				items,
-				async (x, index) => {
-					concurrent.push(index);
-					max_concurrent = Math.max(max_concurrent, concurrent.length);
-					await new Promise((r) => setTimeout(r, 10));
-					concurrent.splice(concurrent.indexOf(index), 1);
-					return x * 2;
-				},
-				3,
+		test("results equal items.map in order, whatever the completion order", async () => {
+			await fc.assert(
+				fc.asyncProperty(items_arb, n_arb, yields_arb, async (items, n, yields) => {
+					const results = await parallel_map(
+						items,
+						async (x, i) => {
+							await yield_times(yields_at(yields, i));
+							return transform(x, i);
+						},
+						n,
+					);
+					expect(results).toEqual(items.map(transform));
+				}),
+				run_options,
 			);
-
-			expect(max_concurrent).toBeLessThanOrEqual(3);
 		});
 
-		test("returns results in original order", async () => {
-			const items = [5, 1, 3, 2, 4];
-			const results = await parallel_map(
-				items,
-				async (x) => {
-					await new Promise((r) => setTimeout(r, x * 5));
-					return x * 10;
-				},
-				2,
+		test("in-flight mappers never exceed concurrency, and reach min(n, len)", async () => {
+			await fc.assert(
+				fc.asyncProperty(items_arb, n_arb, yields_arb, async (items, n, yields) => {
+					const state = { current: 0, max: 0 };
+					await parallel_map(
+						items,
+						async (_, i) => {
+							state.current++;
+							state.max = Math.max(state.max, state.current);
+							await yield_times(yields_at(yields, i));
+							state.current--;
+							return i;
+						},
+						n,
+					);
+					expect(state.max).toBe(Math.min(n, items.length));
+					expect(state.current).toBe(0);
+				}),
+				run_options,
 			);
-			expect(results).toEqual([50, 10, 30, 20, 40]);
 		});
 
-		test("handles errors in individual mappers", async () => {
-			const items = [1, 2, 3];
+		test("mapper receives each item's position as index", async () => {
+			await fc.assert(
+				fc.asyncProperty(items_arb, n_arb, yields_arb, async (items, n, yields) => {
+					const seen: Array<[number, number]> = [];
+					await parallel_map(
+						items,
+						async (x, i) => {
+							await yield_times(yields_at(yields, i));
+							seen.push([x, i]);
+							return i;
+						},
+						n,
+					);
+					const expected = items.map((x, i): [number, number] => [x, i]);
+					expect(seen.toSorted(by_index)).toEqual(expected);
+				}),
+				run_options,
+			);
+		});
 
-			await expect(
-				parallel_map(
-					items,
-					async (x) => {
-						if (x === 2) throw new Error("failed on 2");
-						return x;
+		test("a rejecting mapper rejects the whole map with its error", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(fc.integer(), { minLength: 1, maxLength: 40 }),
+					n_arb,
+					yields_arb,
+					fc.nat(),
+					async (items, n, yields, pick) => {
+						const bad = pick % items.length;
+						const failing = parallel_map(
+							items,
+							async (x, i) => {
+								await yield_times(yields_at(yields, i));
+								if (i === bad) throw new Error(`failed at ${String(bad)}`);
+								return x;
+							},
+							n,
+						);
+						await expect(failing).rejects.toThrow(`failed at ${String(bad)}`);
 					},
-					2,
 				),
-			).rejects.toThrow("failed on 2");
-		});
-
-		test("works with empty array", async () => {
-			const results = await parallel_map([] as number[], async (x) => x * 2, 3);
-			expect(results).toEqual([]);
-		});
-
-		test("works with single item", async () => {
-			const results = await parallel_map([42], async (x) => x * 2, 5);
-			expect(results).toEqual([84]);
-		});
-
-		test("works when concurrency exceeds items", async () => {
-			const items = [1, 2];
-			const results = await parallel_map(items, async (x) => x * 2, 10);
-			expect(results).toEqual([2, 4]);
-		});
-
-		test("passes index to mapper function", async () => {
-			const items = ["a", "b", "c"];
-			const results = await parallel_map(items, async (item, index) => `${item}-${String(index)}`, 2);
-			expect(results).toEqual(["a-0", "b-1", "c-2"]);
-		});
-
-		test("handles async operations with varying durations", async () => {
-			const items = [100, 50, 10, 80, 30];
-			const start_times: number[] = [];
-			const start = Date.now();
-
-			await parallel_map(
-				items,
-				async (delay) => {
-					start_times.push(Date.now() - start);
-					await new Promise((r) => setTimeout(r, delay));
-					return delay;
-				},
-				2,
+				run_options,
 			);
-
-			expect(start_times[0]).toBeLessThan(20);
-			expect(start_times[1]).toBeLessThan(20);
-			expect(start_times[2]).toBeGreaterThan(40);
-		});
-
-		test("works with concurrency of 1 (sequential)", async () => {
-			const order: number[] = [];
-			const items = [1, 2, 3];
-
-			await parallel_map(
-				items,
-				async (x) => {
-					order.push(x);
-					await new Promise((r) => setTimeout(r, 10));
-					return x;
-				},
-				1,
-			);
-
-			expect(order).toEqual([1, 2, 3]);
-		});
-
-		test("handles objects as items", async () => {
-			const items = [{ id: 1 }, { id: 2 }, { id: 3 }];
-			const results = await parallel_map(items, async (item) => ({ ...item, processed: true }), 2);
-			expect(results).toEqual([
-				{ id: 1, processed: true },
-				{ id: 2, processed: true },
-				{ id: 3, processed: true },
-			]);
 		});
 	});
 });
