@@ -40,7 +40,9 @@ export type D1RawResponse = {
 export type FakeD1HttpServer = {
 	url: string;
 	stop: () => void;
-	sqlite: Database;
+	/** Drops all state and rebuilds an empty schema; the server keeps serving on the same url. */
+	reset: () => void;
+	readonly sqlite: Database;
 };
 
 export type FakeD1HttpOptions = {
@@ -51,7 +53,7 @@ export type FakeD1HttpOptions = {
 };
 
 export function create_fake_d1_http(tables: SQLiteTable[], options: FakeD1HttpOptions = {}): FakeD1HttpServer {
-	const fake_d1 = create_fake_d1(tables);
+	let fake_d1 = create_fake_d1(tables);
 
 	const server = Bun.serve({
 		port: 0,
@@ -163,6 +165,12 @@ export function create_fake_d1_http(tables: SQLiteTable[], options: FakeD1HttpOp
 		stop: () => {
 			void server.stop();
 		},
-		sqlite: fake_d1.sqlite,
+		reset: () => {
+			fake_d1.sqlite.close();
+			fake_d1 = create_fake_d1(tables);
+		},
+		get sqlite() {
+			return fake_d1.sqlite;
+		},
 	};
 }

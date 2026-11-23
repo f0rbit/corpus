@@ -10,6 +10,8 @@
 export type FakeS3Server = {
 	url: string;
 	stop: () => void;
+	/** Clears every stored object; the server keeps serving on the same url. */
+	reset: () => void;
 	has: (key: string) => boolean;
 	keys: () => string[];
 };
@@ -156,6 +158,9 @@ export function create_fake_s3(): FakeS3Server {
 		url,
 		stop: () => {
 			void server.stop();
+		},
+		reset: () => {
+			objects.clear();
 		},
 		has: (key: string) => objects.has(key),
 		keys: () => [...objects.keys()],
