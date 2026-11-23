@@ -433,7 +433,7 @@
 
         <h3>AD-1: Deletion criterion (all four must hold, per cluster)</h3>
         <ol>
-          <li><strong>Coverage superset.</strong> <code>bun run coverage:diff</code> against the merge-base (6171c87) shows, for every lib file, that the covered line set is a superset of the base set and the function hit count is ≥ base. Lib source is frozen for Phases 1-3, so line identity is exact. Phase 4's one lib change (<code>cli/main.ts</code>) is re-baselined at its own commit.</li>
+          <li><strong>Coverage superset.</strong> <code>bun run coverage:diff</code> against the merge-base (6171c87) shows, for every lib file, that the covered line set is a superset of the base set and the function hit count is ≥ base. Lib source is frozen for Phases 1-3, so line identity is exact. The one exception is task 3.0, a verified layered-observations bug fixed as its own commit, after which the diff is re-baselined at that commit. Phase 4's one lib change (<code>cli/main.ts</code>) is re-baselined at its own commit.</li>
           <li><strong>Not on the KEEP list.</strong> These stay regardless of yield:
             <ul>
               <li><strong>Type-level tests:</strong> <code>transaction-types</code>, <code>observation-query-types</code>, <code>cloudflare-binding-types</code>, <code>builder-types</code>, <code>schema-entry</code>.</li>
@@ -953,12 +953,110 @@ bun run mutate tests/mutations/guards.ts</pre>
             <span class="badge todo">todo</span>
           </header>
           <p>The structural fix (audit §5.2/§5.3). The observations contract and the equivalence expansion land first. Contract pruning comes last (delete last) and only after C9 has proven the model kills the pruned assertions' mutants on all 6 backends. Rollback: C10/C11 revert independently. C8/C9 are additive until their deletions.</p>
+          <p>Coder briefs (checked against HEAD <code>8d9b35c</code>): <code>.plans/test-suite-yield-phase3-briefs.md</code>.</p>
           <dl class="meta">
             <dt>Devpad task</dt>
             <dd><code>task_2bae1617-e27a-4fb5-b4dc-94e2a36cf41c</code></dd>
             <dt>Mode</dt>
-            <dd>3.1, 3.2 and 3.4 are background coders on disjoint files in parallel. Coders self-check typecheck and lint; <code>equivalence_command&lt;M,S,R&gt;</code> typing catches model/SUT arm drift at that step. 3.3 is sequential after 3.2 is committed: it is a true ordering dependency, because pruning is only justified once the model covers those behaviours.</dd>
+            <dd>
+              <p>One worktree per task. Coders have no shell and no delete tool, so they list deletions and the reviewer runs <code>git rm</code>. The waves:</p>
+              <ul>
+                <li><strong>Wave 0</strong> (parallel):
+                  <ul>
+                    <li>3.0: layered observations fix (<code>p3-layered-obs</code>), a lib change behind a decision;</li>
+                    <li>3.F: fake <code>reset()</code> hooks (<code>p3-fake-reset</code>).</li>
+                  </ul>
+                  After both are committed, the reviewer measures fake construction and reset cost before dispatching 3.2.</li>
+                <li><strong>Wave 1</strong> (parallel, branched from the post-Wave-0 tip):
+                  <ul>
+                    <li>3.1 (<code>p3-observations</code>);</li>
+                    <li>3.2 (<code>p3-backend-model</code>);</li>
+                    <li>3.4 (<code>p3-store-level</code>).</li>
+                  </ul>
+                </li>
+                <li><strong>Wave 2</strong> (sequential): 3.3 (<code>p3-contract-prune</code>) only after C9 is committed. This is a true ordering dependency, because pruning is justified only once the model covers those behaviours. Its <code>mutate</code> base is the C9 commit.</li>
+              </ul>
+            </dd>
           </dl>
+
+          <article class="task" id="task-3-0">
+            <header>
+              <h3>Task 3.0 (C8a): Layered observations route to the bottom write layer</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>observations/types.ts</code>, <code>observations/utils.ts</code>, <code>observations/client.ts</code>, <code>observations/index.ts</code>, <code>corpus.ts</code> (<code>tx.observe</code>), <code>backend/{memory,file,drizzle-storage,layered}.ts</code>, <code>docs/src/content/docs/guides/observations.mdx</code>, <code>AGENTS.md</code>, <code>tests/integration/layered-backend.test.ts</code>, <code>tests/integration/observations-id.test.ts</code> (new), <code>tests/mutations/guards.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>none (Wave 0). Q7 resolved: option A.</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p><strong>Public API addition</strong>, which means a release-notes entry and a <strong>minor bump at the next release</strong>: optional <code>ObservationPutOpts.id?: string</code>. Full brief: <code>.plans/test-suite-yield-phase3-briefs.md</code> §3.0.</p>
+              <ul>
+                <li><strong>Format:</strong> a new exported <code>observation_id_schema</code> (<code>/^obs_[A-Za-z0-9_-]{1,64}$/</code>) is the single source. A malformed id gives <code>validation_error</code> before any write, in both <code>put</code> and <code>tx.observe</code>.</li>
+                <li><strong>Collision:</strong> <code>validation_error</code> (<code>observation id "…" already exists</code>), <em>never</em> an overwrite. It is checked in each backend's atomic section:
+                  <ul>
+                    <li>memory <code>add_one</code> (today a silent <code>Map.set</code> overwrite);</li>
+                    <li>file <code>add_one</code> under <code>OBS_LOCK</code> (today a duplicate row);</li>
+                    <li>drizzle/remote <code>put_row</code>, where the PK <code>UNIQUE constraint failed: corpus_observations.id</code> is mapped (today a generic <code>storage_error</code>);</li>
+                    <li>in-tx collisions give <code>transaction_aborted</code> with no visible writes.</li>
+                  </ul>
+                  It is deliberately not a new <code>CorpusError</code> kind, because that would be breaking.</li>
+                <li><strong>Layered put:</strong> generates the id once (<code>opts.id ?? generate_observation_id()</code>) and passes it to every write layer, with best-effort compensation on a mid-fan-out failure. It returns the first write layer's observation.</li>
+                <li><strong>Layered delete / delete_by_source:</strong>
+                  <ul>
+                    <li><code>delete</code> fans out; it returns <code>observation_not_found</code> only if no layer had the id, and other errors propagate.</li>
+                    <li><code>delete_by_source</code> deletes everywhere and reports the bottom layer's count. Today it double-counts and swallows errors.</li>
+                  </ul>
+                </li>
+                <li><strong>Layered get / query / is_stale:</strong> unchanged (primary read layer), now consistent.</li>
+                <li><strong>Docs and AGENTS:</strong> a "Choosing an id" docs subsection, plus one AGENTS.md Gotchas bullet.</li>
+                <li><strong>Guards:</strong> <code>layered-observations-shared-id</code>, <code>observation-id-collision-memory</code>, <code>observation-id-collision-file</code>.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/layered-backend.test.ts tests/integration/observations-id.test.ts
+bun run docs:build
+bun run mutate tests/mutations/guards.ts
+bun run gate</pre>
+              <p>Expected:</p>
+              <ul>
+                <li>Two-layer <code>put</code>→<code>get(id)</code> is ok on both layers; <code>delete</code> removes the row from both; <code>delete_by_source</code> returns the real count.</li>
+                <li>Malformed and colliding ids are rejected identically on memory, file, cloudflare and remote, and the original row is unchanged.</li>
+                <li>In-tx collisions give <code>transaction_aborted</code>.</li>
+                <li>All guards are KILLED.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-f">
+            <header>
+              <h3>Task 3.F (C8b): <code>reset()</code> on the D1-HTTP and S3 fakes</h3>
+              <span class="badge todo">todo</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/fakes/d1-http.ts</code>, <code>tests/fakes/s3.ts</code>, <code>tests/integration/http-fakes.test.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>none (Wave 0)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Neither fake has a reset hook at HEAD.</p>
+              <ul>
+                <li><strong>D1-HTTP:</strong> <code>reset()</code> rebuilds the underlying <code>create_fake_d1</code> (with a <code>sqlite</code> getter), and the request handler reads the current instance.</li>
+                <li><strong>S3:</strong> <code>reset()</code> clears the object map.</li>
+              </ul>
+              <p>One fidelity test per fake. Every existing quirk is unchanged.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/http-fakes.test.ts</pre>
+              <p>Expected: state is gone after <code>reset()</code> and the server still serves the same quirks.</p>
+            </section>
+          </article>
 
           <article class="task" id="task-3-1">
             <header>
@@ -1041,7 +1139,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/backend-model.ts
               <ul>
                 <li><strong>Remove</strong> the assertions the model now subsumes: the 19 listed in audit §5.2, plus list limit, plain tag filter, tag+date+limit, get_latest newest / per-entity / unknown-entity / store-wide, get_children ×2, find_by_hash ×3 and list_stores.</li>
                 <li><strong>Keep</strong> as named examples: exact-match <code>eq()</code>, tag-before-limit, entity-before-limit, the insertion tie-break, and everything in streaming, data-handle, transactions and cross-client.</li>
-                <li>Add <code>handle.size</code> to the data-handle block (the only assertion <code>remote-r2.test.ts</code> adds), so it now runs on all 6 backends, then delete <code>tests/unit/remote-r2.test.ts</code> (decided in Q4).</li>
+                <li>Delete <code>tests/unit/remote-r2.test.ts</code> (the reviewer runs <code>git rm</code>) <strong>without</strong> adding a <code>handle.size</code> assertion. Correction to Q4: the public <code>DataHandle</code> has no <code>size</code>, and <code>DataStorageHandle.size</code> is read by no library code, so the assertion is unobservable at the contract level. The file's other 7 tests are covered by the RemoteBackend contract run and the C9 model.</li>
               </ul>
             </section>
             <section data-kind="acceptance">
@@ -1314,6 +1412,13 @@ bun run mutate tests/mutations/guards.ts</pre>
       <section id="breaking">
         <h2>Breaking changes</h2>
         <p>None for consumers. <code>cli/main.ts</code> is internal (not in <code>exports</code>), and bin behaviour is unchanged. The internal test helper <code>run_backend_contract_tests</code> loses ~27 assertions, which are now model-checked. Anyone adding a backend must now also add it as an equivalence provider and an observations-contract target (AGENTS.md is updated to say so).</p>
+        <p><strong>Public API addition (task 3.0), minor bump at the next release:</strong> optional <code>ObservationPutOpts.id</code> and an exported <code>observation_id_schema</code>. It is additive, but there are behaviour changes worth noting in the release notes:</p>
+        <ul>
+          <li>A repeated observation id is now rejected with <code>validation_error</code> on every backend. Before, memory overwrote silently, file duplicated the row, and drizzle returned <code>storage_error</code>.</li>
+          <li>Layered observations now share one id across write layers.</li>
+          <li>Layered <code>delete_by_source</code> reports the bottom layer's count instead of a summed one, and surfaces errors instead of swallowing them.</li>
+        </ul>
+        <p>The reviewer puts the release-notes line in the PR body.</p>
       </section>
 
       <section id="out-of-scope">
@@ -1323,6 +1428,9 @@ bun run mutate tests/mutations/guards.ts</pre>
           <li>Full StrykerJS adoption or a mutation-score CI gate. Revisit if the manifests prove too narrow.</li>
           <li>Branch coverage. Bun doesn't emit <code>BRDA</code>; the mutation manifests are the stand-in.</li>
           <li>The data-key aliasing layout fix (still deferred, <code>task_b3439360</code>).</li>
+          <li><code>DataStorageHandle.size</code> is set by 4 adapters but read by no library code. Either surface it on <code>DataHandle</code> or remove it (found during Phase 3 brief verification).</li>
+          <li>A dedicated <code>CorpusError</code> kind for observation-id collisions. Today the collision is a <code>validation_error</code>; a new kind would be breaking, so it waits for the next major.</li>
+          <li>Layered <code>apply_batch</code> still writes transactional observations only to the bottom layer, so the cache layer misses them (an existing documented asymmetry).</li>
           <li>Any lib bug a new property uncovers is fixed in its own commit with a regression test and listed in the PR body. If it's non-trivial, it's split out instead.</li>
           <li>The same coverage-gate pattern for vault/pulse, mentioned in <code>task_c453a4e2</code>'s summary. That belongs in those repos.</li>
         </ul>
@@ -1343,6 +1451,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <li><strong>Temp dirs:</strong> use <code>tests/support/tmp.ts</code>. Fixed temp paths collide under concurrent runs (mutation worktrees, per-test runs).</li>
           <li><strong>Coverage:</strong> the gate is <code>bun test --coverage</code> with the per-file 80% lines+functions threshold in <code>bunfig.toml</code>, verified by exit code. <code>tests/</code>, <code>docs/</code>, <code>scripts/</code> and <code>sst.ts</code> (deliberately untested naming helper) are ignored. There is no ratchet; <code>bun run coverage:diff</code> is a manual tool for proving that a test deletion lost nothing. <code>cli/main.ts</code> exists so CLI coverage is visible in-process; spawn tests are limited to 3 smokes.</li>
           <li><strong>Equivalence over HTTP fakes:</strong> the remote provider shares one <code>Bun.serve</code> transport per file and swaps fresh fake D1/S3 state per run. Fresh SUT <em>state</em> is what the law requires, not a fresh server. Never let state survive across runs.</li>
+          <li><strong>Observation ids (task 3.0):</strong> caller ids must match <code>observation_id_schema</code>, and a repeat is a <code>validation_error</code> (never an overwrite), enforced inside each adapter's atomic section. In-tx collisions give <code>transaction_aborted</code>. Layered put generates the id once and fans it out; <code>delete_by_source</code> reports the bottom layer's count.</li>
           <li><strong>Laws:</strong> each law has a "fails when violated" test. A law that can't fail is a silent no-op.</li>
           <li>Update the citations that moved: "applies tag filters before limit", the <code>observations-*</code> files, and the remote transaction fallback test location.</li>
         </ul>
@@ -1369,7 +1478,8 @@ bun run mutate tests/mutations/guards.ts</pre>
             </ul>
           </li>
           <li><span class="badge done">resolved</span> <strong>Q3: CLI coverage:</strong> extract <code>cli/main.ts</code> (<code>run_cli(io) → exit code</code>), move the entrypoint tests in-process, and keep 3 spawn smokes (task 4.3).</li>
-          <li><span class="badge done">resolved</span> <strong>Q4: <code>remote-r2.test.ts</code>:</strong> fold <code>handle.size</code> into the contract data-handle block, then delete the file (task 3.3).</li>
+          <li><span class="badge done">resolved</span> <strong>Q4: <code>remote-r2.test.ts</code>:</strong> delete the file (task 3.3). <em>Corrected 2026-11-24:</em> the planned <code>handle.size</code> fold is impossible, because <code>size</code> is not on the public <code>DataHandle</code> and nothing reads it. The file is deleted with no replacement assertion.</li>
+          <li><span class="badge done">resolved</span> <strong>Q7: layered observations bug</strong> (2026-11-24): <strong>option A</strong>. Optional <code>ObservationPutOpts.id</code>, with one shared id fanned out to every write layer. This is a public API addition, so it gets a release-notes entry and a minor bump at the next release (task 3.0).</li>
           <li><span class="badge done">resolved</span> <strong>Q5: devpad:</strong> Phase 4 reuses <code>task_c453a4e2-dfec-4bac-aad6-703a80175519</code>. New devpad tasks are created for Phases 1-3 only, after approval.</li>
           <li><span class="badge done">resolved</span> <strong>Q6: mutation tooling:</strong> <code>tests/mutations/*.ts</code> and <code>scripts/mutation-check.ts</code> (<code>bun run mutate</code>) are committed as durable repo tooling (task 1.3).</li>
         </ol>
