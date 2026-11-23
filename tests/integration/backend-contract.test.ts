@@ -220,6 +220,18 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(versions).toEqual(["v1"]);
 				});
 
+				it("treats LIKE wildcards in store_id literally", async () => {
+					await backend.metadata.put(make_meta("a_b", "v1"));
+					await backend.metadata.put(make_meta("axb", "v2"));
+
+					const versions: string[] = [];
+					for await (const meta of backend.metadata.list("a_b")) {
+						versions.push(meta.version);
+					}
+
+					expect(versions).toEqual(["v1"]);
+				});
+
 				it("respects limit option", async () => {
 					await backend.metadata.put(make_meta("test-store", "v1", { created_at: new Date("2024-01-01") }));
 					await backend.metadata.put(make_meta("test-store", "v2", { created_at: new Date("2024-01-02") }));
@@ -924,26 +936,23 @@ import { corpus_observations } from "../../observations/schema.js";
 import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare.js";
 import { create_fake_d1_http, type FakeD1HttpServer } from "../fakes/d1-http.js";
 import { create_fake_s3, type FakeS3Server } from "../fakes/s3.js";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
 run_backend_contract_tests("MemoryBackend", () => create_memory_backend());
 
-const file_test_dir = join(tmpdir(), "corpus-contract-test-file");
+let file_test_dir = "";
 run_backend_contract_tests(
 	"FileBackend",
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
-		await mkdir(file_test_dir, { recursive: true });
+		file_test_dir = await make_tmp_dir("contract-file");
 		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(file_test_dir);
 	},
 );
 
-const layered_test_dir = join(tmpdir(), "corpus-contract-test-layered");
+let layered_test_dir = "";
 run_backend_contract_tests("LayeredBackend (memory read/write)", () => {
 	const memory = create_memory_backend();
 	return create_layered_backend({
@@ -955,8 +964,7 @@ run_backend_contract_tests("LayeredBackend (memory read/write)", () => {
 run_backend_contract_tests(
 	"LayeredBackend (file read/write)",
 	async () => {
-		await rm(layered_test_dir, { recursive: true, force: true });
-		await mkdir(layered_test_dir, { recursive: true });
+		layered_test_dir = await make_tmp_dir("contract-layered");
 		const file = create_file_backend({ base_path: layered_test_dir });
 		return create_layered_backend({
 			read: [file],
@@ -964,7 +972,7 @@ run_backend_contract_tests(
 		});
 	},
 	async () => {
-		await rm(layered_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(layered_test_dir);
 	},
 );
 
@@ -1041,9 +1049,7 @@ describe("backend-specific streaming chunk counts", () => {
 	it("file backend yields multiple chunks for a 1 MB payload", async () => {
 		// Bun.file().stream() emits 256 KB chunks; a 1 MB payload guarantees ≥4 chunks
 		// and proves we're actually streaming rather than buffering.
-		const dir = join(tmpdir(), "corpus-contract-streaming-file");
-		await rm(dir, { recursive: true, force: true });
-		await mkdir(dir, { recursive: true });
+		const dir = await make_tmp_dir("contract-streaming-file");
 		try {
 			const backend = create_file_backend({ base_path: dir });
 			const data = big(1024 * 1024);
@@ -1059,7 +1065,7 @@ describe("backend-specific streaming chunk counts", () => {
 			const total = chunks.reduce((acc, c) => acc + c.length, 0);
 			expect(total).toBe(data.length);
 		} finally {
-			await rm(dir, { recursive: true, force: true });
+			await remove_tmp_dir(dir);
 		}
 	});
 });

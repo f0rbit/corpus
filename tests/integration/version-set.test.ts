@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import type { Backend, VersionSetManifest } from "../../index";
 import { version_set_store, VersionSetManifestSchema } from "../../index.js";
 import { create_memory_backend } from "../../backend/memory.js";
@@ -347,19 +345,18 @@ function run_version_set_tests(name: string, factory: BackendFactory, cleanup?: 
 
 run_version_set_tests("MemoryBackend", () => create_memory_backend());
 
-const file_test_dir = join(tmpdir(), "corpus-version-set-test-file");
+let file_test_dir = "";
 run_version_set_tests(
 	"FileBackend",
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
-		await mkdir(file_test_dir, { recursive: true });
+		file_test_dir = await make_tmp_dir("version-set-file");
 		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(file_test_dir);
 	},
 );
 
 afterAll(async () => {
-	await rm(file_test_dir, { recursive: true, force: true });
+	if (file_test_dir) await remove_tmp_dir(file_test_dir);
 });

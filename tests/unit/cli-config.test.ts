@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { join } from "path";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { sniff_wrangler, type WranglerSniff } from "../../cli/wrangler.js";
 import { load_cli_config } from "../../cli/load-config.js";
 import { resolve_backend, resolve_connection_ids } from "../../cli/resolve-backend.js";
@@ -50,8 +51,7 @@ describe("sniff_wrangler", () => {
 
 	it("returns null when no wrangler file exists", async () => {
 		// Create a temp dir with .git to prevent upward search from finding parent wrangler files
-		const temp_dir = `/tmp/no-wrangler-${String(Date.now())}`;
-		await mkdir(temp_dir, { recursive: true });
+		const temp_dir = await make_tmp_dir("no-wrangler");
 		await mkdir(`${temp_dir}/.git`, { recursive: true });
 
 		try {
@@ -61,7 +61,7 @@ describe("sniff_wrangler", () => {
 				expect(result.value).toBeNull();
 			}
 		} finally {
-			await rm(temp_dir, { recursive: true, force: true });
+			await remove_tmp_dir(temp_dir);
 		}
 	});
 });
@@ -88,8 +88,9 @@ describe("load_cli_config", () => {
 
 	it("returns null when no config file exists", async () => {
 		// Use explicit path to a non-existent directory that has no corpus.config
-		const temp_dir = `/tmp/nonexistent-corpus-test-${String(Date.now())}`;
-		const result = await load_cli_config(join(temp_dir, "corpus.config.js"));
+		const parent_dir = await make_tmp_dir("nonexistent");
+		const result = await load_cli_config(join(parent_dir, "never-created", "corpus.config.js"));
+		await remove_tmp_dir(parent_dir);
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.value).toBeNull();
@@ -97,7 +98,8 @@ describe("load_cli_config", () => {
 	});
 
 	it("returns validation error for invalid config", async () => {
-		const temp_file = "/tmp/test-invalid-config.js";
+		const temp_dir = await make_tmp_dir("invalid-config");
+		const temp_file = join(temp_dir, "invalid-config.js");
 
 		await writeFile(
 			temp_file,
@@ -112,14 +114,13 @@ describe("load_cli_config", () => {
 			expect(result.error.kind).toBe("validation_error");
 		}
 
-		await unlink(temp_file);
+		await remove_tmp_dir(temp_dir);
 	});
 });
 
 describe("resolve_backend", () => {
 	it("resolves file backend when selector has file", async () => {
-		const temp_dir = "/tmp/test-corpus-backend";
-		await mkdir(temp_dir, { recursive: true });
+		const temp_dir = await make_tmp_dir("backend");
 
 		const result = await resolve_backend({ file: temp_dir }, null, {
 			config: null,
@@ -129,7 +130,7 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		await rm(temp_dir, { recursive: true, force: true });
+		await remove_tmp_dir(temp_dir);
 	});
 
 	it("returns error when required params are missing", async () => {
@@ -219,8 +220,7 @@ describe("resolve_backend", () => {
 	});
 
 	it("resolves file backend from config", async () => {
-		const temp_dir = "/tmp/test-corpus-backend-2";
-		await mkdir(temp_dir, { recursive: true });
+		const temp_dir = await make_tmp_dir("backend-2");
 
 		const config: Record<string, unknown> = {
 			environments: {
@@ -238,12 +238,11 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		await rm(temp_dir, { recursive: true, force: true });
+		await remove_tmp_dir(temp_dir);
 	});
 
 	it("uses default_env from config when env not specified", async () => {
-		const temp_dir = "/tmp/test-corpus-backend-3";
-		await mkdir(temp_dir, { recursive: true });
+		const temp_dir = await make_tmp_dir("backend-3");
 
 		const config: Record<string, unknown> = {
 			default_env: "local",
@@ -262,7 +261,7 @@ describe("resolve_backend", () => {
 
 		expect(result.ok).toBe(true);
 
-		await rm(temp_dir, { recursive: true, force: true });
+		await remove_tmp_dir(temp_dir);
 	});
 
 	it("resolves database_id/bucket from CORPUS_D1_DATABASE_ID/CORPUS_R2_BUCKET env vars when config and sniff are absent", async () => {

@@ -12,8 +12,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { copy, type CopyProgressEvent } from "../../copy.js";
 import { create_file_backend } from "../../backend/file.js";
 import { create_memory_backend } from "../../backend/memory.js";
@@ -22,6 +20,7 @@ import { corpus_snapshots } from "../../schema.js";
 import { create_fake_d1_http, type FakeD1HttpServer } from "../fakes/d1-http.js";
 import { create_fake_s3, type FakeS3Server } from "../fakes/s3.js";
 import { err, type Backend, type MetadataClient, type SnapshotMeta } from "../../types.js";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
 function make_meta(
 	overrides: Partial<SnapshotMeta> & Pick<SnapshotMeta, "store_id" | "version" | "data_key">,
@@ -56,24 +55,22 @@ async function bytes_at(backend: Backend, data_key: string): Promise<Uint8Array>
 }
 
 describe("copy() — integration", () => {
-	const SRC_DIR = join(import.meta.dir, ".test-copy-src");
-	const DEST_DIR = join(import.meta.dir, ".test-copy-dest");
+	let src_dir = "";
+	let dest_dir = "";
 
 	beforeEach(async () => {
-		await rm(SRC_DIR, { recursive: true, force: true });
-		await rm(DEST_DIR, { recursive: true, force: true });
-		await mkdir(SRC_DIR, { recursive: true });
-		await mkdir(DEST_DIR, { recursive: true });
+		src_dir = await make_tmp_dir("copy-src");
+		dest_dir = await make_tmp_dir("copy-dest");
 	});
 
 	afterEach(async () => {
-		await rm(SRC_DIR, { recursive: true, force: true });
-		await rm(DEST_DIR, { recursive: true, force: true });
+		await remove_tmp_dir(src_dir);
+		await remove_tmp_dir(dest_dir);
 	});
 
 	it("clones a store's versions + data verbatim, file → file", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		const bytes_a = new TextEncoder().encode("hello-a");
 		const bytes_b = new TextEncoder().encode("hello-b");
@@ -103,8 +100,8 @@ describe("copy() — integration", () => {
 	});
 
 	it("second run is a no-op — hash-skip idempotency", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		await seed(
 			source,
@@ -140,7 +137,7 @@ describe("copy() — integration", () => {
 	});
 
 	it("filters by store id and by tags", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
+		const source = create_file_backend({ base_path: src_dir });
 
 		await seed(
 			source,
@@ -158,7 +155,7 @@ describe("copy() — integration", () => {
 			new TextEncoder().encode("c"),
 		);
 
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const dest = create_file_backend({ base_path: dest_dir });
 		const store_filtered = await copy(source, dest, { stores: ["docs"] });
 		expect(store_filtered.ok).toBe(true);
 		if (!store_filtered.ok) return;
@@ -166,8 +163,8 @@ describe("copy() — integration", () => {
 		expect(store_filtered.value.versions_copied).toBe(2);
 		expect(await collect(dest, "notes")).toHaveLength(0);
 
-		await rm(DEST_DIR, { recursive: true, force: true });
-		const dest2 = create_file_backend({ base_path: DEST_DIR });
+		await remove_tmp_dir(dest_dir);
+		const dest2 = create_file_backend({ base_path: dest_dir });
 		const tag_filtered = await copy(source, dest2, { stores: ["docs"], tags: ["published"] });
 		expect(tag_filtered.ok).toBe(true);
 		if (!tag_filtered.ok) return;
@@ -177,8 +174,8 @@ describe("copy() — integration", () => {
 	});
 
 	it("dry-run reports what would happen without writing to dest", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		await seed(
 			source,
@@ -205,8 +202,8 @@ describe("copy() — integration", () => {
 	});
 
 	it("dedups data transfer across versions sharing a data_key", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		const shared_bytes = new TextEncoder().encode("shared-content");
 		const shared_key = "docs/shared-hash";
@@ -236,8 +233,8 @@ describe("copy() — integration", () => {
 	});
 
 	it("honours the concurrency bound for data transfers", async () => {
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest_inner = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest_inner = create_file_backend({ base_path: dest_dir });
 
 		let current = 0;
 		let max_concurrent = 0;
@@ -277,8 +274,8 @@ describe("copy() — integration", () => {
 		// ordering (copy_version's doc comment) was checked "by reasoning" —
 		// this test forces an actual mid-copy failure and asserts the invariant
 		// holds, not just that the code reads that way.
-		const source = create_file_backend({ base_path: SRC_DIR });
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const source = create_file_backend({ base_path: src_dir });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		const versions = ["v1", "v2", "v3", "v4"];
 		for (const version of versions) {
@@ -360,7 +357,7 @@ describe("copy() — integration", () => {
 			find_by_hash: inner.metadata.find_by_hash,
 		};
 		const source: Backend = { ...inner, metadata: metadata_without_list_stores };
-		const dest = create_file_backend({ base_path: DEST_DIR });
+		const dest = create_file_backend({ base_path: dest_dir });
 
 		const result = await copy(source, dest);
 		expect(result.ok).toBe(false);
@@ -395,7 +392,7 @@ describe("copy() — integration", () => {
 					endpoint: s3.url,
 				},
 			});
-			const dest = create_file_backend({ base_path: DEST_DIR });
+			const dest = create_file_backend({ base_path: dest_dir });
 
 			const bytes = new TextEncoder().encode("remote-payload");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);

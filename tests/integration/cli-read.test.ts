@@ -16,8 +16,7 @@ import { stores_command } from "../../cli/commands/stores.js";
 import { versions_command } from "../../cli/commands/versions.js";
 import { show_command } from "../../cli/commands/show.js";
 import { lineage_command } from "../../cli/commands/lineage.js";
-import { mkdirSync, rmSync } from "node:fs";
-import { existsSync } from "node:fs";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
 const test_schema = z.object({
 	id: z.string(),
@@ -33,8 +32,7 @@ describe("CLI read commands", () => {
 
 	beforeEach(async () => {
 		// Create test directory
-		test_dir = `/tmp/corpus-cli-test-${String(Date.now())}-${Math.random().toString(36).slice(2)}`;
-		mkdirSync(test_dir, { recursive: true });
+		test_dir = await make_tmp_dir("cli-read");
 
 		// Set up corpus with memory backend
 		backend = create_memory_backend();
@@ -61,11 +59,8 @@ describe("CLI read commands", () => {
 		);
 	});
 
-	afterEach(() => {
-		// Clean up test directory
-		if (existsSync(test_dir)) {
-			rmSync(test_dir, { recursive: true, force: true });
-		}
+	afterEach(async () => {
+		await remove_tmp_dir(test_dir);
 	});
 
 	describe("stores command", () => {

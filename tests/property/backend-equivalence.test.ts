@@ -55,8 +55,8 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import fc from "fast-check";
-import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { provider_equivalence, equivalence_command } from "../../testing/laws/provider-equivalence.js";
 import { create_memory_backend } from "../../backend/memory.js";
 import { create_file_backend } from "../../backend/file.js";
@@ -64,7 +64,7 @@ import { create_layered_backend } from "../../backend/layered.js";
 import { ok, err } from "../../types.js";
 import type { Backend, CorpusError, Result, SnapshotMeta } from "../../types.js";
 
-const ROOT = join(import.meta.dir, "..", ".tmp", "backend-equivalence");
+let root = "";
 
 // ---------------------------------------------------------------------------
 // Reference model — plain Maps with hand-rolled semantics, NOT a backend.
@@ -326,23 +326,23 @@ let dir_seq = 0;
 const spawned_dirs: string[] = [];
 
 const fresh_dir = (): string => {
-	const dir = join(ROOT, `run-${String(dir_seq++)}`);
+	const dir = join(root, `run-${String(dir_seq++)}`);
 	spawned_dirs.push(dir);
 	return dir;
 };
 
 const flush_dirs = async (): Promise<void> => {
 	const doomed = spawned_dirs.splice(0);
-	await Promise.all(doomed.map((dir) => rm(dir, { recursive: true, force: true })));
+	await Promise.all(doomed.map(remove_tmp_dir));
 };
 
 describe("property: cross-backend model-based equivalence", () => {
 	beforeAll(async () => {
-		await rm(ROOT, { recursive: true, force: true });
+		root = await make_tmp_dir("backend-equivalence");
 	});
 
 	afterAll(async () => {
-		await rm(ROOT, { recursive: true, force: true });
+		await remove_tmp_dir(root);
 	});
 
 	test("memory, file, layered backends agree with the reference model under arbitrary command sequences", async () => {

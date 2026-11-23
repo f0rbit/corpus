@@ -524,7 +524,7 @@ export type MutationManifest = {
         <section class="phase" id="phase-1">
           <header>
             <h3>Phase 1: Safety rails</h3>
-            <span class="badge todo">todo</span>
+            <span class="badge done">done</span>
           </header>
           <p>Builds the instruments every later deletion is judged by, and makes the suite parallel-safe so the mutation worktrees and per-test runs stop colliding. No test is deleted in this phase. Rollback: revert the commit, since there are no behaviour changes.</p>
           <dl class="meta">
@@ -537,7 +537,7 @@ export type MutationManifest = {
           <article class="task" id="task-1-1">
             <header>
               <h3>Task 1.1 (C0): Parallel-safe temp dirs</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -560,7 +560,7 @@ for i in 1 2 3 4; do bun test &amp; done; wait                                # 
           <article class="task" id="task-1-2">
             <header>
               <h3>Task 1.2 (C0): <code>coverage:diff</code> tool</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -590,7 +590,7 @@ for i in 1 2 3 4; do bun test &amp; done; wait                                # 
           <article class="task" id="task-1-3">
             <header>
               <h3>Task 1.3 (C0): <code>mutate</code> tool plus the guards manifest</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -633,7 +633,35 @@ bun run mutate tests/mutations/guards.ts</pre>
 
           <section data-kind="proof">
             <h4>Proof</h4>
-            <div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div>
+            <div class="proof">
+              <p>Reviewer pass: gate green (typecheck, build, 1164 tests, lint 0 errors, fmt). <code>test:zod3</code> not run (it rewrites installed zod; Phase 1 touches no lib code).</p>
+              <ul>
+                <li>1.1: no fixed temp paths remain (only argv strings in <code>cli-args</code>). The plan's 7 files were not enough: <code>observations-file</code>, <code>file-transactions</code>, <code>put-if-changed</code>, <code>copy</code> and <code>cli-clone</code> used fixed <code>.test-*</code> dirs under <code>tests/integration/</code>, which the planned grep couldn't see; they were migrated too. 4 concurrent <code>bun test</code> runs: 1164 pass / 0 fail each (before the extra migration: up to 32 failures).</li>
+                <li>1.2: <code>coverage:diff --base HEAD</code> exit 0 in ~5.5 s ("no lost lines"). With <code>tests/unit/compose.test.ts</code> removed: exit 1, <code>utils.ts</code> lost 18 lines (264-275, 277, 279, 281, 287-289), function hits -4. <code>parse_lcov</code> lives in <code>scripts/lib/lcov.ts</code>. SF paths are repo-relative; <code>tests/ docs/ scripts/ node_modules/</code> are excluded.</li>
+                <li>1.3: <code>mutate tests/mutations/guards.ts</code> ~36 s, exit 0, <code>git status --porcelain</code> unchanged, no leftover worktrees. A non-unique <code>find</code> aborts with "stale manifest ... matched 25 times" (exit 2). All 15 guards KILLED on the new side (old side differs only for the like() guard, see below).</li>
+              </ul>
+              <table>
+                <thead><tr><th>Guard</th><th>old</th><th>new</th></tr></thead>
+                <tbody>
+                  <tr><td>list-store-id-like-not-eq</td><td>survived</td><td>KILLED (new contract test: store ids <code>a_b</code> vs <code>axb</code>)</td></tr>
+                  <tr><td>list-drops-tag-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>list-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>get-latest-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>observations-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>memory-latest-strict-gt</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>args-argv-typo</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>args-drops-command-option-tokens</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>lineage-no-cycle-guard</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>stores-json-falls-through</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>file-aliasing-check-off</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>listing-ignores-tracker-errors</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>if-changed-compares-by-hash</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>copy-metadata-before-data</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>walker-no-self-skip</td><td>KILLED</td><td>KILLED</td></tr>
+                </tbody>
+              </table>
+              <p>Not in the manifest, by design: (a) drizzle <code>desc(sql`rowid`)</code> tie-break removal is an equivalent mutant while <code>idx_store_created</code> exists (a reverse index scan already yields rowid-desc ties); the get_latest tie-break is still guarded behaviourally by the contract test and the memory <code>&gt;=</code> mutant. (b) The selector-key-presence guard can't be killed in-process today; add it to <code>guards.ts</code> in Phase 4 once <code>cli/main.ts</code> lets tests drive the real entry. No <code>eslint.config.ts</code> scripts override was needed.</p>
+            </div>
           </section>
         </section>
 

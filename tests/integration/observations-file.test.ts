@@ -3,10 +3,9 @@ import { z } from "zod";
 import { create_file_backend } from "../../backend/file.js";
 import { define_observation_type, create_pointer } from "../../observations/index.js";
 import type { ObservationsClient } from "../../types";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
-const TEST_DIR = join(import.meta.dir, ".test-file-observations");
+let test_dir = "";
 
 const sentiment_type = define_observation_type(
 	"sentiment",
@@ -38,14 +37,13 @@ describe("observations integration - file backend", () => {
 	let observations: ObservationsClient;
 
 	beforeEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
-		await mkdir(TEST_DIR, { recursive: true });
-		backend = create_file_backend({ base_path: TEST_DIR });
+		test_dir = await make_tmp_dir("obs-file");
+		backend = create_file_backend({ base_path: test_dir });
 		observations = backend.observations!;
 	});
 
 	afterEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
+		await remove_tmp_dir(test_dir);
 	});
 
 	describe("basic CRUD", () => {
@@ -479,7 +477,7 @@ describe("observations integration - file backend", () => {
 
 			const obs_id = result.value.id;
 
-			const new_backend = create_file_backend({ base_path: TEST_DIR });
+			const new_backend = create_file_backend({ base_path: test_dir });
 			const new_observations = new_backend.observations!;
 
 			const get_result = await new_observations.get(obs_id);
@@ -499,7 +497,7 @@ describe("observations integration - file backend", () => {
 				content: { value: "b" },
 			});
 
-			const new_backend = create_file_backend({ base_path: TEST_DIR });
+			const new_backend = create_file_backend({ base_path: test_dir });
 			const new_observations = new_backend.observations!;
 
 			const remaining = await Array.fromAsync(new_observations.query({}));

@@ -4,10 +4,9 @@ import { create_memory_backend } from "../../backend/memory.js";
 import { create_file_backend } from "../../backend/file.js";
 import { create_corpus, define_store, json_codec, ok, text_codec } from "../../index.js";
 import type { Backend, CorpusEvent, Corpus, Store } from "../../types.js";
-import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
-const TEST_DIR = join(import.meta.dir, ".test-put-if-changed");
+let test_dir = "";
 
 const item_schema = z.object({ id: z.string(), value: z.number() });
 type Item = z.infer<typeof item_schema>;
@@ -40,12 +39,11 @@ const suites: { name: string; make: () => Backend; setup?: () => Promise<void>; 
 	{ name: "memory", make: () => create_memory_backend() },
 	{
 		name: "file",
-		make: () => create_file_backend({ base_path: TEST_DIR }),
+		make: () => create_file_backend({ base_path: test_dir }),
 		setup: async () => {
-			await rm(TEST_DIR, { recursive: true, force: true });
-			await mkdir(TEST_DIR, { recursive: true });
+			test_dir = await make_tmp_dir("put-if-changed");
 		},
-		cleanup: () => rm(TEST_DIR, { recursive: true, force: true }),
+		cleanup: () => remove_tmp_dir(test_dir),
 	},
 ];
 
