@@ -190,7 +190,7 @@ Every public export, grouped by the source module that defines it.
 - Types: `SnapshotPointer`, `ObservationTypeDef`, `Observation`, `ObservationMeta`, `ObservationPutOpts`, `VersionFilter`, `ObservationQueryOpts`, `InferObservationContent`
 
 ### observations/utils.ts
-- Values: `create_pointer`, `pointer_to_key`, `key_to_pointer`, `resolve_path`, `apply_span`, `generate_observation_id`, `pointers_equal`, `pointer_to_snapshot`
+- Values: `create_pointer`, `pointer_to_key`, `key_to_pointer`, `resolve_path`, `apply_span`, `generate_observation_id`, `pointers_equal`, `pointer_to_snapshot`, `observation_id_schema`
 
 ### testing/index.ts
 Namespace re-export: `testing` (e.g. `import { testing } from '@f0rbit/corpus'`)

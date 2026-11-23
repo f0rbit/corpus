@@ -18,10 +18,11 @@
 import { and, desc, eq, gt, inArray, like, lt, ne, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
+import { observation_id_collision } from "../observations/id.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
 import { corpus_snapshots } from "../schema.js";
 import { storage_error } from "./errors.js";
-import type { CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
+import type { CorpusError, CorpusEvent, ListOpts, MetadataClient, SnapshotMeta } from "../types.js";
 import { err, ok } from "../types.js";
 import { parse_snapshot_meta } from "../utils.js";
 
@@ -273,6 +274,20 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 	};
 }
 
+// drizzle wraps the driver error ("Failed query: ..."), so the UNIQUE text lives further down the cause chain
+const is_observation_id_conflict = (cause: unknown): boolean => {
+	const messages: string[] = [];
+	for (let current = cause, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth++) {
+		messages.push(current.message);
+	}
+	return messages.some((m) => m.includes("UNIQUE constraint failed") && m.includes("corpus_observations.id"));
+};
+
+const observation_put_error =
+	(id: string) =>
+	(cause: unknown): CorpusError =>
+		is_observation_id_conflict(cause) ? observation_id_collision(id) : storage_error("observations.put")(cause);
+
 /**
  * Builds the `ObservationsStorage` implementation over `corpus_observations`,
  * generic over any async drizzle SQLite database (D1 or sqlite-proxy).
@@ -285,7 +300,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 		async put_row(row) {
 			const result = await try_catch_async(async () => {
 				await db.insert(corpus_observations).values(row);
-			}, storage_error("observations.put"));
+			}, observation_put_error(row.id));
 			if (!result.ok) return result;
 			return ok(row);
 		},

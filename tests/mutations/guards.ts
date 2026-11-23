@@ -15,6 +15,7 @@ export const manifest = {
 		"tests/integration/put-if-changed.test.ts",
 		"tests/integration/copy.test.ts",
 		"tests/unit/testing-walker.test.ts",
+		"tests/integration/layered-backend.test.ts",
 	],
 	new_tests: [
 		contract,
@@ -26,6 +27,8 @@ export const manifest = {
 		"tests/integration/put-if-changed.test.ts",
 		"tests/integration/copy.test.ts",
 		"tests/unit/testing-walker.test.ts",
+		"tests/integration/layered-backend.test.ts",
+		"tests/integration/observations-id.test.ts",
 	],
 	// Not listed (unkillable): `desc(sql`rowid`)` tie-break removal in drizzle list/get_latest is an equivalent mutant
 	// while idx_store_created exists (a reverse index scan already yields ties in rowid-desc order); the selector-key
@@ -137,6 +140,27 @@ export const manifest = {
 			find: "if (manifest.name === SELF_PACKAGE_NAME) return null;",
 			replace: "if (manifest.name === SELF_PACKAGE_NAME && false) return null;",
 			guards: "dev-checkout guard: walker skips the corpus package itself",
+		},
+		{
+			id: "guards/layered-observations-shared-id",
+			file: "backend/layered.ts",
+			find: "const with_id = { ...opts, id };",
+			replace: "const with_id = opts;",
+			guards: "layered put fans one shared id out to every write layer",
+		},
+		{
+			id: "guards/observation-id-collision-memory",
+			file: "backend/memory.ts",
+			find: "if (observation_store.has(row.id)) return err(observation_id_collision(row.id));",
+			replace: "void observation_id_collision;",
+			guards: "memory add_one rejects a repeated observation id instead of overwriting",
+		},
+		{
+			id: "guards/observation-id-collision-file",
+			file: "backend/file.ts",
+			find: "if (rows.some((r) => r.id === row.id)) return err(observation_id_collision(row.id));",
+			replace: "void observation_id_collision;",
+			guards: "file add_one rejects a repeated observation id instead of duplicating the row",
 		},
 	],
 } satisfies MutationManifest;

@@ -14,6 +14,7 @@ import type {
 	EventHandler,
 } from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
+import { observation_id_collision, observation_id_collision_cause } from "../observations/id.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter, parse_snapshot_meta, raw_snapshot_meta_schema } from "../utils.js";
 import { ok, err } from "../types.js";
@@ -324,17 +325,19 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		add_one: (row) =>
 			locked([OBS_LOCK], async () => {
 				const rows = await read_observations();
+				if (rows.some((r) => r.id === row.id)) return err(observation_id_collision(row.id));
 				rows.push(row);
 				await write_observations(rows);
+				return ok(undefined);
 			}),
 		remove_one: (id) =>
 			locked([OBS_LOCK], async () => {
 				const rows = await read_observations();
 				const idx = rows.findIndex((r) => r.id === id);
-				if (idx === -1) return false;
+				if (idx === -1) return ok(false);
 				rows.splice(idx, 1);
 				await write_observations(rows);
-				return true;
+				return ok(true);
 			}),
 	});
 	const observations = create_observations_client(storage, metadata, emit);
@@ -469,6 +472,20 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 				const merged = await read_observations();
 				const delete_set = new Set(obs_deletes);
 				const filtered = merged.filter((r) => !delete_set.has(r.id));
+				const seen = new Set(filtered.map((r) => r.id));
+				const duplicate = obs_puts.find((row) => {
+					const dup = seen.has(row.id);
+					seen.add(row.id);
+					return dup;
+				});
+				if (duplicate) {
+					await rm(tx_dir, { recursive: true, force: true });
+					return err({
+						kind: "transaction_aborted",
+						reason: "apply_batch_failed",
+						cause: observation_id_collision_cause(duplicate.id),
+					});
+				}
 				const final = filtered.concat(obs_puts);
 				await Bun.write(staged_obs_path, JSON.stringify(final, null, 2));
 				obs_write = { staged: staged_obs_path, live: file_path };

@@ -5,6 +5,7 @@
 
 import type { Backend, BatchOp, CorpusError, MetadataClient, Result, SnapshotMeta } from "../types.js";
 import type { ObservationRow } from "../observations/index.js";
+import { observation_id_collision, observation_id_collision_cause } from "../observations/id.js";
 import { create_observations_client, create_observations_storage } from "../observations/index.js";
 import { create_emitter } from "../utils.js";
 import { ok, err } from "../types.js";
@@ -164,6 +165,20 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		const meta_snap = new Map(meta_store);
 		const data_snap = new Map(data_store);
 		const obs_snap = new Map(observation_store);
+		const batch_ids = new Set<string>();
+		const duplicate = ops.find((op) => {
+			if (op.type !== "observation_put") return false;
+			const seen = observation_store.has(op.row.id) || batch_ids.has(op.row.id);
+			batch_ids.add(op.row.id);
+			return seen;
+		});
+		if (duplicate?.type === "observation_put") {
+			return err({
+				kind: "transaction_aborted",
+				reason: "apply_batch_failed",
+				cause: observation_id_collision_cause(duplicate.row.id),
+			});
+		}
 		const applied = try_catch(
 			() => {
 				for (const op of ops) {
@@ -214,12 +229,14 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 		},
 		get_one: async (id) => observation_store.get(id) ?? null,
 		add_one: async (row) => {
+			if (observation_store.has(row.id)) return err(observation_id_collision(row.id));
 			observation_store.set(row.id, CORPUS_DEV ? Object.freeze({ ...row }) : row);
+			return ok(undefined);
 		},
 		remove_one: async (id) => {
 			const had = observation_store.has(id);
 			observation_store.delete(id);
-			return had;
+			return ok(had);
 		},
 	});
 	const observations = create_observations_client(storage, metadata, emit);

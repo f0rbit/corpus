@@ -16,7 +16,7 @@ import type {
 import type { ObservationRow } from "./schema.js";
 import type { ObservationsStorage, StorageQueryOpts } from "./storage.js";
 import { row_to_observation, row_to_meta, create_observation_row } from "./storage.js";
-import { generate_observation_id } from "./utils.js";
+import { resolve_observation_id } from "./id.js";
 import { as_error } from "../utils.js";
 import { ok, err } from "../types.js";
 
@@ -137,7 +137,9 @@ export function create_observations_client(
 			if (!inherited.ok) return inherited;
 			const entity_key = inherited.value;
 
-			const id = generate_observation_id();
+			const resolved = resolve_observation_id(opts.id);
+			if (!resolved.ok) return resolved;
+			const id = resolved.value;
 			const row = create_observation_row(id, type.name, opts.source, validation.data, {
 				confidence: opts.confidence,
 				observed_at: opts.observed_at,

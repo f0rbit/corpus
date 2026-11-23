@@ -5,6 +5,7 @@ import {
 	create_memory_backend,
 	create_layered_backend,
 	define_store,
+	define_observation_type,
 	json_codec,
 	type Corpus,
 	type Store,
@@ -18,6 +19,17 @@ const item_schema = z.object({
 });
 
 type Item = z.infer<typeof item_schema>;
+
+const obs = (backend: Backend) => {
+	if (!backend.observations) throw new Error("backend has no observations client");
+	return backend.observations;
+};
+
+const collect = async (backend: Backend) => {
+	const rows = [];
+	for await (const row of obs(backend).query()) rows.push(row);
+	return rows;
+};
 
 describe("layered backend", () => {
 	let memory1: Backend;
@@ -478,6 +490,79 @@ describe("layered backend", () => {
 			expect(get_result.ok).toBe(true);
 			if (!get_result.ok) return;
 			expect(get_result.value.data).toEqual({ id: "1", text: "hello" });
+		});
+	});
+
+	describe("observations", () => {
+		const note_type = define_observation_type("note", z.object({ text: z.string() }));
+		const source = { store_id: "items", version: "v1" };
+		let cache: Backend;
+		let disk: Backend;
+		let layered: Backend;
+
+		beforeEach(() => {
+			cache = create_memory_backend();
+			disk = create_memory_backend();
+			layered = create_layered_backend({ read: [cache, disk], write: [cache, disk] });
+		});
+
+		it("put is readable through the layered get and stored under one id on both layers", async () => {
+			const put = await obs(layered).put(note_type, { source, content: { text: "hi" } });
+			expect(put.ok).toBe(true);
+			if (!put.ok) return;
+
+			const via_layered = await obs(layered).get(put.value.id);
+			expect(via_layered.ok).toBe(true);
+			expect((await obs(cache).get(put.value.id)).ok).toBe(true);
+			expect((await obs(disk).get(put.value.id)).ok).toBe(true);
+		});
+
+		it("honours a caller-supplied id on both layers", async () => {
+			const put = await obs(layered).put(note_type, { source, content: { text: "hi" }, id: "obs_mine" });
+			expect(put.ok).toBe(true);
+			if (!put.ok) return;
+			expect(put.value.id).toBe("obs_mine");
+			expect((await obs(cache).get("obs_mine")).ok).toBe(true);
+			expect((await obs(disk).get("obs_mine")).ok).toBe(true);
+		});
+
+		it("delete removes the observation from both layers", async () => {
+			const put = await obs(layered).put(note_type, { source, content: { text: "hi" } });
+			if (!put.ok) throw new Error("put failed");
+
+			const deleted = await obs(layered).delete(put.value.id);
+			expect(deleted.ok).toBe(true);
+			expect((await obs(cache).get(put.value.id)).ok).toBe(false);
+			expect((await obs(disk).get(put.value.id)).ok).toBe(false);
+
+			expect(await collect(layered)).toHaveLength(0);
+		});
+
+		it("delete of an unknown id is observation_not_found", async () => {
+			const deleted = await obs(layered).delete("obs_missing");
+			expect(deleted.ok).toBe(false);
+			if (!deleted.ok) expect(deleted.error.kind).toBe("observation_not_found");
+		});
+
+		it("delete_by_source reports the real count, not one per layer", async () => {
+			await obs(layered).put(note_type, { source, content: { text: "a" } });
+			await obs(layered).put(note_type, { source, content: { text: "b" } });
+
+			const removed = await obs(layered).delete_by_source(source);
+			expect(removed.ok).toBe(true);
+			if (removed.ok) expect(removed.value).toBe(2);
+			expect(await collect(cache)).toHaveLength(0);
+			expect(await collect(disk)).toHaveLength(0);
+		});
+
+		it("a collision on a later layer leaves earlier layers clean", async () => {
+			const seeded = await obs(disk).put(note_type, { source, content: { text: "old" }, id: "obs_dup" });
+			expect(seeded.ok).toBe(true);
+
+			const put = await obs(layered).put(note_type, { source, content: { text: "new" }, id: "obs_dup" });
+			expect(put.ok).toBe(false);
+			if (!put.ok) expect(put.error.kind).toBe("validation_error");
+			expect((await obs(cache).get("obs_dup")).ok).toBe(false);
 		});
 	});
 });
