@@ -27,6 +27,31 @@ const ALL_CORPUS_ERROR_VARIANTS: readonly CorpusError["kind"][] = [
 	"concurrent_modification",
 ];
 
+const is_hash = (s: string): boolean => /^[a-f0-9]{64}$/.test(s);
+const has_ids = (e: { store_id: string; version: string }): boolean => e.store_id.length > 0 && e.version.length > 0;
+
+const shape_checks: { [K in CorpusError["kind"]]: (e: Extract<CorpusError, { kind: K }>) => boolean } = {
+	not_found: has_ids,
+	already_exists: has_ids,
+	concurrent_modification: has_ids,
+	storage_error: (e) => e.cause instanceof Error && e.operation.length > 0,
+	decode_error: (e) => e.cause instanceof Error,
+	encode_error: (e) => e.cause instanceof Error,
+	validation_error: (e) => e.cause instanceof Error && e.message.length > 0,
+	hash_mismatch: (e) => is_hash(e.expected) && is_hash(e.actual),
+	invalid_config: (e) => e.message.length > 0,
+	observation_not_found: (e) => e.id.length > 0,
+	transaction_aborted: (e) =>
+		["returned_err", "threw", "apply_batch_failed"].includes(e.reason) &&
+		(e.cause === undefined || e.cause instanceof Error),
+	partial_commit: (e) => e.cause instanceof Error && e.ops_failed >= 1 && e.ops_completed >= 0,
+};
+
+// The mapped type guarantees each check matches its own kind; the cast only
+// erases that correlation for the lookup-by-runtime-kind call site.
+const shape_ok = (kind: CorpusError["kind"], e: CorpusError): boolean =>
+	e.kind === kind && (shape_checks[kind] as (e: CorpusError) => boolean)(e);
+
 describe("testing/failure module", () => {
 	beforeEach(() => {
 		__reset_registry_for_tests();
@@ -116,95 +141,14 @@ describe("testing/failure module", () => {
 			expect(variants.length).toBe(12);
 		});
 
-		for (const kind of ALL_CORPUS_ERROR_VARIANTS) {
-			test(`${kind} generator is registered and produces values with matching kind`, async () => {
+		test("every kind's generator yields its own kind and a well-formed shape", async () => {
+			for (const kind of ALL_CORPUS_ERROR_VARIANTS) {
 				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
-				expect(gen).toBeDefined();
-				if (!gen) return;
-				const samples = fc.sample(gen, 10);
-				for (const sample of samples) {
+				if (!gen) throw new Error(`no generator registered for ${kind}`);
+				for (const sample of fc.sample(gen, 20)) {
 					expect(sample.kind).toBe(kind);
+					expect(shape_ok(kind, sample)).toBe(true);
 				}
-			});
-		}
-
-		test("storage_error cause is a real Error instance", async () => {
-			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "storage_error");
-			expect(gen).toBeDefined();
-			if (!gen) return;
-			const samples = fc.sample(gen, 10);
-			for (const sample of samples) {
-				if (sample.kind !== "storage_error") throw new Error("unreachable");
-				expect(sample.cause).toBeInstanceOf(Error);
-				expect(typeof sample.operation).toBe("string");
-			}
-		});
-
-		test("decode_error / encode_error / validation_error / partial_commit causes are Error instances", async () => {
-			const kinds = ["decode_error", "encode_error", "validation_error", "partial_commit"] as const;
-			for (const kind of kinds) {
-				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
-				expect(gen).toBeDefined();
-				if (!gen) continue;
-				const samples = fc.sample(gen, 5);
-				for (const sample of samples) {
-					if (sample.kind !== kind) throw new Error("unreachable");
-					expect(sample.cause).toBeInstanceOf(Error);
-				}
-			}
-		});
-
-		test("transaction_aborted reason is one of the allowed literals", async () => {
-			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "transaction_aborted");
-			expect(gen).toBeDefined();
-			if (!gen) return;
-			const allowed = new Set(["returned_err", "threw", "apply_batch_failed"]);
-			const samples = fc.sample(gen, 20);
-			for (const sample of samples) {
-				if (sample.kind !== "transaction_aborted") throw new Error("unreachable");
-				expect(allowed.has(sample.reason)).toBe(true);
-				if (sample.cause !== undefined) {
-					expect(sample.cause).toBeInstanceOf(Error);
-				}
-			}
-		});
-
-		test("hash_mismatch expected/actual are 64-char hex strings", async () => {
-			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "hash_mismatch");
-			expect(gen).toBeDefined();
-			if (!gen) return;
-			const samples = fc.sample(gen, 10);
-			for (const sample of samples) {
-				if (sample.kind !== "hash_mismatch") throw new Error("unreachable");
-				expect(sample.expected).toMatch(/^[a-f0-9]{64}$/);
-				expect(sample.actual).toMatch(/^[a-f0-9]{64}$/);
-			}
-		});
-
-		test("not_found / already_exists / concurrent_modification carry non-empty store_id + version", async () => {
-			const kinds = ["not_found", "already_exists", "concurrent_modification"] as const;
-			for (const kind of kinds) {
-				const gen = await lookup_failure(CORPUS_ERROR_BRAND, kind);
-				expect(gen).toBeDefined();
-				if (!gen) continue;
-				const samples = fc.sample(gen, 5);
-				for (const sample of samples) {
-					if (sample.kind !== kind) throw new Error("unreachable");
-					expect(sample.store_id.length).toBeGreaterThan(0);
-					expect(sample.version.length).toBeGreaterThan(0);
-				}
-			}
-		});
-
-		test("partial_commit ops_failed is at least 1 (otherwise it wouldn't be 'partial')", async () => {
-			const gen = await lookup_failure(CORPUS_ERROR_BRAND, "partial_commit");
-			expect(gen).toBeDefined();
-			if (!gen) return;
-			const samples = fc.sample(gen, 10);
-			for (const sample of samples) {
-				if (sample.kind !== "partial_commit") throw new Error("unreachable");
-				expect(sample.ops_failed).toBeGreaterThanOrEqual(1);
-				expect(sample.ops_completed).toBeGreaterThanOrEqual(0);
 			}
 		});
 	});
