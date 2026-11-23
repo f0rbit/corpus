@@ -671,11 +671,26 @@ bun run mutate tests/mutations/guards.ts</pre>
             <span class="badge todo">todo</span>
           </header>
           <p>The audit's §5.1. Each cluster replaces example tables with properties over the <code>testing.*</code> substrate, deletes the subsumed examples, and keeps every KEEP-list guard. Each cluster ships with its mutation manifest. One commit per cluster (C1-C7). Rollback is per cluster: revert one commit.</p>
+          <p><strong>Phase 2 deletion rule</strong>, which is the operational form of AD-1. A cluster commits only if all of the following hold:</p>
+          <ol>
+            <li><code>bun run coverage:diff --base 6171c87</code> shows no lost lines.</li>
+            <li><code>bun run mutate tests/mutations/&lt;cluster&gt;.ts</code> shows 0 regressions.</li>
+            <li>The keep-list items named in the task are still present.</li>
+            <li>The deletion and its replacement are in the same diff.</li>
+          </ol>
+          <p>Every manifest mutation must change a real code path. The reviewer drops any mutation that survives on <em>both</em> sides and notes it in the proof, because a mutation nothing can kill is equivalent and gives no signal. A mutation killed only on the new side (new coverage, e.g. <code>merge_deep</code>) is kept.</p>
           <dl class="meta">
             <dt>Devpad task</dt>
             <dd><code>task_caddb6cf-a52b-4414-b121-2e50453eda91</code></dd>
             <dt>Mode</dt>
-            <dd>7 background coders on disjoint files in the shared checkout. Each coder self-checks typecheck and lint (this catches manifests whose shape violates <code>MutationManifest</code>, and arbitraries typed wrongly against the schema). Because coders can't run properties, a property that fails on its first real run is fixed forward by the reviewer. The reviewer commits each cluster independently as it passes AD-1.</dd>
+            <dd>
+              <ul>
+                <li><strong>One worktree per cluster</strong> (7 worktrees off <code>test/suite-yield</code>). The clusters' files <em>are</em> disjoint, but the gate tools snapshot the whole tree: <code>coverage:diff</code> runs the full suite, and <code>mutate</code> uses <code>git stash create</code>. In a shared checkout, one cluster's in-flight deletions would contaminate another cluster's gate.</li>
+                <li>The reviewer symlinks <code>node_modules</code> into each worktree, gates it there, and cherry-picks onto the feature branch linearly. It then re-runs <code>coverage:diff --base 6171c87</code> on the integrated tip.</li>
+                <li>In practice coders have no shell (Phase 1 lesson), so briefs list the typed-ESLint traps explicitly. A property that fails on its first real run is fixed forward by the reviewer.</li>
+                <li>No coder edits <code>AGENTS.md</code>, <code>eslint.config.ts</code> or <code>package.json</code> in this phase. The <code>AGENTS.md</code> layout/citation touch-ups happen once at phase close.</li>
+              </ul>
+            </dd>
           </dl>
 
           <article class="task" id="task-2-1">
@@ -701,12 +716,12 @@ bun run mutate tests/mutations/guards.ts</pre>
                 <li><code>format_error</code> is total over <code>fc.anything()</code>.</li>
                 <li>New: <code>merge_deep(x,{}) ≡ x</code>, right-bias on leaf conflicts, and <code>at(xs,i)</code> ok ⇔ 0≤i&lt;len.</li>
               </ul>
-              <p>Keep the <code>fetch_result</code> examples (real fetch fake) and <code>result-functor.test.ts</code>.</p>
+              <p>Also add <code>first</code>/<code>last</code> properties (empty ⇒ err, else ends). Today <code>result.ts</code> 502/505 are reached only through <code>observation-utils</code>. <code>at</code> also returns err for an in-range <code>undefined</code> element, so generate defined values or assert that branch explicitly. Keep the <code>fetch_result</code> examples (real fetch fake), the <code>unwrap</code>/<code>unwrap_err</code> throw-message examples, and <code>result-functor.test.ts</code>.</p>
             </section>
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/unit/result.test.ts tests/property/result-laws.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/result.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/result.ts</pre>
               <p>Expected: 79 → ~22 tests; <code>result.ts</code> lines 426-467 are now covered; no lost lines; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
             </section>
           </article>
@@ -737,7 +752,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/result.ts</pre>
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/property/observation-utils.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/observation-utils.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/observation-utils.ts</pre>
               <p>Expected: 64 → ~15; <code>observations/utils.ts</code> stays at 100%; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
             </section>
           </article>
@@ -760,13 +775,14 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/observation-util
                 <li><code>law.round_trip</code> over every codec and every <code>compose(head, ...layers)</code> combination of {text, binary, json} × {∅, gzip, encrypt, gzip+encrypt}.</li>
                 <li><code>concat(encode_stream(v)) ≡ encode(v)</code> (this covers the encrypt 76-90 and gzip 45-46 gaps) and <code>decode_stream ≡ decode</code> where present.</li>
                 <li>Streamability ⇔ every layer streams.</li>
+                <li><code>text_codec.decode_stream</code> over UTF-8 bytes split at random offsets, including inside multi-byte characters, equals <code>decode</code>.</li>
               </ul>
               <p>Examples kept in <code>codecs.test.ts</code>: random IV, wrong key, tamper, no-dedup-under-encrypt, one ≥512 KB multi-chunk decode.</p>
             </section>
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/property/codec-laws.test.ts tests/integration/codecs.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/codecs.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/codecs.ts</pre>
               <p>Expected: 28 → ~12; <code>codecs/encrypt.ts</code> ≥95% lines (from 60.6); K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
             </section>
           </article>
@@ -791,12 +807,12 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/codecs.ts</pre>
                 <li>the index is passed correctly;</li>
                 <li>a rejecting mapper surfaces.</li>
               </ul>
-              <p>Keep the Semaphore acquire/release and FIFO examples.</p>
+              <p>Keep the Semaphore acquire/release and FIFO examples, with their <code>setTimeout</code> sleeps replaced by microtask flushes. The file ends with zero <code>setTimeout</code> calls.</p>
             </section>
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/unit/concurrency.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/concurrency.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/concurrency.ts</pre>
               <p>Expected: 18 → ~8; file runtime &lt;100 ms (from 329); mutants on the limit check and result-index assignment are killed.</p>
             </section>
           </article>
@@ -819,12 +835,12 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/concurrency.ts</
                 <li><strong>Precedence:</strong> ∀ presence subsets of {flag, config env, env var, wrangler uuid / placeholder}, the resolved id equals the highest-ranked present non-placeholder value; if none is present, <code>invalid_config</code> naming the fix.</li>
                 <li><strong>argv reconstruction:</strong> ∀ argv drawn from {globals, <code>--x</code>, <code>--x=v</code>, <code>--x v</code>, positionals}, the command parse sees exactly the non-global tokens, in order.</li>
               </ul>
-              <p>Keep all <code>--json</code> purity, selector-key, <code>.git</code>-boundary and placeholder-id examples.</p>
+              <p>The enable matrix also observes <code>note()</code> (visible ⇔ ¬quiet ∧ ¬json). The precedence property targets <code>resolve_connection_ids</code> directly. Keep all <code>--json</code> purity, selector-key, <code>.git</code>-boundary and placeholder-id examples, the purity and spawn-smoke tests in <code>cli-output</code>, and the <code>cli-args.test.ts</code> path (<code>guards.ts</code> references it).</p>
             </section>
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/unit/cli-output.test.ts tests/unit/cli-config.test.ts tests/unit/cli-args.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/cli-policy.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/cli-policy.ts</pre>
               <p>Expected: 71 → ~48; mutants dropping <code>!ci</code> from the spinner gate or adding <code>quiet</code> to the colour gate are killed.</p>
             </section>
           </article>
@@ -843,7 +859,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/cli-policy.ts</p
             <section data-kind="scope">
               <h4>Scope</h4>
               <ul>
-                <li>One table of schemas, with ∀ entry asserting <code>fc.assert(arb(schema) ⇒ safeParse ok)</code>. Add v3 tuple, intersection and unsupported-kind message rows (the arb-v3 gaps).</li>
+                <li>One table of schemas, with ∀ entry asserting <code>fc.assert(arb(schema) ⇒ safeParse ok)</code>. Add v3 tuple, intersection and unsupported-kind message rows (the arb-v3 gaps). Branch-reach claims (union branches, optional/nullable emitting both) use <code>testing.cover</code> labels instead of hand-counted samples. Keep the file names <code>testing-arb.test.ts</code> and <code>testing-arb-dual.test.ts</code>, because <code>eslint.config.ts</code> overrides name them.</li>
                 <li>One table typed <code>{ [K in CorpusError["kind"]]: ... }</code>, asserting each failure generator yields its <code>kind</code>.</li>
                 <li><code>testing-compose</code> keeps the shrink test and one shape test.</li>
                 <li>Add a deliberately violating input for <code>round_trip</code>, <code>idempotent</code>, <code>functor</code> (both branches), <code>default_equals</code> and <code>provider_equivalence</code>, and assert the law <em>throws</em>. This covers equality 17-19, functor 84-88/108-112, idempotent 62-64 and provider-equivalence 142-146. A law that can't fail is a silent no-op.</li>
@@ -852,7 +868,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/cli-policy.ts</p
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/unit/testing-*.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/substrate.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/substrate.ts</pre>
               <p>Expected: 66 → ~32; <code>testing/laws/{equality,functor}.ts</code> ≥80% lines; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
             </section>
           </article>
@@ -880,7 +896,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/substrate.ts</pr
             <section data-kind="acceptance">
               <h4>Acceptance</h4>
               <pre>bun test tests/integration/version-set.test.ts
-bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/version-set.ts</pre>
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/version-set.ts</pre>
               <p>Expected: 40 → ~14; <code>version-set.ts</code> no lost lines (259-263 newly covered if reachable); K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
             </section>
           </article>
