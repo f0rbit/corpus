@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
+import fc from "fast-check";
 import { z } from "zod";
 import {
 	create_corpus,
@@ -186,80 +187,29 @@ describe("layered backend", () => {
 	});
 
 	describe("list merging", () => {
-		it("merges results from multiple read backends", async () => {
-			await memory1.metadata.put(make_meta("items", "v1", new Date("2024-01-01")));
-			await memory2.metadata.put(make_meta("items", "v2", new Date("2024-01-02")));
+		it("merges layers: first layer wins on duplicates, newest first, limit after the merge", async () => {
+			await fc.assert(
+				fc.asyncProperty(layers_arb, limit_arb, async (layer_versions, limit) => {
+					const backends = layer_versions.map(() => create_memory_backend());
+					for (const [layer, versions] of layer_versions.entries()) {
+						for (const version of versions) {
+							await backends[layer]?.metadata.put({
+								...make_meta("items", version, date_of(version)),
+								size_bytes: layer,
+							});
+						}
+					}
 
-			const layered = create_layered_backend({
-				read: [memory1, memory2],
-				write: [],
-				list_strategy: "merge",
-			});
+					const layered = create_layered_backend({ read: backends, write: [], list_strategy: "merge" });
+					const actual: string[] = [];
+					for await (const meta of layered.metadata.list("items", limit === undefined ? undefined : { limit })) {
+						actual.push(`${meta.version}@${String(meta.size_bytes)}`);
+					}
 
-			const versions: string[] = [];
-			for await (const meta of layered.metadata.list("items")) {
-				versions.push(meta.version);
-			}
-
-			expect(versions).toHaveLength(2);
-			expect(versions).toContain("v1");
-			expect(versions).toContain("v2");
-		});
-
-		it("deduplicates by version", async () => {
-			const same_meta = make_meta("items", "v1", new Date("2024-01-01"));
-			await memory1.metadata.put(same_meta);
-			await memory2.metadata.put(same_meta);
-
-			const layered = create_layered_backend({
-				read: [memory1, memory2],
-				write: [],
-			});
-
-			const versions: string[] = [];
-			for await (const meta of layered.metadata.list("items")) {
-				versions.push(meta.version);
-			}
-
-			expect(versions).toHaveLength(1);
-			expect(versions[0]).toBe("v1");
-		});
-
-		it("sorts by created_at descending", async () => {
-			await memory1.metadata.put(make_meta("items", "v1", new Date("2024-01-01")));
-			await memory2.metadata.put(make_meta("items", "v2", new Date("2024-01-03")));
-			await memory1.metadata.put(make_meta("items", "v3", new Date("2024-01-02")));
-
-			const layered = create_layered_backend({
-				read: [memory1, memory2],
-				write: [],
-			});
-
-			const versions: string[] = [];
-			for await (const meta of layered.metadata.list("items")) {
-				versions.push(meta.version);
-			}
-
-			expect(versions).toEqual(["v2", "v3", "v1"]);
-		});
-
-		it("applies limit after merging", async () => {
-			await memory1.metadata.put(make_meta("items", "v1", new Date("2024-01-01")));
-			await memory2.metadata.put(make_meta("items", "v2", new Date("2024-01-02")));
-			await memory1.metadata.put(make_meta("items", "v3", new Date("2024-01-03")));
-
-			const layered = create_layered_backend({
-				read: [memory1, memory2],
-				write: [],
-			});
-
-			const versions: string[] = [];
-			for await (const meta of layered.metadata.list("items", { limit: 2 })) {
-				versions.push(meta.version);
-			}
-
-			expect(versions).toHaveLength(2);
-			expect(versions).toEqual(["v3", "v2"]);
+					expect(actual).toEqual(expected_merge(layer_versions, limit));
+				}),
+				{ numRuns: 200 },
+			);
 		});
 
 		it("uses first strategy when configured", async () => {
@@ -566,6 +516,33 @@ describe("layered backend", () => {
 		});
 	});
 });
+
+const VERSION_POOL = ["v1", "v2", "v3", "v4", "v5", "v6"];
+
+// a version carries the same created_at in every layer (3 distinct dates, so ties occur); duplicates differ only by
+// the layer that holds them
+const date_of = (version: string): Date => new Date(Date.UTC(2024, 0, 1 + (VERSION_POOL.indexOf(version) % 3)));
+
+const layers_arb = fc.array(fc.uniqueArray(fc.constantFrom(...VERSION_POOL), { maxLength: 6 }), {
+	minLength: 2,
+	maxLength: 3,
+});
+const limit_arb = fc.option(fc.integer({ min: 1, max: 8 }), { nil: undefined });
+
+// union of layers, first layer wins a duplicate; each layer lists newest-put first, so equal created_at keeps
+// layer order then reverse insertion; limit applies to the merged result
+function expected_merge(layer_versions: string[][], limit: number | undefined): string[] {
+	const claimed = new Set<string>();
+	const merged = layer_versions.flatMap((versions, layer) => {
+		const fresh = versions.toReversed().filter((version) => !claimed.has(version));
+		fresh.forEach((version) => claimed.add(version));
+		return fresh.map((version) => ({ version, layer }));
+	});
+	return merged
+		.toSorted((a, b) => date_of(b.version).getTime() - date_of(a.version).getTime())
+		.slice(0, limit ?? Infinity)
+		.map(({ version, layer }) => `${version}@${String(layer)}`);
+}
 
 function make_meta(store_id: string, version: string, created_at: Date): SnapshotMeta {
 	return {
