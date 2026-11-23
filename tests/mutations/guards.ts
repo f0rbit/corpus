@@ -19,7 +19,7 @@ export const manifest = {
 	],
 	new_tests: [
 		contract,
-		"tests/integration/observations-entity.test.ts",
+		"tests/integration/observations-contract.test.ts",
 		"tests/unit/cli-args.test.ts",
 		"tests/integration/cli-read.test.ts",
 		"tests/integration/file-concurrency.test.ts",
