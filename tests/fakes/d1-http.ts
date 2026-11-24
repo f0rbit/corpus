@@ -42,8 +42,13 @@ export type FakeD1HttpServer = {
 	stop: () => void;
 	/** Drops all state and rebuilds an empty schema; the server keeps serving on the same url. */
 	reset: () => void;
+	/** Installs a hook consulted before normal handling: a returned Response wins, `undefined` falls through. `reset()` clears it. */
+	set_responder: (responder: HttpResponder | undefined) => void;
 	readonly sqlite: Database;
 };
+
+// a clone of the incoming request, so a responder may read the body and still fall through
+export type HttpResponder = (request: ReturnType<Request["clone"]>) => Response | Promise<Response> | undefined;
 
 export type FakeD1HttpOptions = {
 	/** When set, only this Bearer token is accepted (anything else gets a 401). */
@@ -54,10 +59,14 @@ export type FakeD1HttpOptions = {
 
 export function create_fake_d1_http(tables: SQLiteTable[], options: FakeD1HttpOptions = {}): FakeD1HttpServer {
 	let fake_d1 = create_fake_d1(tables);
+	let responder: HttpResponder | undefined;
 
 	const server = Bun.serve({
 		port: 0,
 		fetch: async (request: Request) => {
+			const override = await responder?.(request.clone());
+			if (override) return override;
+
 			const url = new URL(request.url);
 			const path = url.pathname;
 
@@ -168,6 +177,10 @@ export function create_fake_d1_http(tables: SQLiteTable[], options: FakeD1HttpOp
 		reset: () => {
 			fake_d1.sqlite.close();
 			fake_d1 = create_fake_d1(tables);
+			responder = undefined;
+		},
+		set_responder: (next) => {
+			responder = next;
 		},
 		get sqlite() {
 			return fake_d1.sqlite;

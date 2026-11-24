@@ -12,9 +12,14 @@ export type FakeS3Server = {
 	stop: () => void;
 	/** Clears every stored object; the server keeps serving on the same url. */
 	reset: () => void;
+	/** Installs a hook consulted before normal handling: a returned Response wins, `undefined` falls through. `reset()` clears it. */
+	set_responder: (responder: HttpResponder | undefined) => void;
 	has: (key: string) => boolean;
 	keys: () => string[];
 };
+
+// a clone of the incoming request, so a responder may read the body and still fall through
+export type HttpResponder = (request: ReturnType<Request["clone"]>) => Response | Promise<Response> | undefined;
 
 const s3_404_xml = (key: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Error>
@@ -69,10 +74,14 @@ const parse_s3_path = (url: URL): { bucket: string; key: string } | null => {
 
 export function create_fake_s3(): FakeS3Server {
 	const objects = new Map<string, Uint8Array>();
+	let responder: HttpResponder | undefined;
 
 	const server = Bun.serve({
 		port: 0,
 		fetch: async (request: Request) => {
+			const override = await responder?.(request.clone());
+			if (override) return override;
+
 			const url = new URL(request.url);
 			const parsed = parse_s3_path(url);
 
@@ -161,6 +170,10 @@ export function create_fake_s3(): FakeS3Server {
 		},
 		reset: () => {
 			objects.clear();
+			responder = undefined;
+		},
+		set_responder: (next) => {
+			responder = next;
 		},
 		has: (key: string) => objects.has(key),
 		keys: () => [...objects.keys()],

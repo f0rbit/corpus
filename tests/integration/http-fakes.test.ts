@@ -136,6 +136,27 @@ describe("D1 HTTP Server Fake", () => {
 		expect(data.result[0]?.results?.rows.length ?? 0).toBeGreaterThan(0);
 	});
 
+	it("set_responder: a returned Response wins, undefined falls through to normal behaviour, reset() clears it", async () => {
+		const query = () =>
+			fetch(`${server.url}/accounts/test/d1/database/test/raw`, {
+				method: "POST",
+				headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" },
+				body: JSON.stringify({ sql: "SELECT COUNT(*) AS n FROM corpus_snapshots", params: [] }),
+			});
+
+		server.set_responder(() => new Response("boom", { status: 500 }));
+		expect((await query()).status).toBe(500);
+
+		server.set_responder(() => undefined);
+		const fallthrough = await query();
+		expect(fallthrough.status).toBe(200);
+		expect(d1_http_response_schema.parse(await fallthrough.json()).success).toBe(true);
+
+		server.set_responder(() => new Response("boom", { status: 500 }));
+		server.reset();
+		expect((await query()).status).toBe(200);
+	});
+
 	it("reset() drops state, keeps the schema and keeps serving", async () => {
 		const query = async (sql: string, params: unknown[] = []) => {
 			const response = await fetch(`${server.url}/accounts/test/d1/database/test/raw`, {
@@ -310,6 +331,19 @@ describe("S3 Server Fake", () => {
 		const put_response = await fetch(`${server.url}/bucket/other`, { method: "PUT", body: new Uint8Array([9]) });
 		expect(put_response.status).toBe(200);
 		expect(server.keys()).toEqual(["other"]);
+	});
+
+	it("set_responder: a returned Response wins, undefined falls through to normal behaviour, reset() clears it", async () => {
+		await fetch(`${server.url}/bucket/k`, { method: "PUT", body: new Uint8Array([1]) });
+
+		server.set_responder((request) => (request.method === "HEAD" ? new Response("", { status: 500 }) : undefined));
+		expect((await fetch(`${server.url}/bucket/k`, { method: "HEAD" })).status).toBe(500);
+		expect((await fetch(`${server.url}/bucket/k`, { method: "GET" })).status).toBe(200);
+
+		server.reset();
+		server.set_responder(() => new Response("", { status: 500 }));
+		server.reset();
+		expect((await fetch(`${server.url}/bucket/k`, { method: "HEAD" })).status).toBe(404);
 	});
 
 	it("stores bytes exactly without corruption", async () => {
