@@ -162,5 +162,12 @@ export const manifest = {
 			replace: "void observation_id_collision;",
 			guards: "file add_one rejects a repeated observation id instead of duplicating the row",
 		},
+		{
+			id: "guards/file-list-stores-includes-empty",
+			file: "backend/file.ts",
+			find: "if ((await read_store_meta(store_id)).size > 0) ids.push(store_id);",
+			replace: "ids.push(store_id);",
+			guards: "file list_stores omits stores with no remaining metas (delete leaves an empty _meta.json)",
+		},
 	],
 } satisfies MutationManifest;

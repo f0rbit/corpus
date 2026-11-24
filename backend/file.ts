@@ -273,7 +273,7 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 		async *list_stores() {
 			const ids: string[] = [];
 			for await (const store_id of list_all_stores()) {
-				ids.push(store_id);
+				if ((await read_store_meta(store_id)).size > 0) ids.push(store_id);
 			}
 			for (const id of ids.toSorted()) {
 				yield id;

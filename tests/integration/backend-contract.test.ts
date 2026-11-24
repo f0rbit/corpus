@@ -540,6 +540,22 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(ids.toSorted()).toEqual(["store-a", "store-b"]);
 					expect(new Set(ids).size).toBe(ids.length);
 				});
+
+				it("omits stores whose versions were all deleted or never existed", async () => {
+					if (!backend.metadata.list_stores) return;
+
+					await backend.metadata.put(make_meta("store-a", "v1"));
+					await backend.metadata.put(make_meta("store-b", "v1"));
+					await backend.metadata.delete("store-b", "v1");
+					await backend.metadata.delete("store-c", "missing");
+
+					const ids: string[] = [];
+					for await (const store_id of backend.metadata.list_stores()) {
+						ids.push(store_id);
+					}
+
+					expect(ids).toEqual(["store-a"]);
+				});
 			});
 		});
 
