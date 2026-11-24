@@ -219,7 +219,7 @@
     <main>
       <header>
         <h1>Plan: test-suite-yield</h1>
-        <span class="badge doing">approved</span>
+        <span class="badge done">done</span>
         <p>Make the corpus test suite smaller and stronger at the same time. Today 1164 tests / 14.5k LOC reach 87.2% lines / 91.5% functions, but 684 of the 885 tests in the heaviest files add no line coverage and are mostly literal-variation examples. Two observation suites are copy-pasted, and real code (drizzle <code>delete_by_source</code>, layered observations, remote tx compensation, <code>wrap_bytes_storage</code>, <code>merge_deep</code>/<code>at</code>) has no coverage at all. The plan does four things. It adds two cheap, mechanical safety rails: a coverage-superset diff and a mutation kill-set check. It turns example clusters into <code>testing.*</code> laws and properties. It replaces copy-paste with shared contract suites and model-based equivalence across all five backends. It fills the ranked coverage gaps and then turns on the deferred per-file 80% CI coverage gate (devpad <code>task_c453a4e2</code>). Expected result: about 1164 → about 750 tests, about 14.5k → about 9.5k test LOC, lines 87.2% → ≥93%, functions 91.5% → ≥96%, and no lib file under 80%.</p>
       </header>
 
@@ -1223,7 +1223,7 @@ bun run mutate tests/mutations/guards.ts</pre>
         <section class="phase" id="phase-4">
           <header>
             <h3>Phase 4: Close the gaps, make CLI coverage visible, enable the coverage gate</h3>
-            <span class="badge todo">todo</span>
+            <span class="badge done">done</span>
           </header>
           <p>Adds the high-value tests the audit ranked, then turns on the per-file 80% gate (devpad <code>task_c453a4e2</code>, adopted as this phase's task). Ends with AGENTS.md updates and the ONE PR. Rollback: C14 (<code>cli/main.ts</code> plus the <code>load_cli_config</code> <code>cwd</code> seam) and C14b (the <code>equality.ts</code> seam) are the only lib changes, and each reverts cleanly. C16 (the gate) reverts to plain <code>bun test</code>.</p>
           <p><strong>Revised task map (2026-11-24, checked against <code>8b0926b</code>).</strong> Full briefs: <code>.plans/test-suite-yield-phase4-briefs.md</code>. They supersede the task articles below where the two differ.</p>
@@ -1261,7 +1261,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <article class="task" id="task-4-1">
             <header>
               <h3>Task 4.1 (C12): <code>corpus.ts</code> gaps</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1287,7 +1287,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <article class="task" id="task-4-2">
             <header>
               <h3>Task 4.2 (C13): Backend error paths</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1314,7 +1314,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <article class="task" id="task-4-3">
             <header>
               <h3>Task 4.3 (C14): In-process CLI (<code>cli/main.ts</code>) and command error branches</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1342,7 +1342,7 @@ bun run coverage:diff --base HEAD  # re-baselined at this commit</pre>
           <article class="task" id="task-4-4">
             <header>
               <h3>Task 4.4 (C15): Floor stragglers</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1369,7 +1369,7 @@ bun run coverage:diff --base HEAD  # re-baselined at this commit</pre>
           <article class="task" id="task-4-5">
             <header>
               <h3>Task 4.5 (C16): Enable the gate, update AGENTS.md</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1422,7 +1422,13 @@ bun run mutate tests/mutations/guards.ts</pre>
 
           <section data-kind="proof">
             <h4>Proof</h4>
-            <div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div>
+            <div class="proof">
+              <p>Commits on <code>test/suite-yield</code>: 4.0a <code>d8c605b</code> + <code>0ebd936</code> (<code>coverage:diff --by-content</code>); 4.0b <code>921c7e5</code> (hit-rate floors); 4.5 <code>7bd4b36</code> (<code>has_bun</code> seam); 4.1 <code>1c5b1f3</code>; 4.2 <code>c3f33f9</code>; 4.3 <code>a780e66</code> (<code>cli/main.ts</code>, <code>cwd</code> seam); 4.4 <code>aecadf6</code> (CLI error branches); 4.6 <code>ci: enforce per-file coverage in gate and CI</code>; 4.7 AGENTS.md + this proof.</p>
+              <p>Task 4.4: <code>coverage:diff --base a780e66 --by-content</code> reported no lost lines; <code>mutate tests/mutations/cli-errors.ts --base a780e66</code>: 13 mutants, all survived old and KILLED new, 0 regressions, 0 new-side survivors. One test defect caught in review: the failing-listing fake emitted its error when the iterator was created rather than consumed, so <code>collect_list</code> (which snapshots the error count first) missed it; the fake now emits during iteration like the real backends. Fresh per-file table: <code>cli/commands/{cat,show,versions,stores}.ts</code>, <code>cli/config-schema.ts</code>, <code>cli/load-config.ts</code>, <code>cli/wrangler.ts</code> all 100% lines and functions.</p>
+              <p>Task 4.6: bunfig <code>coveragePathIgnorePatterns = ["sst.ts", "tests/**"]</code>; <code>gate</code> and CI's <code>test</code> job run <code>bun test --coverage</code> (job name unchanged; zod3 rerun stays plain). Exit codes verified on both bun 1.3.13 (CI pin, installed to a temp dir) and local bun 1.4.4: clean tree exits 0; a probe file with 25% function coverage exits 1 on both, and the lcov/table output lists no <code>sst.ts</code> or <code>tests/**</code> rows.</p>
+              <p>Final tally (tip, bun lcov): tests 1164 → 995; lines 4699/5368 (87.5%) → 5081/5239 (97.0%); functions 714/780 (91.5%) → 753/775 (97.2%); no lib file under 80% lines or functions (lowest: <code>clone.ts</code> 83.3% functions, <code>output.ts</code>/<code>spinner.ts</code> ~89% functions). Suite wall time about 7 s. Test LOC (tests/ excluding fixtures) 17.1k including fakes, mutation manifests and support. This is above the plan's original ~750 test estimate because Phase 4 added the gap-closing tests; coverage targets were exceeded.</p>
+              <p>Final verification: <code>bun run gate</code> green; <code>test:zod3</code> 995 pass / 0 fail; <code>mutate tests/mutations/guards.ts</code> 0 regressions, 0 survivors; 4 concurrent <code>bun test</code> runs: 995 pass / 0 fail each.</p>
+            </div>
           </section>
         </section>
       </section>
@@ -1473,6 +1479,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <li>Layered <code>apply_batch</code> still writes transactional observations only to the bottom layer, so the cache layer misses them (an existing documented asymmetry).</li>
           <li>The sequential transaction fallback still rejects observation ops with <code>invalid_config</code> (<code>corpus.ts</code> ≈ 785-789). Now that <code>ObservationPutOpts.id</code> exists, it could replay the buffered row with its id, so remote-backend transactions could include observations. That is a follow-up feature; Phase 4 only tests today's behaviour.</li>
           <li>Any lib bug a new property uncovers is fixed in its own commit with a regression test and listed in the PR body. If it's non-trivial, it's split out instead.</li>
+          <li><code>compensate_op</code>'s <code>observation_put</code>, <code>meta_delete</code> and <code>observation_delete</code> arms (<code>corpus.ts</code> ≈ 800-809) are dead code: the sequential fallback rejects observation ops up front and treats <code>meta_delete</code> as non-undoable before compensation runs. Follow-up candidate: delete them or make them reachable (together with the observation-ops item above).</li>
           <li>The same coverage-gate pattern for vault/pulse, mentioned in <code>task_c453a4e2</code>'s summary. That belongs in those repos.</li>
         </ul>
       </section>
