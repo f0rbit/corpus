@@ -144,11 +144,15 @@ const compare = async (base_ref: string, by_content: boolean): Promise<Result<Fi
 	const wt = await create_worktree(base_ref);
 	if (!wt.ok) return wt;
 	const [head, base] = await Promise.all([measure(repo_root), measure(wt.value.dir)]);
+	const result: Result<FileDiff[], string> = !head.ok
+		? head
+		: !base.ok
+			? base
+			: await diff(base.value, head.value, { base: wt.value.dir, head: repo_root }, by_content);
+	// sources are read from the base tree during diff, so it is removed only afterwards
 	const removed = await remove_worktree(wt.value);
 	if (!removed.ok) process.stderr.write(`warning: ${removed.error}\n`);
-	if (!head.ok) return head;
-	if (!base.ok) return base;
-	return diff(base.value, head.value, { base: wt.value.dir, head: repo_root }, by_content);
+	return result;
 };
 
 const main = async (): Promise<number> => {
