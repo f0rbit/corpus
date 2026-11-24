@@ -950,7 +950,7 @@ bun run mutate tests/mutations/guards.ts</pre>
         <section class="phase" id="phase-3">
           <header>
             <h3>Phase 3: Shared contracts and model-based expansion across all backends</h3>
-            <span class="badge todo">todo</span>
+            <span class="badge done">done</span>
           </header>
           <p>The structural fix (audit §5.2/§5.3). The observations contract and the equivalence expansion land first. Contract pruning comes last (delete last) and only after C9 has proven the model kills the pruned assertions' mutants on all 6 backends. Rollback: C10/C11 revert independently. C8/C9 are additive until their deletions.</p>
           <p>Coder briefs (checked against HEAD <code>8d9b35c</code>): <code>.plans/test-suite-yield-phase3-briefs.md</code>.</p>
@@ -982,7 +982,7 @@ bun run mutate tests/mutations/guards.ts</pre>
           <article class="task" id="task-3-0">
             <header>
               <h3>Task 3.0 (C8a): Layered observations route to the bottom write layer</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1034,7 +1034,7 @@ bun run gate</pre>
           <article class="task" id="task-3-f">
             <header>
               <h3>Task 3.F (C8b): <code>reset()</code> on the D1-HTTP and S3 fakes</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1061,7 +1061,7 @@ bun run gate</pre>
           <article class="task" id="task-3-1">
             <header>
               <h3>Task 3.1 (C8): Observations contract suite and equivalence model</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1091,7 +1091,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/observations.ts<
           <article class="task" id="task-3-2">
             <header>
               <h3>Task 3.2 (C9): <code>backend-equivalence</code> expansion</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1126,7 +1126,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/backend-model.ts
           <article class="task" id="task-3-3">
             <header>
               <h3>Task 3.3 (C10): Prune the backend-contract, fold <code>remote-r2</code></h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1153,7 +1153,7 @@ bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/backend-contract
           <article class="task" id="task-3-4">
             <header>
               <h3>Task 3.4 (C11): Memory/layered store-level duplicates</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge done">done</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1201,7 +1201,22 @@ bun run mutate tests/mutations/guards.ts</pre>
 
           <section data-kind="proof">
             <h4>Proof</h4>
-            <div class="empty-proof">To be filled by the reviewer at unit close: commit SHA(s), gate output excerpt.</div>
+            <div class="proof">
+              <p>Commits on <code>test/suite-yield</code>: 3.0 <code>7544fe5</code> (caller-supplied observation ids + layered fan-out, earlier); briefs <code>8bdda5e</code>; 3.1 <code>71ac26a</code> (observations contract + model, 5 files removed); 3.4 <code>5f85204</code> (memory/layered duplicates); lib fix <code>fix: omit empty stores from the file backend's list_stores</code> (found by 3.2, user-approved; patch-level behaviour fix for the release notes) + contract regression test + guard; 3.2 <code>ec42325</code> (backend model, 6 providers, 13 commands); 3.3 <code>909041e</code> (34 contract examples pruned, <code>remote-r2.test.ts</code> deleted). Gate green on the tip (typecheck, build, 848 tests, lint 0 errors, fmt). <code>test:zod3</code>: 848 pass / 0 fail. 4 concurrent <code>bun test</code>: 848 pass / 0 fail each (one earlier <code>coverage:diff</code> run hit a 5 s timeout in <code>result-laws</code> under load, not reproducible).</p>
+              <p>Totals: tests 1164 (baseline) → 1017 (after wave 0) → 848. Lines covered 4699/5368 (87.5%) → 4945/5455 (90.7%); functions 714/780 (91.5%) → 760/809 (93.9%) (bun lcov, <code>--base 6171c87</code> vs head). <code>coverage:diff --base 7544fe5</code>: no lost lines after every unit. <code>coverage:diff --base 6171c87</code> reports line-number "lost" lines in 8 lib files from the 3.0 edits and the list_stores fix; a content comparison (covered line text, base vs head) shows only intended changes: <code>ids.push(store_id)</code> reworked by the fix, <code>return ok(had)</code>/<code>ok(true|false)</code> returns from the observations Result change, and <code>generate_observation_id()</code> moved behind the caller-id path.</p>
+              <p>Runtimes: <code>backend-equivalence</code> 1.6 s (6 providers x 200 runs, budget 30 s); <code>observations-equivalence</code> 1.4 s (5 providers x 200 runs); observations contract + equivalence together 2.1 s. The wave-0 fake timing measurements were taken in the earlier session and are not repeated here.</p>
+              <table>
+                <thead><tr><th>Cluster</th><th>mutants</th><th>killed old</th><th>killed new</th><th>regressions</th></tr></thead>
+                <tbody>
+                  <tr><td>observations</td><td>11</td><td>5</td><td>11</td><td>0</td></tr>
+                  <tr><td>backend-model</td><td>11</td><td>0</td><td>11</td><td>0</td></tr>
+                  <tr><td>store-level</td><td>8</td><td>7</td><td>8</td><td>0</td></tr>
+                  <tr><td>backend-contract (--base ec42325)</td><td>9</td><td>9</td><td>9</td><td>0</td></tr>
+                  <tr><td>guards (incl. new file-list-stores-includes-empty)</td><td>all</td><td>-</td><td>all killed</td><td>0</td></tr>
+                </tbody>
+              </table>
+              <p>Findings and fixes: the model found a real bug, the file backend's <code>list_stores</code> listing a store whose versions were all deleted (or only touched by a delete of a missing version); fixed in lib and guarded. Coverage fix en route: the store-level <code>delete</code> tests in memory-backend were kept (the contract only covers <code>backend.metadata.delete</code>). Model strengthening: weighted <code>alpha</code> store pool plus a <code>put_burst</code> command, because single puts rarely stacked enough metas for limit, tie-break and before-boundary mutants to bite. Dropped equivalent mutants: none. The dead <code>DataStorageHandle.size</code> stays an out-of-scope follow-up.</p>
+            </div>
           </section>
         </section>
 
