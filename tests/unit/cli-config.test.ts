@@ -6,6 +6,7 @@ import * as testing from "../../testing/index.js";
 import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { sniff_wrangler, type WranglerSniff } from "../../cli/wrangler.js";
 import { load_cli_config } from "../../cli/load-config.js";
+import { define_config } from "../../cli/config-schema.js";
 import { resolve_backend, resolve_connection_ids } from "../../cli/resolve-backend.js";
 
 const fc = testing.fc;
@@ -119,6 +120,176 @@ describe("load_cli_config", () => {
 		}
 
 		await remove_tmp_dir(temp_dir);
+	});
+});
+
+async function in_tmp_repo(prefix: string, fn: (dir: string) => Promise<void>): Promise<void> {
+	const dir = await make_tmp_dir(prefix);
+	await mkdir(join(dir, ".git"), { recursive: true });
+	try {
+		await fn(dir);
+	} finally {
+		await remove_tmp_dir(dir);
+	}
+}
+
+describe("sniff_wrangler edge cases", () => {
+	it("an unreadable wrangler.toml (a directory) is a storage_error naming the path", async () => {
+		await in_tmp_repo("wrangler-unreadable", async (dir) => {
+			await mkdir(join(dir, "wrangler.toml"));
+			const result = await sniff_wrangler(dir);
+			expect(result.ok).toBe(false);
+			if (result.ok || result.error.kind !== "storage_error") throw new Error("expected storage_error");
+			expect(result.error.operation).toBe(`read file ${join(dir, "wrangler.toml")}`);
+		});
+	});
+
+	it("wrangler.jsonc tolerates line comments, block comments and trailing commas", async () => {
+		await in_tmp_repo("wrangler-jsonc", async (dir) => {
+			await writeFile(
+				join(dir, "wrangler.jsonc"),
+				`/* header
+				   block */ {
+				"account_id": "acc", // line comment
+				"r2_buckets": [{ "binding": "B", /* inline */ "bucket_name": "bk", },],
+			}`,
+			);
+			const result = await sniff_wrangler(dir);
+			if (!result.ok) throw new Error(`expected ok, got ${result.error.kind}`);
+			expect(result.value).toEqual({
+				path: join(dir, "wrangler.jsonc"),
+				account_id: "acc",
+				d1_candidates: [],
+				r2_candidates: [{ binding: "B", bucket_name: "bk", source: "top-level" }],
+			});
+		});
+	});
+
+	const parse_failures: Array<{ file: string; content: string; prefix: string }> = [
+		{ file: "wrangler.toml", content: "this = = not [toml", prefix: "failed to parse wrangler.toml: " },
+		{ file: "wrangler.json", content: "{nope", prefix: "failed to parse wrangler.json: " },
+		{ file: "wrangler.jsonc", content: "{ // only a comment\n", prefix: "failed to parse wrangler.jsonc: " },
+	];
+
+	for (const c of parse_failures) {
+		it(`invalid ${c.file} syntax is a parse validation_error`, async () => {
+			await in_tmp_repo("wrangler-parse", async (dir) => {
+				await writeFile(join(dir, c.file), c.content);
+				const result = await sniff_wrangler(dir);
+				if (result.ok || result.error.kind !== "validation_error") throw new Error("expected validation_error");
+				expect(result.error.message.startsWith(c.prefix)).toBe(true);
+			});
+		});
+	}
+
+	const wrong_structure: Array<{ file: string; content: string }> = [
+		{ file: "wrangler.json", content: `{"d1_databases": "not-an-array"}` },
+		{ file: "wrangler.toml", content: `r2_buckets = "nope"` },
+		{ file: "wrangler.jsonc", content: `{"env": {"x": {"r2_buckets": [{"binding": 1}]}}}` },
+	];
+
+	for (const c of wrong_structure) {
+		it(`valid ${c.file} syntax with the wrong structure is "invalid wrangler.* structure"`, async () => {
+			await in_tmp_repo("wrangler-structure", async (dir) => {
+				await writeFile(join(dir, c.file), c.content);
+				const result = await sniff_wrangler(dir);
+				if (result.ok || result.error.kind !== "validation_error") throw new Error("expected validation_error");
+				expect(result.error.message).toBe(`invalid ${c.file} structure`);
+			});
+		});
+	}
+
+	it("collects env-scoped d1_databases and r2_buckets with the env name as source", async () => {
+		await in_tmp_repo("wrangler-env", async (dir) => {
+			await writeFile(
+				join(dir, "wrangler.json"),
+				JSON.stringify({
+					r2_buckets: [{ binding: "TOP", bucket_name: "top-bucket" }],
+					env: {
+						staging: {
+							account_id: "ignored",
+							d1_databases: [{ binding: "SDB", database_id: "sid" }],
+							r2_buckets: [{ binding: "SB", bucket_name: "stg-bucket" }],
+						},
+						empty: {},
+					},
+				}),
+			);
+			const result = await sniff_wrangler(dir);
+			if (!result.ok || !result.value) throw new Error("expected a sniff");
+			expect(result.value.r2_candidates).toEqual([
+				{ binding: "TOP", bucket_name: "top-bucket", source: "top-level" },
+				{ binding: "SB", bucket_name: "stg-bucket", source: "staging" },
+			]);
+			expect(result.value.d1_candidates).toEqual([{ binding: "SDB", database_id: "sid", source: "staging" }]);
+		});
+	});
+
+	it("prefers wrangler.toml over wrangler.jsonc over wrangler.json when several exist", async () => {
+		await in_tmp_repo("wrangler-precedence", async (dir) => {
+			await writeFile(join(dir, "wrangler.json"), JSON.stringify({ account_id: "from-json" }));
+			await writeFile(join(dir, "wrangler.jsonc"), JSON.stringify({ account_id: "from-jsonc" }));
+			const jsonc = await sniff_wrangler(dir);
+			expect(jsonc.ok && jsonc.value?.account_id).toBe("from-jsonc");
+			await writeFile(join(dir, "wrangler.toml"), `account_id = "from-toml"`);
+			const toml = await sniff_wrangler(dir);
+			expect(toml.ok && toml.value?.account_id).toBe("from-toml");
+		});
+	});
+});
+
+describe("load_cli_config edge cases", () => {
+	it("a config that throws at import is a validation_error naming the path and the cause", async () => {
+		await in_tmp_repo("config-throws", async (dir) => {
+			const config_path = join(dir, "corpus.config.ts");
+			await writeFile(config_path, `throw new Error("kaboom at import");`);
+			const result = await load_cli_config(undefined, dir);
+			if (result.ok || result.error.kind !== "validation_error") throw new Error("expected validation_error");
+			expect(result.error.message).toContain(`failed to load config from ${config_path}`);
+			expect(result.error.message).toContain("kaboom at import");
+			expect(result.error.cause.message).toContain("kaboom at import");
+		});
+	});
+
+	it("discovers corpus.config.ts, then corpus.config.js, from the given cwd and honours a named `config` export", async () => {
+		await in_tmp_repo("config-discovery", async (dir) => {
+			await writeFile(join(dir, "corpus.config.js"), `export const config = { default_env: "from-js" };`);
+			const js = await load_cli_config(undefined, dir);
+			expect(js.ok && js.value?.default_env).toBe("from-js");
+		});
+		await in_tmp_repo("config-discovery-ts", async (dir) => {
+			await writeFile(join(dir, "corpus.config.ts"), `export default { default_env: "from-ts" };`);
+			await writeFile(join(dir, "corpus.config.js"), `export default { default_env: "from-js" };`);
+			const ts = await load_cli_config(undefined, dir);
+			expect(ts.ok && ts.value?.default_env).toBe("from-ts");
+		});
+	});
+
+	it("unknown keys are rejected by the strict schema, naming the file", async () => {
+		await in_tmp_repo("config-strict", async (dir) => {
+			const config_path = join(dir, "corpus.config.ts");
+			await writeFile(config_path, `export default { surprise: true };`);
+			const result = await load_cli_config(undefined, dir);
+			if (result.ok || result.error.kind !== "validation_error") throw new Error("expected validation_error");
+			expect(result.error.message).toContain(`invalid corpus config at ${config_path}`);
+		});
+	});
+
+	it("no config upward of cwd is ok(null)", async () => {
+		await in_tmp_repo("config-none", async (dir) => {
+			const result = await load_cli_config(undefined, dir);
+			expect(result).toEqual({ ok: true, value: null });
+		});
+	});
+});
+
+describe("define_config", () => {
+	it("returns its argument unchanged (identity)", () => {
+		fc.assert(
+			fc.property(fc.record({ default_env: fc.option(fc.string(), { nil: undefined }) }), (config) => {
+				expect(define_config(config)).toBe(config);
+			}),
+		);
 	});
 });
 

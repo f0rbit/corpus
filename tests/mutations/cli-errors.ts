@@ -1,0 +1,112 @@
+import type { MutationManifest } from "./types.js";
+
+export const manifest = {
+	cluster: "cli-errors",
+	old_tests: [
+		"tests/integration/cli-read.test.ts",
+		"tests/integration/cli-clone.test.ts",
+		"tests/unit/cli-config.test.ts",
+		"tests/unit/cli-output.test.ts",
+	],
+	new_tests: [
+		"tests/integration/cli-read.test.ts",
+		"tests/integration/cli-clone.test.ts",
+		"tests/integration/cli-errors.test.ts",
+		"tests/unit/cli-config.test.ts",
+		"tests/unit/cli-output.test.ts",
+	],
+	mutations: [
+		{
+			id: "cli-errors/versions-accepts-bare-date",
+			file: "cli/commands/versions.ts",
+			find: "const date_schema = z.iso.datetime().transform((s) => new Date(s));",
+			replace: "const date_schema = z.string().transform((s) => new Date(s));",
+			guards: "--before/--after reject anything but a full ISO-8601 datetime",
+		},
+		{
+			id: "cli-errors/lineage-depth-zero-accepted",
+			file: "cli/commands/lineage.ts",
+			find: "if (isNaN(parsed) || parsed < 1) {",
+			replace: "if (isNaN(parsed) || parsed < 0) {",
+			guards: "lineage --depth 0 is a validation error",
+		},
+		{
+			id: "cli-errors/cat-decode-error-swallowed",
+			file: "cli/commands/cat.ts",
+			find: "if (!decode_result.ok) return decode_result;",
+			replace: "if (!decode_result.ok) return ok(undefined);",
+			guards: "a throwing codec.decode surfaces as decode_error",
+		},
+		{
+			id: "cli-errors/show-drops-parents",
+			file: "cli/commands/show.ts",
+			find: "if (meta.parents.length > 0) {",
+			replace: "if (meta.parents.length > 999) {",
+			guards: "show renders the Parents rows with their roles",
+		},
+		{
+			id: "cli-errors/stores-list-stores-guard-removed",
+			file: "cli/commands/stores.ts",
+			find: "if (!backend.metadata.list_stores) {",
+			replace:
+				"if (!backend.metadata.list_stores) {\n\t\t\treturn ok(undefined);\n\t\t}\n\t\tif (!backend.metadata.list_stores) {",
+			guards: "a backend without list_stores is invalid_config, not a silent success",
+		},
+		{
+			id: "cli-errors/describe-validation-prefix-dropped",
+			file: "cli/output.ts",
+			find: "return `Validation failed: ${err.message}`;",
+			replace: "return err.message;",
+			guards: "the validation_error message carries its 'Validation failed: ' prefix",
+		},
+		{
+			id: "cli-errors/jsonc-block-comment-kept",
+			file: "cli/wrangler.ts",
+			find: '} else if (content[i] === "/" && content[i + 1] === "*") {',
+			replace: '} else if (content[i] === "/" && content[i + 1] === "~") {',
+			guards: "wrangler.jsonc block comments are stripped before parsing",
+		},
+		{
+			id: "cli-errors/wrangler-structure-unchecked",
+			file: "cli/wrangler.ts",
+			find: "\td1_databases: z.array(d1_binding_schema).optional(),\n\tr2_buckets: z.array(r2_binding_schema).optional(),\n\tenv: z",
+			replace: "\td1_databases: z.any().optional(),\n\tr2_buckets: z.any().optional(),\n\tenv: z",
+			guards: "a wrangler file with the wrong structure is an 'invalid wrangler.* structure' error",
+		},
+		{
+			id: "cli-errors/load-config-import-failure-swallowed",
+			file: "cli/load-config.ts",
+			find: "if (!import_result.ok) return import_result;",
+			replace: "if (!import_result.ok) return ok(null);",
+			guards: "a corpus.config.ts that throws at import is a validation_error",
+		},
+		{
+			id: "cli-errors/define-config-copies",
+			file: "cli/config-schema.ts",
+			find: "return config;",
+			replace: "return { ...config };",
+			guards: "define_config is the identity",
+		},
+		{
+			id: "cli-errors/ensure-store-swallows-errors",
+			file: "cli/lookup.ts",
+			find: 'return latest.error.kind === "not_found" ? ok(false) : latest;',
+			replace: "return ok(false);",
+			guards: "a non-not_found get_latest error propagates instead of reading as 'no such store'",
+		},
+		{
+			id: "cli-errors/write-fatal-stack-always",
+			file: "cli/output.ts",
+			find: "if (debug && error instanceof Error && error.stack)",
+			replace: "if (error instanceof Error && error.stack)",
+			guards: "the stack prints only under CORPUS_DEBUG",
+		},
+		{
+			id: "cli-errors/lineage-missing-unflagged",
+			file: "cli/commands/lineage.ts",
+			find: "nodes.push({ store, version: ver, depth, parents: [], missing: true });",
+			replace: "nodes.push({ store, version: ver, depth, parents: [] });",
+			guards: "a parent that does not exist renders as (missing)",
+		},
+	],
+} satisfies MutationManifest;
