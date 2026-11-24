@@ -92,6 +92,32 @@ describe("testing/arb dual generation", () => {
 		}
 	});
 
+	test("v3 tuple, intersection, float, exact-length array, any and unknown generate valid values", () => {
+		const v3_rows = [
+			["tuple", z3.tuple([z3.string(), z3.number(), z3.boolean()])],
+			["intersection", z3.intersection(z3.object({ a: z3.string() }), z3.object({ b: z3.number() }))],
+			["float with bounds", z3.number().min(-5).max(5)],
+			["array exact length", z3.array(z3.string()).length(3)],
+			["array min/max", z3.array(z3.number()).min(1).max(4)],
+			["any", z3.any()],
+			["unknown", z3.unknown()],
+		] as const;
+		for (const [label, schema] of v3_rows) {
+			fc.assert(
+				fc.property(arb(schema), (v) => {
+					if (!schema.safeParse(v).success) throw new Error(`${label}: generated a value its own schema rejects`);
+				}),
+				{ numRuns: 100 },
+			);
+		}
+	});
+
+	test("v3 unsupported kinds throw naming the kind and the escape hatch", () => {
+		const schema = z3.string().refine((s) => s.length > 0);
+		expect(() => arb(schema)).toThrow(/ZodEffects/);
+		expect(() => arb(schema)).toThrow(/testing\.arbitrary/);
+	});
+
 	test("dispatch is generation-identity based, not class based", () => {
 		// The two schemas are structurally identical but built from different
 		// class hierarchies; both must walk successfully in the same process.

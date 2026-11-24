@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Plan: test-suite-yield</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+        --todo: #6e7681;
+        --doing: #d29922;
+        --done: #2ea043;
+        --blocked: #f85149;
+        --decision: #db61a2;
+      }
+      html, body {
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 2rem;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      h1, h2, h3 {
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.3em;
+      }
+      h1 { font-size: 1.8rem; }
+      h2 { font-size: 1.4rem; margin-top: 2.5rem; }
+      h3 { font-size: 1.1rem; border: none; padding: 0; margin-top: 1.5rem; }
+      h4 {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin: 0 0 0.3em 0;
+      }
+      code, pre {
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 0.9em;
+      }
+      code {
+        background: var(--panel);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        background: var(--panel);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.75em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .badge.todo { background: var(--todo); color: #fff; }
+      .badge.doing { background: var(--doing); color: #000; }
+      .badge.done { background: var(--done); color: #fff; }
+      .badge.blocked { background: var(--blocked); color: #fff; }
+      .badge.decision { background: var(--decision); color: #fff; }
+      .badge.recommended { background: var(--accent); color: #000; }
+      .root-cause {
+        background: var(--panel);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1rem 0;
+      }
+      .root-cause p {
+        margin: 0.4em 0;
+      }
+      .option {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+        opacity: 0.85;
+      }
+      .option.recommended {
+        opacity: 1;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent) inset;
+      }
+      .option > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .option h3 {
+        margin: 0;
+        flex: 1;
+      }
+      .option h4 {
+        margin-top: 0.9rem;
+      }
+      .philosophy-score th:first-child,
+      .philosophy-score td:first-child {
+        width: 35%;
+      }
+      .philosophy-score td:nth-child(2) {
+        font-family: "SF Mono", Menlo, monospace;
+        font-weight: 600;
+        width: 60px;
+        text-align: center;
+      }
+      .recommendation {
+        background: rgba(88, 166, 255, 0.08);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 1.5rem 0;
+      }
+      .recommendation h3 {
+        margin-top: 0;
+        border: none;
+        padding: 0;
+      }
+      .task {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+      .task > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .task h3 {
+        margin: 0;
+        flex: 1;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.4em 1em;
+        font-size: 0.85em;
+        color: var(--muted);
+        margin: 0 0 0.75rem 0;
+      }
+      .meta dt {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .meta dd {
+        margin: 0;
+      }
+      .task section {
+        margin-top: 0.75rem;
+      }
+      .proof {
+        background: rgba(46, 160, 67, 0.08);
+        border-left: 3px solid var(--done);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .empty-proof {
+        background: rgba(110, 118, 129, 0.08);
+        border-left: 3px solid var(--todo);
+        padding: 0.5rem 0.75rem;
+        color: var(--muted);
+        font-style: italic;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary {
+        background: rgba(219, 97, 162, 0.08);
+        border-left: 3px solid var(--decision);
+        padding: 0.5rem 0.75rem;
+        border-radius: 0 6px 6px 0;
+      }
+      .adversary ul {
+        margin: 0.3em 0;
+        padding-left: 1.5em;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1em 0;
+      }
+      th, td {
+        padding: 0.5em 0.75em;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        font-weight: 600;
+        color: var(--muted);
+        font-size: 0.8em;
+        text-transform: uppercase;
+      }
+      a { color: var(--accent); }
+      .phase {
+        margin: 2rem 0;
+        padding-left: 1rem;
+        border-left: 3px solid var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Plan: test-suite-yield</h1>
+        <span class="badge done">done</span>
+        <p>Make the corpus test suite smaller and stronger at the same time. Today 1164 tests / 14.5k LOC reach 87.2% lines / 91.5% functions, but 684 of the 885 tests in the heaviest files add no line coverage and are mostly literal-variation examples. Two observation suites are copy-pasted, and real code (drizzle <code>delete_by_source</code>, layered observations, remote tx compensation, <code>wrap_bytes_storage</code>, <code>merge_deep</code>/<code>at</code>) has no coverage at all. The plan does four things. It adds two cheap, mechanical safety rails: a coverage-superset diff and a mutation kill-set check. It turns example clusters into <code>testing.*</code> laws and properties. It replaces copy-paste with shared contract suites and model-based equivalence across all five backends. It fills the ranked coverage gaps and then turns on the deferred per-file 80% CI coverage gate (devpad <code>task_c453a4e2</code>). Expected result: about 1164 → about 750 tests, about 14.5k → about 9.5k test LOC, lines 87.2% → ≥93%, functions 91.5% → ≥96%, and no lib file under 80%.</p>
+      </header>
+
+      <section id="root-cause">
+        <h2>Root cause</h2>
+        <div class="root-cause">
+          <p><strong>Stated goal:</strong> Remove low-value and low-yield unit tests, widen the high-value tests, and lean on properties, fuzzing and generators instead of repeated examples. The test for "low-yield" is: does removing it lower coverage?</p>
+          <p><strong>Underlying need:</strong> A suite where each test earns its keep, i.e. its removal would let a real bug through. Each behaviour should be specified once (a law, a contract or a model) and checked across every implementation, not re-typed per backend or per literal. Line coverage is the cheap proxy for this, but it can't distinguish inputs and bun reports no branches. So "does removing it lower coverage?" has to be extended to "does removing it lower coverage <em>or</em> let a mutation survive?".</p>
+          <p><strong>Why this matters:</strong> Pure coverage-driven deletion is known to lose fault-detection power (Rothermel et al. found large losses for coverage-preserving reductions). Done naively, it would delete the mutation-proven regression guards (tie-break, SQL-before-LIMIT, parseArgs tokens, selector key, <code>--json</code> purity), because those deliberately add zero lines. Separately, the duplication is why the uncovered code exists. Nobody wrote observation tests for layered, cloudflare or remote because each backend needed its own copy-pasted file.</p>
+        </div>
+      </section>
+
+      <section id="alternatives">
+        <h2>Alternatives considered</h2>
+
+        <article class="option recommended" id="option-1">
+          <header>
+            <h3>Option 1: Specify once, check everywhere, delete under a mutation gate</h3>
+            <span class="badge recommended">recommended</span>
+          </header>
+          <p>Combines the audit's three levers behind two mechanical rails. (1) Pure-function example clusters become <code>testing.*</code> laws and properties (Result, observation utils, codecs, <code>parallel_map</code>, CLI policy, substrate self-tests, version-set). (2) Duplicated integration suites become shared contract suites: a new <code>run_observations_contract_tests</code> over 5 backends plus an observations <code>provider_equivalence</code> model. (3) <code>backend-equivalence</code> gains filtered-list, get_latest, children, hash and store-list commands and the cloudflare and remote providers. The contract assertions it now subsumes are then pruned, except the named regression guards. Every deletion has to pass a per-file coverage-superset diff against the base ref and a hand-curated mutation kill-set check (new kill set ⊇ old kill set). The plan finishes with gap-filling and the per-file 80% coverage gate in CI.</p>
+
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>CockroachDB Pebble</strong>: a metamorphic test runs generated op sequences against several configurations and diffs their outputs, instead of hand-written per-config cases. This is the shape of <code>backend-equivalence</code> extended to 5 backends. <a href="https://github.com/cockroachdb/pebble/tree/master/internal/metamorphic">source</a></li>
+            <li><strong>Go <code>testing/fstest.TestFS</code> and <code>x/net/nettest.TestConn</code></strong>: one conformance suite that every <code>fs.FS</code> / <code>net.Conn</code> implementation runs, replacing per-implementation copies. This is the shape of the observations contract suite. <a href="https://pkg.go.dev/testing/fstest#TestFS">source</a></li>
+            <li><strong>Google diff-based mutation testing</strong>: a small number of mutants, chosen per change and surfaced in code review, instead of whole-codebase mutation runs. This is the model for the per-cluster manifest check. <a href="https://research.google/pubs/state-of-mutation-testing-at-google/">source</a></li>
+          </ul>
+
+          <h4>Pros</h4>
+          <ul>
+            <li>Line coverage goes up while test count goes down. The observations contract alone covers drizzle <code>delete_by_source</code> (370-393), the filter branches (323-335) and layered observations (246-300), which are uncovered today.</li>
+            <li>Deletions are defensible. Each cluster commit carries proof: a coverage superset and a kill-set superset. Bun has no branch coverage, and the mutation check is the substitute.</li>
+            <li>Reuses machinery corpus already ships (<code>law.round_trip</code>, <code>law.functor</code>, <code>provider_equivalence</code>, <code>equivalence_command</code>, <code>testing.arb</code>), which dogfoods the substrate downstream packages are told to use.</li>
+            <li>Ends with the coverage gate the repo already declares but doesn't enforce (<code>bunfig.toml</code> <code>coverageThreshold = 0.8</code>, devpad <code>task_c453a4e2</code>).</li>
+          </ul>
+
+          <h4>Cons</h4>
+          <ul>
+            <li>Biggest lift: 4 phases and about 16 cluster commits. The mutation manifests are hand-authored, and their quality depends on the coder's choice of mutants (mitigation: minimum one mutant per deleted describe block, plus a durable regression-guard manifest).</li>
+            <li>Adding cloudflare and remote to the equivalence law costs runtime (fake D1 DDL per run; <code>Bun.serve</code> for remote). Resolved in Q1: one shared transport per file with fresh fake state per run, measured first.</li>
+            <li>Making <code>cli-entrypoint</code> coverage visible needs a small, behaviour-preserving lib change (<code>cli/main.ts</code>).</li>
+          </ul>
+
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead>
+              <tr>
+                <th>Principle</th>
+                <th>Score</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Single source of truth</td>
+                <td>5/5</td>
+                <td>Each behaviour is specified once: one model per backend surface, one contract per surface, one law per combinator. The coverage target stays in <code>bunfig.toml</code> only, and the baseline is a git ref, not a committed number table.</td>
+              </tr>
+              <tr>
+                <td>Strictest types possible</td>
+                <td>4/5</td>
+                <td>Mutation manifests are typed (<code>satisfies MutationManifest</code>). Equivalence commands share the result type <code>R</code> across model and SUT arms. The weak point is that the manifest <code>find</code>/<code>replace</code> strings are text, validated at runtime (exactly one match or fail).</td>
+              </tr>
+              <tr>
+                <td>Compiler catches bugs</td>
+                <td>4/5</td>
+                <td>Table-driven failure tests are typed over <code>CorpusError["kind"]</code>, so a 13th variant breaks the table at compile time. <code>equivalence_command&lt;M,S,R&gt;</code> makes model/SUT drift a type error. Mutant validity is still a runtime check.</td>
+              </tr>
+              <tr>
+                <td>Inferred types propagate</td>
+                <td>4/5</td>
+                <td><code>testing.arb(schema)</code> derives generators from the Zod schemas (version-set manifest, observation types) instead of hand-written literals. <code>SchemaInferred</code> flows to assertions.</td>
+              </tr>
+              <tr>
+                <td>In-memory repositories</td>
+                <td>5/5</td>
+                <td>Every new check runs against the existing in-memory fakes (memory backend, fake D1/R2, D1-HTTP, S3) through contract suites and models. No mocks are introduced, and <code>tests/support/tmp.ts</code> makes the file backend's disk usage parallel-safe.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-2">
+          <header>
+            <h3>Option 2: Delete-only by greedy set cover</h3>
+          </header>
+          <p>Take <code>setcover.json</code> literally. Keep the 201 covering tests in the heavy files, keep the classified (a)/(b)/(f) zero-unique files, and delete the remaining ~600. Add nothing.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Test-suite minimisation research (Rothermel, Harrold et al.)</strong>: coverage-preserving reduction cut suites heavily but lost substantial fault-detection power in their empirical studies. This is the cautionary result. <a href="https://doi.org/10.1002/stvr.256">source</a></li>
+            <li><strong>Regression test selection in large CI systems (e.g. Meta's predictive test selection)</strong>: these select a subset to <em>run</em> per change but keep the full suite, because selection by coverage alone misses failures. <a href="https://engineering.fb.com/2018/11/21/developer-tools/predictive-test-selection/">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul><li>Fastest: one mechanical pass, no new code.</li><li>Lines and functions provably don't drop (by construction).</li></ul>
+          <h4>Cons</h4>
+          <ul><li>Throws away input diversity without replacing it, which is exactly the kind of signal bun's line-only coverage can't see.</li><li>Leaves the copy-paste observation suites and the uncovered code in place, so the coverage gaps persist and the 80% gate still can't be turned on.</li><li>Does nothing for the "lean on properties/generators" half of the request.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Single source of truth</td><td>2/5</td><td>The duplicated memory/file observation suites and the 3 hand-rolled backend loops survive.</td></tr>
+              <tr><td>Strictest types possible</td><td>3/5</td><td>Neutral: no new typed structure.</td></tr>
+              <tr><td>Compiler catches bugs</td><td>3/5</td><td>Neutral.</td></tr>
+              <tr><td>Inferred types propagate</td><td>3/5</td><td>Neutral. Literals stay hand-written.</td></tr>
+              <tr><td>In-memory repositories</td><td>3/5</td><td>Fakes are unchanged, and layered/cloudflare/remote observations stay unexercised.</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-3">
+          <header>
+            <h3>Option 3: Property-rewrite the unit layer only</h3>
+          </header>
+          <p>Do the §5.1 clusters only: Result, observation utils, codecs, concurrency, CLI policy, substrate self-tests and version-set become laws and properties. Leave the integration structure (backend-contract, observation suites, backend-equivalence) unchanged.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>Hypothesis in attrs / PyPy</strong>: per-function property tests replace example tables for pure helpers, while integration suites stay example-based. <a href="https://hypothesis.readthedocs.io/en/latest/">source</a></li>
+            <li><strong>fp-ts / io-ts with fast-check</strong>: algebraic laws (functor, monad, codec round-trip) are checked as properties instead of per-instance examples. <a href="https://fast-check.dev/docs/introduction/">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul><li>Low risk: pure functions, disjoint files, trivially parallel.</li><li>Removes about 200 literal-variation tests and covers <code>merge_deep</code>/<code>at</code> and the codec <code>encode_stream</code>.</li></ul>
+          <h4>Cons</h4>
+          <ul><li>Misses the biggest structural problem (no observations contract) and the biggest test-count lever (~160 subsumed contract tests).</li><li>Leaves <code>layered.ts</code> 246-300 and drizzle <code>delete_by_source</code> uncovered, so <code>layered.ts</code> stays under 80% and the gate can't be turned on.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Single source of truth</td><td>3/5</td><td>Unit laws centralise, but the integration duplication remains.</td></tr>
+              <tr><td>Strictest types possible</td><td>4/5</td><td>Typed law signatures.</td></tr>
+              <tr><td>Compiler catches bugs</td><td>4/5</td><td>The failure table is typed over the error union.</td></tr>
+              <tr><td>Inferred types propagate</td><td>4/5</td><td><code>arb(schema)</code>-driven.</td></tr>
+              <tr><td>In-memory repositories</td><td>3/5</td><td>Doesn't extend fake-backed coverage to the missing backends.</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="option" id="option-4">
+          <header>
+            <h3>Option 4: Mutation-score-driven pruning with StrykerJS</h3>
+          </header>
+          <p>Adopt StrykerJS with its <code>commandRunner</code> (<code>bun test</code>), since there is no first-class bun runner with per-test coverage analysis. Compute the mutation score per lib file, delete any test whose removal leaves the killed-mutant set unchanged, and gate CI on mutation score.</p>
+          <h4>Real-world examples</h4>
+          <ul>
+            <li><strong>StrykerJS command runner</strong>: the generic escape hatch for unsupported runners. It runs the full command per mutant with <code>coverageAnalysis: "off"</code>. <a href="https://stryker-mutator.io/docs/stryker-js/configuration/#commandrunner-object">source</a></li>
+            <li><strong>PIT (pitest) in the JVM ecosystem</strong>: mutation score is used as a test-quality gate on many Java projects. <a href="https://pitest.org/">source</a></li>
+          </ul>
+          <h4>Pros</h4>
+          <ul><li>The strongest objective evidence of which tests catch nothing.</li><li>Finds weak assertions as well as redundant tests.</li></ul>
+          <h4>Cons</h4>
+          <ul><li>Cost: without per-test coverage analysis, every mutant re-runs the 3.2 s suite. Corpus's ~5000 lib lines yield thousands of mutants, which means hours per run. Leave-one-test-out is that cost × N.</li><li>Many textual mutants don't typecheck. Bun still executes them (it strips types), so results get noisy unless the TS checker plugin is wired in.</li><li>Adds a heavy devDependency and config. It measures redundancy but doesn't consolidate it, and it adds no tests for the gaps.</li></ul>
+          <h4>Philosophy alignment</h4>
+          <table class="philosophy-score">
+            <thead><tr><th>Principle</th><th>Score</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Single source of truth</td><td>3/5</td><td>Adds a parallel config and a score threshold, and leaves the duplication in place.</td></tr>
+              <tr><td>Strictest types possible</td><td>3/5</td><td>Stryker config is loosely typed and the mutants are textual.</td></tr>
+              <tr><td>Compiler catches bugs</td><td>3/5</td><td>Mutants that fail to compile pollute the score unless the checker plugin is used.</td></tr>
+              <tr><td>Inferred types propagate</td><td>3/5</td><td>Neutral.</td></tr>
+              <tr><td>In-memory repositories</td><td>4/5</td><td>Runs against the existing fakes.</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <section class="recommendation">
+          <h3>Recommendation: Option 1 (4.4/5), borrowing Option 4's idea in miniature</h3>
+          <p>Option 1 is the only option that both shrinks the suite and closes the gaps that block the 80% gate. It scores 4.4 against 2.8, 3.6 and 3.2. Option 2 is ruled out by the fault-detection evidence and by its own guard-deletion failure mode. Option 3 is a strict subset of Option 1 (it becomes Phase 2). Option 4's insight is kept but its cost is not: a small typed mutation manifest per cluster, run in throwaway worktrees, gives diff-scoped evidence (Google-style) in seconds instead of a whole-codebase Stryker run in hours.</p>
+        </section>
+      </section>
+
+      <section id="affected-areas">
+        <h2>Affected areas</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Path</th>
+              <th>Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>tests/support/tmp.ts</code></td><td>new: <code>make_tmp_dir(prefix)</code> (mkdtemp under <code>os.tmpdir()</code>) and cleanup</td></tr>
+            <tr><td><code>scripts/coverage-diff.ts</code>, <code>scripts/mutation-check.ts</code></td><td>new: reviewer tools (lcov superset diff; manifest-driven mutation kill-set check in throwaway worktrees)</td></tr>
+            <tr><td><code>tests/mutations/*.ts</code></td><td>new: <code>types.ts</code> (<code>MutationManifest</code>), <code>guards.ts</code> (regression-guard re-introductions), one manifest per cluster</td></tr>
+            <tr><td><code>package.json</code></td><td>add <code>coverage:diff</code> and <code>mutate</code> scripts; <code>gate</code> runs <code>bun test --coverage</code></td></tr>
+            <tr><td><code>bunfig.toml</code></td><td><code>coverageThreshold</code> stays the single target, now enforced; add <code>coveragePathIgnorePatterns</code> for <code>tests/**</code>, <code>docs/**</code>, <code>scripts/**</code> and <code>sst.ts</code> (Q2: excluded, no test)</td></tr>
+            <tr><td><code>.github/workflows/ci.yml</code></td><td>"Run tests" becomes <code>bun test --coverage</code> (the zod3 rerun stays plain)</td></tr>
+            <tr><td><code>eslint.config.ts</code></td><td>override for <code>scripts/*.ts</code> (<code>no-console</code>, try/finally restore), with a why-comment</td></tr>
+            <tr><td><code>tests/unit/result.test.ts</code>, <code>tests/property/result-laws.test.ts</code></td><td>C1: 79 → ~22; add <code>merge_deep</code>/<code>at</code> properties</td></tr>
+            <tr><td><code>tests/unit/observation-utils.test.ts</code> → <code>tests/property/observation-utils.test.ts</code></td><td>C2: 64 → ~15</td></tr>
+            <tr><td><code>tests/unit/{gzip,encrypt,codecs,compose}.test.ts</code>, <code>tests/integration/composed-codec.test.ts</code></td><td>C3: merged into <code>tests/property/codec-laws.test.ts</code> and <code>tests/integration/codecs.test.ts</code> (28 → ~12)</td></tr>
+            <tr><td><code>tests/unit/concurrency.test.ts</code></td><td>C4: 18 → ~8; <code>parallel_map</code> properties without real sleeps</td></tr>
+            <tr><td><code>tests/unit/{cli-output,cli-config,cli-args}.test.ts</code></td><td>C5: enable-matrix, precedence and argv-reconstruction properties (71 → ~48)</td></tr>
+            <tr><td><code>tests/unit/{testing-arb,testing-failure,testing-compose,testing-laws-basic,testing-arb-dual}.test.ts</code></td><td>C6: table-driven, plus "law fails when violated" tests (66 → ~32)</td></tr>
+            <tr><td><code>tests/integration/version-set.test.ts</code></td><td>C7: 40 → ~14 (memory plus one file smoke; backend-free schema tests; arb round-trip)</td></tr>
+            <tr><td><code>tests/integration/observations-contract.test.ts</code>, <code>tests/property/observations-equivalence.test.ts</code></td><td>C8: new. Replaces <code>observations-{memory,file,entity,version-filter,exclude-version}.test.ts</code> (149 → ~84)</td></tr>
+            <tr><td><code>tests/property/backend-equivalence.test.ts</code></td><td>C9: +5 commands, ordered list compare, prefix store ids, pooled dates, cloudflare/remote (+ <code>wrap_bytes_storage</code>) providers</td></tr>
+            <tr><td><code>tests/fakes/{d1-http,s3}.ts</code></td><td>C9: minimal <code>reset()</code>/state-swap hook only if one is missing, so the shared transport can serve fresh state per run</td></tr>
+            <tr><td><code>tests/integration/backend-contract.test.ts</code>, <code>tests/unit/remote-r2.test.ts</code></td><td>C10: prune ~27 subsumed assertions × 6; add <code>handle.size</code>; delete <code>remote-r2.test.ts</code></td></tr>
+            <tr><td><code>tests/integration/{memory-backend,layered-backend}.test.ts</code></td><td>C11: drop contract duplicates; layered list-merge property</td></tr>
+            <tr><td><code>tests/integration/{transaction-compensation,pointers,remote-backend}.test.ts</code></td><td>C12: corpus.ts gap tests</td></tr>
+            <tr><td><code>tests/integration/{http-fakes,cloudflare-backend}.test.ts</code></td><td>C13: remote-d1 error envelopes, drizzle emit-on-error</td></tr>
+            <tr><td><code>cli/main.ts</code> (new), <code>cli/index.ts</code>, <code>tests/integration/cli-{entrypoint,read,clone}.test.ts</code></td><td>C14: <code>run_cli(io) → exit code</code>; most entrypoint tests move in-process; command error branches</td></tr>
+            <tr><td>Files with fixed temp-dir names: <code>tests/integration/{backend-contract,version-set,pipeline-template-store,store-streaming,file-concurrency}.test.ts</code>, <code>tests/property/backend-equivalence.test.ts</code>, <code>tests/unit/cli-config.test.ts</code></td><td>C0: migrate to <code>make_tmp_dir</code></td></tr>
+            <tr><td><code>AGENTS.md</code></td><td>Testing section, Gotchas (renamed contract tests, new tools, gate)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture-decisions">
+        <h2>Architecture decisions</h2>
+
+        <h3>AD-1: Deletion criterion (all four must hold, per cluster)</h3>
+        <ol>
+          <li><strong>Coverage superset.</strong> <code>bun run coverage:diff</code> against the merge-base (6171c87) shows, for every lib file, that the covered line set is a superset of the base set and the function hit count is ≥ base. Lib source is frozen for Phases 1-3, so line identity is exact. The one exception is task 3.0, a verified layered-observations bug fixed as its own commit, after which the diff is re-baselined at that commit. Phase 4's one lib change (<code>cli/main.ts</code>) is re-baselined at its own commit.</li>
+          <li><strong>Not on the KEEP list.</strong> These stay regardless of yield:
+            <ul>
+              <li><strong>Type-level tests:</strong> <code>transaction-types</code>, <code>observation-query-types</code>, <code>cloudflare-binding-types</code>, <code>builder-types</code>, <code>schema-entry</code>.</li>
+              <li><strong>Documented-bug guards:</strong> list <code>eq()</code> exact-match; tag-before-limit; entity-before-limit; version_filter-before-limit; get_latest insertion tie-break; parseArgs token reconstruction; selector key presence; lineage <code>(cycle)</code>; <code>--json</code> purity; data-key aliasing guard; "bad token ≠ empty db" (<code>listing-errors</code>, <code>cli-entrypoint</code>); dev-checkout walker guard; put-if-changed revert/tombstone; file concurrency and transaction recovery.</li>
+              <li><strong>Fake-fidelity tests:</strong> <code>http-fakes</code>.</li>
+              <li><strong>Reference laws cited by AGENTS.md:</strong> <code>corpus-error-paths</code>, <code>copy-laws</code>, <code>vending-pilot</code>, <code>backend-roundtrip</code>, <code>backend-equivalence</code>, <code>result-functor</code>.</li>
+            </ul>
+            A guard may <em>move</em> (e.g. into a contract suite) but keeps its exact assertion and its AGENTS.md citation is updated.</li>
+          <li><strong>Mutation kill-set superset.</strong> <code>bun run mutate tests/mutations/&lt;cluster&gt;.ts</code> reports K<sub>new</sub> ⊇ K<sub>old</sub>. Survivors in both runs are logged as known gaps, not blockers.</li>
+          <li><strong>Replacement first.</strong> The replacement property or contract lands in the same diff as the deletion, never later (refactor rule: delete last).</li>
+        </ol>
+
+        <h3>AD-2: Mutation-check procedure (cheap, bun-native, no framework)</h3>
+        <p>A manifest is a typed <code>.ts</code> file (not <code>*.test.ts</code>, so <code>bun test</code> ignores it):</p>
+<pre>export type Mutation = {
+  readonly id: string;          // "result/unwrap_or-swaps-branches"
+  readonly file: string;        // lib path, repo-relative
+  readonly find: string;        // must match EXACTLY once, or the manifest is stale → fail
+  readonly replace: string;
+  readonly guards: string;      // the behaviour / deleted describe block it stands for
+};
+export type MutationManifest = {
+  readonly cluster: string;
+  readonly old_tests: readonly string[];   // test files at the base ref that covered this cluster
+  readonly new_tests: readonly string[];   // test files in the working tree after the change
+  readonly mutations: readonly Mutation[];
+};</pre>
+        <p><code>scripts/mutation-check.ts &lt;manifest&gt; [--base HEAD]</code> works as follows:</p>
+        <ol>
+          <li>It requires the change to be staged and snapshots it with <code>git stash create</code>, which captures staged new files without touching the checkout.</li>
+          <li>It adds two detached worktrees under <code>os.tmpdir()</code> (base ref and snapshot) and symlinks <code>node_modules</code> into both. If <code>bun.lock</code> differs between them, it fails.</li>
+          <li>It runs each side unmutated as a sanity check, so a red baseline can't fake kills.</li>
+          <li>For each mutation and each side, it writes the mutant, runs <code>bun test &lt;side's files&gt;</code> (60 s timeout), records killed = non-zero exit, and restores the file.</li>
+          <li>It prints K<sub>old</sub>, K<sub>new</sub>, regressions (K<sub>old</sub> \ K<sub>new</sub>) and survivors, exits 1 on any regression, and removes its own worktrees.</li>
+        </ol>
+        <p>The main checkout is never mutated. Mutant selection rules for coders:</p>
+        <ul>
+          <li>At least 1 mutant per deleted <code>describe</code> block, with at least 5 per cluster.</li>
+          <li>Prefer semantic mutants: boundary flips (<code>&lt;</code>↔<code>&lt;=</code>), negated guard, swapped ok/err branch, dropped filter/<code>where</code> term, reversed comparator, slice off-by-one, removed <code>await</code>.</li>
+          <li>Each mutant must still typecheck. Bun strips types, so a non-compiling mutant would be a false "kill" signal that a reader can't trust.</li>
+        </ul>
+        <p><code>tests/mutations/guards.ts</code> re-introduces every KEEP-list bug once (e.g. <code>eq(</code>→<code>like(</code> in the drizzle list, <code>args:</code>→<code>argv:</code> in <code>cli/args.ts</code>, removed tie-break <code>rowid</code> ordering) with <code>old_tests = new_tests</code> = the current suite, so you can re-prove that the guards still bite at any time.</p>
+
+        <h3>AD-3: Coverage floor is two-tier</h3>
+        <ul>
+          <li><strong>During the refactor (per cluster):</strong> the exact line-set superset from AD-1, which is stricter than any percentage.</li>
+          <li><strong>Permanently:</strong> the existing <code>bunfig.toml</code> <code>coverageThreshold = 0.8</code> (org standard, single source of truth), which bun enforces <em>per file</em> on lines and functions. It gets wired into CI and <code>gate</code> as <code>bun test --coverage</code>. This is exactly devpad <code>task_c453a4e2</code>, so Phase 4 adopts that task instead of minting a new one. No per-file baseline numbers are committed, because they would be a second source of truth that rots as lib code changes. There is <strong>no permanent ratchet</strong> (Q2): after this PR, the 80% floor is the only standing gate.</li>
+          <li>Baseline: 18 lib files are under 80% on lines or functions today. They are base, layered, remote-r2 (funcs), cat, lineage, show, stores, versions, config-schema, load-config (funcs), lookup, output, wrangler (funcs), encrypt, corpus, sst, laws/equality and laws/functor. <code>sst.ts</code> (a 9-line IaC naming helper) is excluded via <code>coveragePathIgnorePatterns</code> with a why-comment and gets no test (Q2). Phase 4 must take the other 17 to ≥80%.</li>
+        </ul>
+
+        <h3>AD-4: Equivalence model is the spec for raw backend CRUD; the contract keeps the edges</h3>
+        <ul>
+          <li><strong>What moves to the model:</strong> plain CRUD and listing semantics become model-checked across all backends. New commands:
+            <ul>
+              <li><code>list_meta_filtered(store,{limit?,tags?,before?,after?,entity_key?})</code>, compared in order. The model filters, sorts newest-first with an insertion tie-break, then limits. The model <code>Map</code> keeps position on re-put, matching drizzle's <code>onConflictDoUpdate</code> rowid.</li>
+              <li><code>get_latest(store, entity?)</code>, with <code>created_at</code> drawn from a small pool so ties actually occur.</li>
+              <li><code>get_children</code>, <code>find_by_hash</code> and <code>list_stores</code>.</li>
+            </ul>
+            <code>STORE_IDS</code> gains a prefix collider (<code>alp</code>/<code>alpha</code>).</li>
+          <li><strong>What the contract suite keeps:</strong> streaming chunk counts, ReadableStream input, the transaction contract, backend-specific error/emit branches (its 84 unique lines), and the KEEP-list guards as named single examples.</li>
+          <li><strong>Payload rules:</strong> payloads are plain <code>fc.*</code>, never <code>testing.compose</code> (the shrink hazard), with <code>size: "max"</code>.</li>
+        </ul>
+
+        <h3>AD-5: Observations get the same two-layer shape</h3>
+        <ul>
+          <li><code>run_observations_contract_tests(name, factory, cleanup?)</code> covers type validation, optional fields, timestamps, id format, events, unknown-key rejection and <code>is_stale</code>. It runs over memory, file, layered, cloudflare and remote.</li>
+          <li>An observations <code>provider_equivalence</code> model covers put/get/delete/<code>delete_by_source</code> and <code>query</code>/<code>query_meta</code> filters: type, source_store/version/prefix, <code>version_filter</code> (Set ≡ array ≡ predicate), <code>exclude_version</code>, <code>entity_key</code>, created/observed ranges and limit. The model uses the AGENTS.md ordering rule: <code>created_at</code> desc, later insertion first.</li>
+          <li>File-persistence-across-instances tests stay file-specific.</li>
+        </ul>
+
+        <h3>AD-6: Property-test discipline</h3>
+        <ul>
+          <li>Everything goes through the <code>testing.*</code> substrate or the in-repo <code>testing/</code> imports, which is the existing tests convention. Tests import root <code>zod</code> so the <code>test:zod3</code> matrix exercises both generations.</li>
+          <li>Any <code>fc.assert</code> over a <code>compose</code> arbitrary that can fail gets <code>{ endOnFailure: true }</code>.</li>
+          <li>Dates are clamped to 2000-2100. Use <code>stringMatching</code> instead of <code>hexaString</code>, a tight email arb for <code>.email()</code>, and <code>noDefaultInfinity</code> for zod-4 numbers.</li>
+          <li>The CLI enable matrix is <em>exhaustive</em> over all 32 combinations (a loop over <code>fc.sample</code>-free enumeration), not sampled.</li>
+          <li>New property files go under <code>tests/property/</code>. Run counts follow the module defaults unless a test documents why not.</li>
+        </ul>
+
+        <h3>AD-7: UI gate</h3>
+        <p>Not applicable: no pages or nav (test-only refactor plus one CLI-internal extraction).</p>
+      </section>
+
+      <section id="phases">
+        <h2>Phases</h2>
+        <p>Executed by the build stage: background coders write diffs and may self-check with <code>bun run typecheck</code>, <code>bun run lint</code> and <code>bun run fmt</code> only, with no tests, builds, installs or git. That matters here, because coders <em>cannot</em> run <code>bun test</code>, <code>coverage:diff</code> or <code>mutate</code>. They author the mutation manifests and the reviewer executes them. Disjoint-file tasks share the checkout; overlapping work uses per-coder worktrees, integrated linearly by the reviewer. Sequential execution is for true ordering dependencies. The reviewer runs the full gate per unit, fixes failures, and commits. <strong>Per cluster</strong>, the reviewer also runs <code>bun run coverage:diff</code> and <code>bun run mutate tests/mutations/&lt;cluster&gt;.ts</code> (AD-1/AD-2) before committing. That means one commit per cluster (C0-C16) on branch <code>test/suite-yield</code> and ONE PR at the end. Verification, the adversary checklist and proof are captured once per phase.</p>
+
+        <section class="phase" id="phase-1">
+          <header>
+            <h3>Phase 1: Safety rails</h3>
+            <span class="badge done">done</span>
+          </header>
+          <p>Builds the instruments every later deletion is judged by, and makes the suite parallel-safe so the mutation worktrees and per-test runs stop colliding. No test is deleted in this phase. Rollback: revert the commit, since there are no behaviour changes.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt>
+            <dd><code>task_382d44fb-a46e-4d8b-91eb-c060e2fa4afe</code></dd>
+            <dt>Mode</dt>
+            <dd>3 background coders on disjoint files in the shared checkout. The tools are TypeScript, so coders self-check with typecheck and lint, but the reviewer proves behaviour (Phase 1 acceptance runs the tools themselves).</dd>
+          </dl>
+
+          <article class="task" id="task-1-1">
+            <header>
+              <h3>Task 1.1 (C0): Parallel-safe temp dirs</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/support/tmp.ts</code> (new); the 7 fixed-name temp-dir test files listed in Affected areas</dd>
+              <dt>Dependencies</dt>
+              <dd>none</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Add <code>make_tmp_dir(prefix): Promise&lt;string&gt;</code> (mkdtemp in <code>os.tmpdir()</code>) and <code>remove_tmp_dir(dir)</code>. Replace every fixed temp path (<code>join(tmpdir(),"corpus-contract-test-file")</code>, <code>tests/.tmp/...</code>, <code>/tmp/test-corpus-backend*</code>) with per-run dirs created in <code>beforeAll</code>/<code>beforeEach</code>. <code>cli-config</code>'s "nonexistent dir" cases use a mkdtemp parent plus a child path that is never created.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>grep -rnE '"/tmp/|\.tmp/|tmpdir\(\), "corpus-' tests --include='*.ts'   # → no matches outside tests/support
+for i in 1 2 3 4; do bun test &amp; done; wait                                # 4 concurrent full runs, all green</pre>
+              <p>Expected: no fixed temp paths remain, and 4 concurrent suite runs all pass (the audit saw 61 false failures from this collision).</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-2">
+            <header>
+              <h3>Task 1.2 (C0): <code>coverage:diff</code> tool</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>scripts/coverage-diff.ts</code>, <code>package.json</code> (<code>"coverage:diff"</code>), <code>eslint.config.ts</code> (<code>scripts/*.ts</code> override)</dd>
+              <dt>Dependencies</dt>
+              <dd>none</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p><code>bun scripts/coverage-diff.ts [--base &lt;ref&gt;]</code> (default <code>git merge-base HEAD origin/main</code>):</p>
+              <ul>
+                <li>Runs <code>bun test --coverage --coverage-reporter=lcov</code> in the current tree and in a temp worktree at the base (with a symlinked <code>node_modules</code>).</li>
+                <li>Parses lcov <code>SF</code>/<code>DA</code>/<code>FNH</code>/<code>FNF</code> into a typed map, excluding <code>tests/</code>, <code>docs/</code> and <code>scripts/</code>.</li>
+                <li>Prints per-file lost lines, gained lines and the FNH delta.</li>
+                <li>Exits 1 if any file lost a covered line or a function hit.</li>
+                <li>Uses the Result style; the <code>no-console</code> override is why-commented.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun run coverage:diff --base HEAD        # → exit 0, "no lost lines"
+# reviewer: delete tests/unit/compose.test.ts locally, rerun → exit 1 listing utils.ts 264-289; restore</pre>
+              <p>Expected: an identical tree passes, and removing a unique-yield file fails with the exact lines from the audit appendix.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-1-3">
+            <header>
+              <h3>Task 1.3 (C0): <code>mutate</code> tool plus the guards manifest</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>scripts/mutation-check.ts</code>, <code>tests/mutations/types.ts</code>, <code>tests/mutations/guards.ts</code>, <code>package.json</code> (<code>"mutate"</code>)</dd>
+              <dt>Dependencies</dt>
+              <dd>none (shares the <code>eslint.config.ts</code> scripts override with 1.2; the 1.2 coder owns that file)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Implement AD-2 exactly. <code>guards.ts</code> lists one bug re-introduction per KEEP-list guard (at least 12), each targeting the guard's current test file. Ensure <code>tsconfig.build.json</code> does not emit <code>scripts/</code> or <code>tests/mutations/</code>.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>git add -A &amp;&amp; bun run mutate tests/mutations/guards.ts --base HEAD
+git status --porcelain   # → unchanged; git worktree list → no leftovers</pre>
+              <p>Expected: every guard mutant is killed on both sides, the checkout is untouched, and the temp worktrees are removed. A manifest with a non-unique <code>find</code> fails with a "stale manifest" message.</p>
+            </section>
+          </article>
+
+          <section data-kind="verification">
+            <h4>Phase verification</h4>
+            <pre>bun run gate
+bun run test:zod3
+bun run mutate tests/mutations/guards.ts</pre>
+            <p>Expected: all exit 0. Run once by the REVIEWER after the diffs land; one commit (C0).</p>
+          </section>
+
+          <section data-kind="adversary">
+            <h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary">
+              <ul>
+                <li>The mutation script can never leave a mutated lib file in the main checkout. Kill it mid-run and check <code>git status</code>.</li>
+                <li>The sanity (unmutated) run is red-aware: a failing baseline aborts instead of counting every mutant as killed.</li>
+                <li>lcov parsing handles files present on only one side (new or deleted lib files) without a crash or a silent pass.</li>
+                <li>No inline lint disables; the <code>scripts/*.ts</code> override has a why-comment.</li>
+                <li><code>dist/</code> after <code>bun run build</code> contains no <code>scripts</code> or <code>tests/mutations</code> output.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section data-kind="proof">
+            <h4>Proof</h4>
+            <div class="proof">
+              <p>Reviewer pass: gate green (typecheck, build, 1164 tests, lint 0 errors, fmt). <code>test:zod3</code> not run (it rewrites installed zod; Phase 1 touches no lib code).</p>
+              <ul>
+                <li>1.1: no fixed temp paths remain (only argv strings in <code>cli-args</code>). The plan's 7 files were not enough: <code>observations-file</code>, <code>file-transactions</code>, <code>put-if-changed</code>, <code>copy</code> and <code>cli-clone</code> used fixed <code>.test-*</code> dirs under <code>tests/integration/</code>, which the planned grep couldn't see; they were migrated too. 4 concurrent <code>bun test</code> runs: 1164 pass / 0 fail each (before the extra migration: up to 32 failures).</li>
+                <li>1.2: <code>coverage:diff --base HEAD</code> exit 0 in ~5.5 s ("no lost lines"). With <code>tests/unit/compose.test.ts</code> removed: exit 1, <code>utils.ts</code> lost 18 lines (264-275, 277, 279, 281, 287-289), function hits -4. <code>parse_lcov</code> lives in <code>scripts/lib/lcov.ts</code>. SF paths are repo-relative; <code>tests/ docs/ scripts/ node_modules/</code> are excluded.</li>
+                <li>1.3: <code>mutate tests/mutations/guards.ts</code> ~36 s, exit 0, <code>git status --porcelain</code> unchanged, no leftover worktrees. A non-unique <code>find</code> aborts with "stale manifest ... matched 25 times" (exit 2). All 15 guards KILLED on the new side (old side differs only for the like() guard, see below).</li>
+              </ul>
+              <table>
+                <thead><tr><th>Guard</th><th>old</th><th>new</th></tr></thead>
+                <tbody>
+                  <tr><td>list-store-id-like-not-eq</td><td>survived</td><td>KILLED (new contract test: store ids <code>a_b</code> vs <code>axb</code>)</td></tr>
+                  <tr><td>list-drops-tag-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>list-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>get-latest-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>observations-drops-entity-filter</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>memory-latest-strict-gt</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>args-argv-typo</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>args-drops-command-option-tokens</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>lineage-no-cycle-guard</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>stores-json-falls-through</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>file-aliasing-check-off</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>listing-ignores-tracker-errors</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>if-changed-compares-by-hash</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>copy-metadata-before-data</td><td>KILLED</td><td>KILLED</td></tr>
+                  <tr><td>walker-no-self-skip</td><td>KILLED</td><td>KILLED</td></tr>
+                </tbody>
+              </table>
+              <p>Not in the manifest, by design: (a) drizzle <code>desc(sql`rowid`)</code> tie-break removal is an equivalent mutant while <code>idx_store_created</code> exists (a reverse index scan already yields rowid-desc ties); the get_latest tie-break is still guarded behaviourally by the contract test and the memory <code>&gt;=</code> mutant. (b) The selector-key-presence guard can't be killed in-process today; add it to <code>guards.ts</code> in Phase 4 once <code>cli/main.ts</code> lets tests drive the real entry. No <code>eslint.config.ts</code> scripts override was needed.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="phase" id="phase-2">
+          <header>
+            <h3>Phase 2: Pure-function clusters → laws and properties</h3>
+            <span class="badge done">done</span>
+          </header>
+          <p>The audit's §5.1. Each cluster replaces example tables with properties over the <code>testing.*</code> substrate, deletes the subsumed examples, and keeps every KEEP-list guard. Each cluster ships with its mutation manifest. One commit per cluster (C1-C7). Rollback is per cluster: revert one commit.</p>
+          <p><strong>Phase 2 deletion rule</strong>, which is the operational form of AD-1. A cluster commits only if all of the following hold:</p>
+          <ol>
+            <li><code>bun run coverage:diff --base 6171c87</code> shows no lost lines.</li>
+            <li><code>bun run mutate tests/mutations/&lt;cluster&gt;.ts</code> shows 0 regressions.</li>
+            <li>The keep-list items named in the task are still present.</li>
+            <li>The deletion and its replacement are in the same diff.</li>
+          </ol>
+          <p>Every manifest mutation must change a real code path. The reviewer drops any mutation that survives on <em>both</em> sides and notes it in the proof, because a mutation nothing can kill is equivalent and gives no signal. A mutation killed only on the new side (new coverage, e.g. <code>merge_deep</code>) is kept.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt>
+            <dd><code>task_caddb6cf-a52b-4414-b121-2e50453eda91</code></dd>
+            <dt>Mode</dt>
+            <dd>
+              <ul>
+                <li><strong>One worktree per cluster</strong> (7 worktrees off <code>test/suite-yield</code>). The clusters' files <em>are</em> disjoint, but the gate tools snapshot the whole tree: <code>coverage:diff</code> runs the full suite, and <code>mutate</code> uses <code>git stash create</code>. In a shared checkout, one cluster's in-flight deletions would contaminate another cluster's gate.</li>
+                <li>The reviewer symlinks <code>node_modules</code> into each worktree, gates it there, and cherry-picks onto the feature branch linearly. It then re-runs <code>coverage:diff --base 6171c87</code> on the integrated tip.</li>
+                <li>In practice coders have no shell (Phase 1 lesson), so briefs list the typed-ESLint traps explicitly. A property that fails on its first real run is fixed forward by the reviewer.</li>
+                <li>No coder edits <code>AGENTS.md</code>, <code>eslint.config.ts</code> or <code>package.json</code> in this phase. The <code>AGENTS.md</code> layout/citation touch-ups happen once at phase close.</li>
+              </ul>
+            </dd>
+          </dl>
+
+          <article class="task" id="task-2-1">
+            <header>
+              <h3>Task 2.1 (C1): Result laws, plus <code>merge_deep</code>/<code>at</code></h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/result.test.ts</code>, <code>tests/property/result-laws.test.ts</code> (new), <code>tests/mutations/result.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Properties, written over an <code>fc.oneof(ok(fc.anything()), err(...))</code> Result arbitrary:</p>
+              <ul>
+                <li><code>match</code> dispatch.</li>
+                <li><code>unwrap_or</code>/<code>to_nullable</code>/<code>to_fallback</code> on ok vs err.</li>
+                <li><code>pipe(r).op(f).result() ≡ op(r,f)</code> for every pipe op.</li>
+                <li><code>try_catch</code>/<code>try_catch_async</code> on throw vs return.</li>
+                <li>The <code>null_on</code>/<code>fallback_on</code> predicate split.</li>
+                <li><code>format_error</code> is total over <code>fc.anything()</code>.</li>
+                <li>New: <code>merge_deep(x,{}) ≡ x</code>, right-bias on leaf conflicts, and <code>at(xs,i)</code> ok ⇔ 0≤i&lt;len.</li>
+              </ul>
+              <p>Also add <code>first</code>/<code>last</code> properties (empty ⇒ err, else ends). Today <code>result.ts</code> 502/505 are reached only through <code>observation-utils</code>. <code>at</code> also returns err for an in-range <code>undefined</code> element, so generate defined values or assert that branch explicitly. Keep the <code>fetch_result</code> examples (real fetch fake), the <code>unwrap</code>/<code>unwrap_err</code> throw-message examples, and <code>result-functor.test.ts</code>.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/unit/result.test.ts tests/property/result-laws.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/result.ts</pre>
+              <p>Expected: 79 → ~22 tests; <code>result.ts</code> lines 426-467 are now covered; no lost lines; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-2">
+            <header>
+              <h3>Task 2.2 (C2): Observation-utils properties</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/observation-utils.test.ts</code> → <code>tests/property/observation-utils.test.ts</code>, <code>tests/mutations/observation-utils.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Properties:</p>
+              <ul>
+                <li><code>law.round_trip</code> for <code>key_to_pointer ∘ pointer_to_key</code>, with paths that include <code>:</code>.</li>
+                <li><code>resolve_path(obj, path_to(obj, leaf)) = ok(leaf)</code> over generated JSON, and err for absent paths.</li>
+                <li><code>apply_span(s,[a,b]) = ok(s.slice(a,b))</code> iff 0≤a≤b≤len, else err.</li>
+                <li><code>pointers_equal</code> is reflexive and symmetric, and true ⇔ field-equal.</li>
+                <li><code>pointer_to_snapshot</code> projection.</li>
+              </ul>
+              <p>Delete the <code>create_pointer</code> shape tests and the <code>define_observation_type</code> tests that re-test zod (class e).</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/property/observation-utils.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/observation-utils.ts</pre>
+              <p>Expected: 64 → ~15; <code>observations/utils.ts</code> stays at 100%; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-3">
+            <header>
+              <h3>Task 2.3 (C3): Codec laws</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>delete <code>tests/unit/{gzip,encrypt,codecs,compose}.test.ts</code> and <code>tests/integration/composed-codec.test.ts</code>; new <code>tests/property/codec-laws.test.ts</code> and <code>tests/integration/codecs.test.ts</code>; <code>tests/mutations/codecs.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Properties:</p>
+              <ul>
+                <li><code>law.round_trip</code> over every codec and every <code>compose(head, ...layers)</code> combination of {text, binary, json} × {∅, gzip, encrypt, gzip+encrypt}.</li>
+                <li><code>concat(encode_stream(v)) ≡ encode(v)</code> (this covers the encrypt 76-90 and gzip 45-46 gaps) and <code>decode_stream ≡ decode</code> where present.</li>
+                <li>Streamability ⇔ every layer streams.</li>
+                <li><code>text_codec.decode_stream</code> over UTF-8 bytes split at random offsets, including inside multi-byte characters, equals <code>decode</code>.</li>
+              </ul>
+              <p>Examples kept in <code>codecs.test.ts</code>: random IV, wrong key, tamper, no-dedup-under-encrypt, one ≥512 KB multi-chunk decode.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/property/codec-laws.test.ts tests/integration/codecs.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/codecs.ts</pre>
+              <p>Expected: 28 → ~12; <code>codecs/encrypt.ts</code> ≥95% lines (from 60.6); K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-4">
+            <header>
+              <h3>Task 2.4 (C4): <code>parallel_map</code>/Semaphore properties</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/concurrency.test.ts</code>, <code>tests/mutations/concurrency.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p><code>fc.asyncProperty</code> over items, n≥1 and per-item microtask-yield counts (no <code>setTimeout</code> sleeps). Assert:</p>
+              <ul>
+                <li>output order = input order;</li>
+                <li>max in-flight ≤ n, measured by a counter;</li>
+                <li>the index is passed correctly;</li>
+                <li>a rejecting mapper surfaces.</li>
+              </ul>
+              <p>Keep the Semaphore acquire/release and FIFO examples, with their <code>setTimeout</code> sleeps replaced by microtask flushes. The file ends with zero <code>setTimeout</code> calls.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/unit/concurrency.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/concurrency.ts</pre>
+              <p>Expected: 18 → ~8; file runtime &lt;100 ms (from 329); mutants on the limit check and result-index assignment are killed.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-5">
+            <header>
+              <h3>Task 2.5 (C5): CLI policy properties</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/{cli-output,cli-config,cli-args}.test.ts</code>, <code>tests/mutations/cli-policy.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1 (cli-config temp dirs migrated in 1.1)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li><strong>Enable matrix:</strong> exhaustively check all 32 combinations of {stdout_tty, stderr_tty, json, quiet, ci, no_color}-relevant booleans against the two AGENTS.md formulas, observed through <code>create_console_output</code> with injected sinks.</li>
+                <li><strong>Precedence:</strong> ∀ presence subsets of {flag, config env, env var, wrangler uuid / placeholder}, the resolved id equals the highest-ranked present non-placeholder value; if none is present, <code>invalid_config</code> naming the fix.</li>
+                <li><strong>argv reconstruction:</strong> ∀ argv drawn from {globals, <code>--x</code>, <code>--x=v</code>, <code>--x v</code>, positionals}, the command parse sees exactly the non-global tokens, in order.</li>
+              </ul>
+              <p>The enable matrix also observes <code>note()</code> (visible ⇔ ¬quiet ∧ ¬json). The precedence property targets <code>resolve_connection_ids</code> directly. Keep all <code>--json</code> purity, selector-key, <code>.git</code>-boundary and placeholder-id examples, the purity and spawn-smoke tests in <code>cli-output</code>, and the <code>cli-args.test.ts</code> path (<code>guards.ts</code> references it).</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/unit/cli-output.test.ts tests/unit/cli-config.test.ts tests/unit/cli-args.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/cli-policy.ts</pre>
+              <p>Expected: 71 → ~48; mutants dropping <code>!ci</code> from the spinner gate or adding <code>quiet</code> to the colour gate are killed.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-6">
+            <header>
+              <h3>Task 2.6 (C6): Substrate self-tests, table-driven, plus "law fails when violated"</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/{testing-arb,testing-arb-dual,testing-failure,testing-compose,testing-laws-basic}.test.ts</code>, <code>tests/mutations/substrate.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li>One table of schemas, with ∀ entry asserting <code>fc.assert(arb(schema) ⇒ safeParse ok)</code>. Add v3 tuple, intersection and unsupported-kind message rows (the arb-v3 gaps). Branch-reach claims (union branches, optional/nullable emitting both) use <code>testing.cover</code> labels instead of hand-counted samples. Keep the file names <code>testing-arb.test.ts</code> and <code>testing-arb-dual.test.ts</code>, because <code>eslint.config.ts</code> overrides name them.</li>
+                <li>One table typed <code>{ [K in CorpusError["kind"]]: ... }</code>, asserting each failure generator yields its <code>kind</code>.</li>
+                <li><code>testing-compose</code> keeps the shrink test and one shape test.</li>
+                <li>Add a deliberately violating input for <code>round_trip</code>, <code>idempotent</code>, <code>functor</code> (both branches), <code>default_equals</code> and <code>provider_equivalence</code>, and assert the law <em>throws</em>. This covers equality 17-19, functor 84-88/108-112, idempotent 62-64 and provider-equivalence 142-146. A law that can't fail is a silent no-op.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/unit/testing-*.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/substrate.ts</pre>
+              <p>Expected: 66 → ~32; <code>testing/laws/{equality,functor}.ts</code> ≥80% lines; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-2-7">
+            <header>
+              <h3>Task 2.7 (C7): Version-set</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/integration/version-set.test.ts</code>, <code>tests/mutations/version-set.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li>Store behaviour runs on memory only, plus one file-backend smoke (the factory sits above the backend).</li>
+                <li>Schema tests become backend-free.</li>
+                <li><code>put→get</code> round-trip over <code>testing.arb(VersionSetManifestSchema)</code>, compared against the <em>parsed</em> input (<code>.default()</code> input ≠ output), and <code>law.idempotent(parse)</code>.</li>
+                <li>Keep the lineage/promote and invalid-message examples.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/version-set.test.ts
+bun run coverage:diff --base 6171c87 &amp;&amp; bun run mutate tests/mutations/version-set.ts</pre>
+              <p>Expected: 40 → ~14; <code>version-set.ts</code> no lost lines (259-263 newly covered if reachable); K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <section data-kind="verification">
+            <h4>Phase verification</h4>
+            <pre>bun run gate
+bun run test:zod3
+bun run coverage:diff
+bun run mutate tests/mutations/guards.ts</pre>
+            <p>Expected: all exit 0; the cumulative diff against 6171c87 shows no lost lines. Run by the REVIEWER: per-cluster checks before each commit, the full set once at phase end.</p>
+          </section>
+
+          <section data-kind="adversary">
+            <h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary">
+              <ul>
+                <li>Every property has a mutant in its manifest that only it kills. A property that passes on a mutated implementation is vacuous.</li>
+                <li>No <code>fc.assert</code> over a <code>testing.compose</code> arbitrary without <code>endOnFailure: true</code>, and no <code>fc.hexaString</code>, unclamped <code>fc.date</code> or <code>fc.emailAddress</code> into <code>.email()</code>.</li>
+                <li>Tests import root <code>zod</code> (dual-zod matrix), and <code>z.record</code> uses the two-arg form.</li>
+                <li>No <code>mock</code>/<code>spyOn</code>; fakes only (<code>f0rbit/no-test-mocks</code>).</li>
+                <li>No KEEP-list guard was deleted. Grep for each guard's assertion text from AD-1 in the new files.</li>
+                <li>Run the wider suite, not just touched files. The codec and Result changes are imported by integration tests.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section data-kind="proof">
+            <h4>Proof</h4>
+            <div class="proof">
+              <p>Reviewer pass over C1-C7 (commits f8c3c39, 4be97a3, 5f9b378, dfc6c87, 106bfc6, ee5cded, b64f537). The earlier reviewer session died before reporting, so every gate was re-run on the integrated tip. Gate green (typecheck, build, 991 tests, lint 0 errors, fmt). <code>test:zod3</code>: 991 pass / 0 fail. 4 concurrent <code>bun test</code>: 991 pass / 0 fail each. <code>coverage:diff --base 6171c87</code>: "no lost lines" (gains in codecs/encrypt, codecs/gzip, result, testing/arb-v3, testing/laws/functor, testing/laws/idempotent). <code>mutate guards.ts</code>: 4/4 KILLED, 0 regressions. Total tests 1164 → 991. Coverage 87.2% → 91.94% lines; functions 91.5% → 91.33% (bun report; the small function-% dip is not explained beyond coverage:diff showing no lost function hits).</p>
+              <p>Test registrations (<code>test(</code>/<code>it(</code>) before → after: C1 result 79 → 32 (12 + 20 in result-laws); C2 observation-utils 64 → 21; C3 codecs 28 → 15 (4 laws + 11 kept examples; the old suite had ~119 expanded cases); C4 concurrency 18 → 11; C5 cli-policy 71 → 56; C6 substrate 66 → 32; C7 version-set 40 → 18.</p>
+              <p>Mutation checks (<code>--base 75ee6da</code>, old = Phase 1 tests): 0 regressions and 0 new-side survivors in all seven clusters.</p>
+              <table>
+                <thead><tr><th>Cluster</th><th>mutants</th><th>killed old</th><th>killed new</th><th>new-only kills</th></tr></thead>
+                <tbody>
+                  <tr><td>result</td><td>13</td><td>9</td><td>13</td><td>merge-deep-recurses-into-arrays, merge-deep-undefined-overwrites, at-rejects-last-index, last-returns-first</td></tr>
+                  <tr><td>observation-utils</td><td>8</td><td>8</td><td>8</td><td>none</td></tr>
+                  <tr><td>codecs</td><td>8</td><td>5</td><td>8</td><td>compose-decode-stream-not-reversed, text-decode-stream-per-chunk, gzip-encode-stream-decompresses</td></tr>
+                  <tr><td>concurrency</td><td>6</td><td>5</td><td>6</td><td>release-mints-permit-on-handoff</td></tr>
+                  <tr><td>cli-policy</td><td>8</td><td>8</td><td>8</td><td>none</td></tr>
+                  <tr><td>substrate</td><td>10</td><td>6</td><td>10</td><td>arb-v3-tuple-one-short, functor-identity-check-skipped, functor-composition-check-skipped, idempotent-op-applied-once</td></tr>
+                  <tr><td>version-set</td><td>7</td><td>7</td><td>7</td><td>none</td></tr>
+                </tbody>
+              </table>
+              <p>Dropped equivalent mutants: none. No mutant survived on both sides, so none needed a why-comment drop. No fixup commits were needed: all seven cluster commits already passed on review. Found already done: every deletion (observation-utils, gzip/encrypt/codecs/compose unit tests, composed-codec integration test), the collapsed codec-laws (4 properties, not ~119 entries) and all seven mutation manifests.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="phase" id="phase-3">
+          <header>
+            <h3>Phase 3: Shared contracts and model-based expansion across all backends</h3>
+            <span class="badge done">done</span>
+          </header>
+          <p>The structural fix (audit §5.2/§5.3). The observations contract and the equivalence expansion land first. Contract pruning comes last (delete last) and only after C9 has proven the model kills the pruned assertions' mutants on all 6 backends. Rollback: C10/C11 revert independently. C8/C9 are additive until their deletions.</p>
+          <p>Coder briefs (checked against HEAD <code>8d9b35c</code>): <code>.plans/test-suite-yield-phase3-briefs.md</code>.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt>
+            <dd><code>task_2bae1617-e27a-4fb5-b4dc-94e2a36cf41c</code></dd>
+            <dt>Mode</dt>
+            <dd>
+              <p>One worktree per task. Coders have no shell and no delete tool, so they list deletions and the reviewer runs <code>git rm</code>. The waves:</p>
+              <ul>
+                <li><strong>Wave 0</strong> (parallel):
+                  <ul>
+                    <li>3.0: layered observations fix (<code>p3-layered-obs</code>), a lib change behind a decision;</li>
+                    <li>3.F: fake <code>reset()</code> hooks (<code>p3-fake-reset</code>).</li>
+                  </ul>
+                  After both are committed, the reviewer measures fake construction and reset cost before dispatching 3.2.</li>
+                <li><strong>Wave 1</strong> (parallel, branched from the post-Wave-0 tip):
+                  <ul>
+                    <li>3.1 (<code>p3-observations</code>);</li>
+                    <li>3.2 (<code>p3-backend-model</code>);</li>
+                    <li>3.4 (<code>p3-store-level</code>).</li>
+                  </ul>
+                </li>
+                <li><strong>Wave 2</strong> (sequential): 3.3 (<code>p3-contract-prune</code>) only after C9 is committed. This is a true ordering dependency, because pruning is justified only once the model covers those behaviours. Its <code>mutate</code> base is the C9 commit.</li>
+              </ul>
+            </dd>
+          </dl>
+
+          <article class="task" id="task-3-0">
+            <header>
+              <h3>Task 3.0 (C8a): Layered observations route to the bottom write layer</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>observations/types.ts</code>, <code>observations/utils.ts</code>, <code>observations/client.ts</code>, <code>observations/index.ts</code>, <code>corpus.ts</code> (<code>tx.observe</code>), <code>backend/{memory,file,drizzle-storage,layered}.ts</code>, <code>docs/src/content/docs/guides/observations.mdx</code>, <code>AGENTS.md</code>, <code>tests/integration/layered-backend.test.ts</code>, <code>tests/integration/observations-id.test.ts</code> (new), <code>tests/mutations/guards.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>none (Wave 0). Q7 resolved: option A.</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p><strong>Public API addition</strong>, which means a release-notes entry and a <strong>minor bump at the next release</strong>: optional <code>ObservationPutOpts.id?: string</code>. Full brief: <code>.plans/test-suite-yield-phase3-briefs.md</code> §3.0.</p>
+              <ul>
+                <li><strong>Format:</strong> a new exported <code>observation_id_schema</code> (<code>/^obs_[A-Za-z0-9_-]{1,64}$/</code>) is the single source. A malformed id gives <code>validation_error</code> before any write, in both <code>put</code> and <code>tx.observe</code>.</li>
+                <li><strong>Collision:</strong> <code>validation_error</code> (<code>observation id "…" already exists</code>), <em>never</em> an overwrite. It is checked in each backend's atomic section:
+                  <ul>
+                    <li>memory <code>add_one</code> (today a silent <code>Map.set</code> overwrite);</li>
+                    <li>file <code>add_one</code> under <code>OBS_LOCK</code> (today a duplicate row);</li>
+                    <li>drizzle/remote <code>put_row</code>, where the PK <code>UNIQUE constraint failed: corpus_observations.id</code> is mapped (today a generic <code>storage_error</code>);</li>
+                    <li>in-tx collisions give <code>transaction_aborted</code> with no visible writes.</li>
+                  </ul>
+                  It is deliberately not a new <code>CorpusError</code> kind, because that would be breaking.</li>
+                <li><strong>Layered put:</strong> generates the id once (<code>opts.id ?? generate_observation_id()</code>) and passes it to every write layer, with best-effort compensation on a mid-fan-out failure. It returns the first write layer's observation.</li>
+                <li><strong>Layered delete / delete_by_source:</strong>
+                  <ul>
+                    <li><code>delete</code> fans out; it returns <code>observation_not_found</code> only if no layer had the id, and other errors propagate.</li>
+                    <li><code>delete_by_source</code> deletes everywhere and reports the bottom layer's count. Today it double-counts and swallows errors.</li>
+                  </ul>
+                </li>
+                <li><strong>Layered get / query / is_stale:</strong> unchanged (primary read layer), now consistent.</li>
+                <li><strong>Docs and AGENTS:</strong> a "Choosing an id" docs subsection, plus one AGENTS.md Gotchas bullet.</li>
+                <li><strong>Guards:</strong> <code>layered-observations-shared-id</code>, <code>observation-id-collision-memory</code>, <code>observation-id-collision-file</code>.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/layered-backend.test.ts tests/integration/observations-id.test.ts
+bun run docs:build
+bun run mutate tests/mutations/guards.ts
+bun run gate</pre>
+              <p>Expected:</p>
+              <ul>
+                <li>Two-layer <code>put</code>→<code>get(id)</code> is ok on both layers; <code>delete</code> removes the row from both; <code>delete_by_source</code> returns the real count.</li>
+                <li>Malformed and colliding ids are rejected identically on memory, file, cloudflare and remote, and the original row is unchanged.</li>
+                <li>In-tx collisions give <code>transaction_aborted</code>.</li>
+                <li>All guards are KILLED.</li>
+              </ul>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-f">
+            <header>
+              <h3>Task 3.F (C8b): <code>reset()</code> on the D1-HTTP and S3 fakes</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/fakes/d1-http.ts</code>, <code>tests/fakes/s3.ts</code>, <code>tests/integration/http-fakes.test.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>none (Wave 0)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Neither fake has a reset hook at HEAD.</p>
+              <ul>
+                <li><strong>D1-HTTP:</strong> <code>reset()</code> rebuilds the underlying <code>create_fake_d1</code> (with a <code>sqlite</code> getter), and the request handler reads the current instance.</li>
+                <li><strong>S3:</strong> <code>reset()</code> clears the object map.</li>
+              </ul>
+              <p>One fidelity test per fake. Every existing quirk is unchanged.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/http-fakes.test.ts</pre>
+              <p>Expected: state is gone after <code>reset()</code> and the server still serves the same quirks.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-1">
+            <header>
+              <h3>Task 3.1 (C8): Observations contract suite and equivalence model</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd>new <code>tests/integration/observations-contract.test.ts</code>, <code>tests/property/observations-equivalence.test.ts</code>, <code>tests/mutations/observations.ts</code>; delete <code>tests/integration/observations-{memory,file,entity,version-filter,exclude-version}.test.ts</code> (file-persistence cases move to a <code>describe("file persistence")</code> in the contract file)</dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Implement AD-5.</p>
+              <ul>
+                <li><code>run_observations_contract_tests(name, factory, cleanup?)</code> is exported like <code>run_backend_contract_tests</code> and invoked for memory, file, layered (memory over file), cloudflare (fake D1+R2) and remote (fake D1-HTTP + S3).</li>
+                <li>The equivalence model is a <code>Map</code> of rows plus a snapshot-meta view for <code>is_stale</code> and entity inheritance.</li>
+                <li>Commands: put, get, delete, <code>delete_by_source(pointer, path?)</code>, <code>query</code>/<code>query_meta</code> with a generated filter record (<code>version_filter</code> as Set | array | sync fn | async fn).</li>
+                <li>Results are compared <em>in order</em>.</li>
+                <li>Keep the entity-before-limit and version_filter-before-limit guards as named contract examples.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/observations-contract.test.ts tests/property/observations-equivalence.test.ts
+bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/observations.ts</pre>
+              <p>Expected: 149 → ~84 tests; newly covered: <code>drizzle-storage.ts</code> 323-335 and 370-393, and <code>layered.ts</code> 246-300 (layered ≥95% lines); K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-2">
+            <header>
+              <h3>Task 3.2 (C9): <code>backend-equivalence</code> expansion</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/property/backend-equivalence.test.ts</code>, <code>tests/mutations/backend-model.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <p>Implement AD-4:</p>
+              <ul>
+                <li>Add 5 commands, ordered list comparison, the prefix collider and the pooled <code>created_at</code>.</li>
+                <li>Add a <code>wrap_bytes_storage</code>-adapted memory provider, which covers <code>base.ts</code> 67-90.</li>
+                <li>Add cloudflare and remote providers (decided in Q1). Run all providers at the full 200 runs.
+                  <ul>
+                    <li><strong>Cloudflare:</strong> a fresh <code>create_fake_d1</code>+<code>create_fake_r2</code> per run.</li>
+                    <li><strong>Remote:</strong> one <code>Bun.serve</code> D1-HTTP transport and one S3 transport per file, started in <code>beforeAll</code> and <code>stop()</code>ped in <code>afterAll</code>. Each provider <code>build</code> swaps in a fresh fake D1 database and a fresh S3 object map behind them, which is fresh SUT state over shared plumbing. If <code>tests/fakes/d1-http.ts</code>/<code>s3.ts</code> lack a state-swap hook, add a minimal <code>reset()</code> (test-fake files only).</li>
+                    <li><strong>Measure first:</strong> the reviewer records per-provider wall time in the proof before committing. If the file exceeds the existing budget assertion, report the numbers rather than silently dropping <code>numRuns</code>.</li>
+                  </ul>
+                </li>
+                <li>Keep the existing wall-clock budget assertion and update the header comment.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/property/backend-equivalence.test.ts
+bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/backend-model.ts</pre>
+              <p>Expected: green across 6-7 providers within the documented budget. The mutants are list <code>eq</code>→prefix, dropped tag predicate, limit applied before filter, reversed tie-break, get_latest ignoring entity, and <code>list_stores</code> unsorted. Each is killed by the model on every provider it applies to.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-3">
+            <header>
+              <h3>Task 3.3 (C10): Prune the backend-contract, fold <code>remote-r2</code></h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/integration/backend-contract.test.ts</code>, delete <code>tests/unit/remote-r2.test.ts</code>, <code>tests/mutations/backend-contract.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>3.2 committed (sequential)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li><strong>Remove</strong> the assertions the model now subsumes: the 19 listed in audit §5.2, plus list limit, plain tag filter, tag+date+limit, get_latest newest / per-entity / unknown-entity / store-wide, get_children ×2, find_by_hash ×3 and list_stores.</li>
+                <li><strong>Keep</strong> as named examples: exact-match <code>eq()</code>, tag-before-limit, entity-before-limit, the insertion tie-break, and everything in streaming, data-handle, transactions and cross-client.</li>
+                <li>Delete <code>tests/unit/remote-r2.test.ts</code> (the reviewer runs <code>git rm</code>) <strong>without</strong> adding a <code>handle.size</code> assertion. Correction to Q4: the public <code>DataHandle</code> has no <code>size</code>, and <code>DataStorageHandle.size</code> is read by no library code, so the assertion is unobservable at the contract level. The file's other 7 tests are covered by the RemoteBackend contract run and the C9 model.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/backend-contract.test.ts tests/property/backend-equivalence.test.ts
+bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/backend-contract.ts</pre>
+              <p>Expected: 332+8 → ~176 tests; all 84 contract-unique lines still covered; old_tests = contract + remote-r2 + equivalence at HEAD, new_tests = pruned contract + equivalence, with K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-3-4">
+            <header>
+              <h3>Task 3.4 (C11): Memory/layered store-level duplicates</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/integration/{memory-backend,layered-backend}.test.ts</code>, <code>tests/mutations/store-level.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 1</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li><code>memory-backend</code>: drop the ~15 get_latest / tag / limit / isolation duplicates of the contract. Keep the events (<code>corpus.ts</code> 308-314) and dedup tests.</li>
+                <li><code>layered-backend</code>: replace the 5 "list merging" examples with one property. Layered <code>list</code> ≡ the union of layer lists, deduped by version (first read layer wins), <code>created_at</code> desc with the tie rule, limit applied after the merge.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/memory-backend.test.ts tests/integration/layered-backend.test.ts
+bun run coverage:diff &amp;&amp; bun run mutate tests/mutations/store-level.ts</pre>
+              <p>Expected: 56 → ~35; <code>layered.ts</code> 102-105 still covered; K<sub>new</sub> ⊇ K<sub>old</sub>.</p>
+            </section>
+          </article>
+
+          <section data-kind="verification">
+            <h4>Phase verification</h4>
+            <pre>bun run gate
+bun run test:zod3
+bun run coverage:diff
+bun run mutate tests/mutations/guards.ts</pre>
+            <p>Expected: all exit 0; suite wall time ≤ ~4.5 s (cloudflare/remote equivalence cost recorded in the proof).</p>
+          </section>
+
+          <section data-kind="adversary">
+            <h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary">
+              <ul>
+                <li>Fresh SUT per run is preserved (the law enforces it at runtime). With a shared remote transport, the state reset happens inside the provider <code>build</code>, and a run that leaks state from the previous one fails.</li>
+                <li>Every <code>Bun.serve</code> fake is <code>stop()</code>ped. There are no hanging handles; <code>bun test</code> exits promptly.</li>
+                <li>The ordered list comparison doesn't hide a real backend divergence behind a model bug. Any newly found divergence is a reported finding (lib fix as its own commit with a regression test), never "fixed" by loosening the model.</li>
+                <li>AGENTS.md references to moved tests are updated (e.g. "applies tag filters before limit", the <code>observations-*</code> files, the RemoteBackend transaction note).</li>
+                <li>Run the full suite. <code>run_backend_contract_tests</code> is consumed by 6 invocations.</li>
+                <li>No unused fakes or helpers are left behind by the deleted observation files.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section data-kind="proof">
+            <h4>Proof</h4>
+            <div class="proof">
+              <p>Commits on <code>test/suite-yield</code>: 3.0 <code>7544fe5</code> (caller-supplied observation ids + layered fan-out, earlier); briefs <code>8bdda5e</code>; 3.1 <code>71ac26a</code> (observations contract + model, 5 files removed); 3.4 <code>5f85204</code> (memory/layered duplicates); lib fix <code>fix: omit empty stores from the file backend's list_stores</code> (found by 3.2, user-approved; patch-level behaviour fix for the release notes) + contract regression test + guard; 3.2 <code>ec42325</code> (backend model, 6 providers, 13 commands); 3.3 <code>909041e</code> (34 contract examples pruned, <code>remote-r2.test.ts</code> deleted). Gate green on the tip (typecheck, build, 848 tests, lint 0 errors, fmt). <code>test:zod3</code>: 848 pass / 0 fail. 4 concurrent <code>bun test</code>: 848 pass / 0 fail each (one earlier <code>coverage:diff</code> run hit a 5 s timeout in <code>result-laws</code> under load, not reproducible).</p>
+              <p>Totals: tests 1164 (baseline) → 1017 (after wave 0) → 848. Lines covered 4699/5368 (87.5%) → 4945/5455 (90.7%); functions 714/780 (91.5%) → 760/809 (93.9%) (bun lcov, <code>--base 6171c87</code> vs head). <code>coverage:diff --base 7544fe5</code>: no lost lines after every unit. <code>coverage:diff --base 6171c87</code> reports line-number "lost" lines in 8 lib files from the 3.0 edits and the list_stores fix; a content comparison (covered line text, base vs head) shows only intended changes: <code>ids.push(store_id)</code> reworked by the fix, <code>return ok(had)</code>/<code>ok(true|false)</code> returns from the observations Result change, and <code>generate_observation_id()</code> moved behind the caller-id path.</p>
+              <p>Runtimes: <code>backend-equivalence</code> 1.6 s (6 providers x 200 runs, budget 30 s); <code>observations-equivalence</code> 1.4 s (5 providers x 200 runs); observations contract + equivalence together 2.1 s. The wave-0 fake timing measurements were taken in the earlier session and are not repeated here.</p>
+              <table>
+                <thead><tr><th>Cluster</th><th>mutants</th><th>killed old</th><th>killed new</th><th>regressions</th></tr></thead>
+                <tbody>
+                  <tr><td>observations</td><td>11</td><td>6</td><td>11</td><td>0</td></tr>
+                  <tr><td>backend-model</td><td>11</td><td>0</td><td>11</td><td>0</td></tr>
+                  <tr><td>store-level</td><td>8</td><td>7</td><td>8</td><td>0</td></tr>
+                  <tr><td>backend-contract (--base ec42325)</td><td>9</td><td>9</td><td>9</td><td>0</td></tr>
+                  <tr><td>guards (incl. new file-list-stores-includes-empty)</td><td>all</td><td>-</td><td>all killed</td><td>0</td></tr>
+                </tbody>
+              </table>
+              <p>Findings and fixes: the model found a real bug, the file backend's <code>list_stores</code> listing a store whose versions were all deleted (or only touched by a delete of a missing version); fixed in lib and guarded. Coverage fix en route: the store-level <code>delete</code> tests in memory-backend were kept (the contract only covers <code>backend.metadata.delete</code>). Model strengthening: weighted <code>alpha</code> store pool plus a <code>put_burst</code> command, because single puts rarely stacked enough metas for limit, tie-break and before-boundary mutants to bite. Dropped equivalent mutants: none. The dead <code>DataStorageHandle.size</code> stays an out-of-scope follow-up.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="phase" id="phase-4">
+          <header>
+            <h3>Phase 4: Close the gaps, make CLI coverage visible, enable the coverage gate</h3>
+            <span class="badge done">done</span>
+          </header>
+          <p>Adds the high-value tests the audit ranked, then turns on the per-file 80% gate (devpad <code>task_c453a4e2</code>, adopted as this phase's task). Ends with AGENTS.md updates and the ONE PR. Rollback: C14 (<code>cli/main.ts</code> plus the <code>load_cli_config</code> <code>cwd</code> seam) and C14b (the <code>equality.ts</code> seam) are the only lib changes, and each reverts cleanly. C16 (the gate) reverts to plain <code>bun test</code>.</p>
+          <p><strong>Revised task map (2026-11-24, checked against <code>8b0926b</code>).</strong> Full briefs: <code>.plans/test-suite-yield-phase4-briefs.md</code>. They supersede the task articles below where the two differ.</p>
+          <table>
+            <thead><tr><th>Wave</th><th>Task (commit)</th><th>Change vs. original plan</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td>4.0a (C12a): <code>coverage:diff --by-content</code></td><td>new. Line-number diffs gave false losses after lib edits (Phase 3 proof)</td></tr>
+              <tr><td>0</td><td>4.0b (C12b, optional): model hit-rate floors</td><td>new. Outcome labels per command, ≥2% each</td></tr>
+              <tr><td>1</td><td>4.1 (C12): <code>corpus.ts</code> gaps</td><td>widened. <code>resolve_pointer</code>/<code>is_superseded</code> are <em>entirely</em> uncovered; also <code>tx.get_latest</code>, <code>tx.observation_delete</code> and error emits</td></tr>
+              <tr><td>1</td><td>4.2 (C13): remote-d1/remote-r2 error paths</td><td>adds <code>set_responder</code> to both HTTP fakes (single fake, no second server). remote-r2 functions are at 76.9%</td></tr>
+              <tr><td>1</td><td>4.3 (C14): <code>cli/main.ts</code></td><td>adds a <code>load_cli_config(path, cwd)</code> seam (it read <code>process.cwd()</code>) and <code>build_backend_selector</code>. Guards on <em>both</em> halves of the selector bug (a single-site mutant is equivalent)</td></tr>
+              <tr><td>1</td><td>4.5 (C14b): <code>equality.ts</code> seam</td><td>new. The 17-19 no-Bun branch is unreachable without a <code>has_bun</code> parameter</td></tr>
+              <tr><td>2</td><td>4.4 (C15): command error branches + CLI stragglers</td><td>now sequential after C14 (uses the <code>cwd</code> seam)</td></tr>
+              <tr><td>3</td><td>4.6 (C16): coverage gate</td><td><code>sst.ts</code> via <code>coveragePathIgnorePatterns</code> (no test); exit codes verified on bun 1.3.13</td></tr>
+              <tr><td>4</td><td>4.7 (C17): AGENTS.md + release notes</td><td>split out of 4.5; then ONE PR and ship</td></tr>
+            </tbody>
+          </table>
+          <p><strong>Baseline at <code>8b0926b</code>:</strong> 848 tests, 90.7% lines, 93.9% functions. Under 80%: <code>cli/commands/{show,cat,stores,versions,lineage}</code>, <code>cli/{lookup,output,wrangler,load-config,config-schema}</code>, <code>backend/remote-r2</code> (functions), <code>testing/laws/equality</code> and <code>sst</code>.</p>
+          <dl class="meta">
+            <dt>Devpad task</dt>
+            <dd><code>task_c453a4e2-dfec-4bac-aad6-703a80175519</code> (existing task "Raise per-file coverage to 80% and enable CI coverage gate", reused per Q5; no new task for this phase)</dd>
+            <dt>Mode</dt>
+            <dd>
+              <p>One worktree per task. Coders run typecheck, lint and fmt (with a <code>node_modules</code> symlink) but not tests; the reviewer runs <code>git rm</code>, tests, <code>coverage:diff --by-content</code> and <code>mutate</code>.</p>
+              <ul>
+                <li><strong>Wave 0:</strong> 4.0a and 4.0b, in parallel.</li>
+                <li><strong>Wave 1:</strong> 4.1, 4.2, 4.3 and 4.5, in parallel.</li>
+                <li><strong>Wave 2:</strong> 4.4, after C14.</li>
+                <li><strong>Wave 3:</strong> 4.6.</li>
+                <li><strong>Wave 4:</strong> 4.7, then the ONE PR.</li>
+              </ul>
+            </dd>
+          </dl>
+
+          <article class="task" id="task-4-1">
+            <header>
+              <h3>Task 4.1 (C12): <code>corpus.ts</code> gaps</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/integration/transaction-compensation.test.ts</code> (new), <code>tests/integration/pointers.test.ts</code> (new)</dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 3</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li><strong>Compensation:</strong> the remote / no-<code>apply_batch</code> sequential path with a fail-after-N wrapper over the backend (same fake style as <code>copy.test.ts</code>). Assert the compensating deletes/restores run and the error kind surfaces (730-806). The tx branches 605-608 and 637-679 are covered the same way.</li>
+                <li><strong>Pointers:</strong> <code>resolve_pointer</code>/<code>is_superseded</code> instance methods with an unknown store, a path error and a span error (546-581).</li>
+                <li><strong>Encode-error emit lines:</strong> a codec whose encode returns err.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/transaction-compensation.test.ts tests/integration/pointers.test.ts</pre>
+              <p>Expected: <code>corpus.ts</code> ≥90% lines (from 77.0).</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-2">
+            <header>
+              <h3>Task 4.2 (C13): Backend error paths</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/integration/remote-backend.test.ts</code>, <code>tests/integration/cloudflare-backend.test.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 3</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li>remote-d1 envelopes via <code>FakeD1HttpOptions</code>: 401, 200 + <code>success:false</code>, non-JSON body, HTTP 5xx (132-194). Each surfaces as <code>storage_error</code> plus an <code>error</code> event with no secret in the message.</li>
+                <li>drizzle emit-on-error 92-93/145-146.</li>
+                <li>remote-r2 get/delete/exists error lines 109/139/148.</li>
+              </ul>
+              <p>One table-driven test per envelope kind.</p>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/remote-backend.test.ts tests/integration/cloudflare-backend.test.ts</pre>
+              <p>Expected: <code>remote-d1.ts</code> ≥95%, <code>remote-r2.ts</code> functions ≥80%, and <code>api_token</code> never appears in any error message (asserted).</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-3">
+            <header>
+              <h3>Task 4.3 (C14): In-process CLI (<code>cli/main.ts</code>) and command error branches</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>cli/main.ts</code> (new), <code>cli/index.ts</code>, <code>tests/integration/cli-entrypoint.test.ts</code>, <code>tests/integration/cli-read.test.ts</code>, <code>tests/integration/cli-clone.test.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 3 (approach decided in Q3)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li>Extract <code>run_cli({ argv, env, cwd, stdout_is_tty, stderr_is_tty, output? }): Promise&lt;number&gt;</code> (exit code). <code>cli/index.ts</code> becomes the shebang shim: it reads <code>process.*</code> once, calls <code>run_cli</code>, then <code>process.exit(code)</code>. This preserves the "detection happens exactly once at the entry" rule. <code>write_fatal</code>/<code>CORPUS_DEBUG</code> are threaded through.</li>
+                <li>Move the entrypoint tests in-process via <code>create_capture_output</code>, keeping 3 spawn smokes: <code>--help</code> exit 0/2, one remote round trip against the HTTP fakes, and the <code>CORPUS_DEBUG</code> stack.</li>
+                <li>Add <code>_test_backend</code> error-branch tests for cat/show/stores/versions/lineage/clone, the <code>output.ts</code> sink branches and the wrangler read errors.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test tests/integration/cli-*.test.ts
+bun cli/index.ts --help; echo $?   # → 0
+bun run coverage:diff --base HEAD  # re-baselined at this commit</pre>
+              <p>Expected: <code>cli/main.ts</code> appears in lcov; every <code>cli/commands/*.ts</code> ≥80% lines and functions; <code>cli-entrypoint</code> runtime drops from ~1.1 s to ≤0.4 s.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-4">
+            <header>
+              <h3>Task 4.4 (C15): Floor stragglers</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>tests/unit/cli-config.test.ts</code>, <code>tests/unit/testing-autoload.test.ts</code></dd>
+              <dt>Dependencies</dt>
+              <dd>Phase 3</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li><code>define_config</code> identity.</li>
+                <li><code>load-config</code> error message 34-38.</li>
+                <li><code>auto-load</code> discovery error kinds 107-114.</li>
+                <li>Any other file the reviewer's pre-gate run shows below 0.8.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun test --coverage 2&gt;&amp;1 | awk -F'|' '$2+0&lt;80 || $3+0&lt;80'</pre>
+              <p>Expected: no lib rows below 80 on lines or functions.</p>
+            </section>
+          </article>
+
+          <article class="task" id="task-4-5">
+            <header>
+              <h3>Task 4.5 (C16): Enable the gate, update AGENTS.md</h3>
+              <span class="badge done">done</span>
+            </header>
+            <dl class="meta">
+              <dt>Files</dt>
+              <dd><code>bunfig.toml</code>, <code>.github/workflows/ci.yml</code>, <code>package.json</code> (<code>gate</code>), <code>AGENTS.md</code></dd>
+              <dt>Dependencies</dt>
+              <dd>4.1-4.4 committed (sequential)</dd>
+            </dl>
+            <section data-kind="scope">
+              <h4>Scope</h4>
+              <ul>
+                <li>Rewrite the stale <code>bunfig.toml</code> comment.</li>
+                <li>Set <code>coverageThreshold = { lines = 0.8, functions = 0.8 }</code>. Add <code>coveragePathIgnorePatterns</code> for tests/docs/scripts (the fakes are at 78% today and must not gate) and for <code>sst.ts</code>, with a why-comment: a 9-line IaC resource-naming helper, deliberately untested per Q2.</li>
+                <li>No ratchet script in CI or <code>gate</code> (Q2). <code>coverage:diff</code> remains a manual reviewer tool.</li>
+                <li>Change CI "Run tests" and <code>gate</code> to <code>bun test --coverage</code>.</li>
+                <li>Update AGENTS.md per the section below.</li>
+              </ul>
+            </section>
+            <section data-kind="acceptance">
+              <h4>Acceptance</h4>
+              <pre>bun run gate
+# reviewer: temporarily set coverageThreshold 0.99 → `bun test --coverage; echo $?` non-zero; revert
+# reviewer: confirm the same on CI's pinned bun 1.3.13 (bunx bun@1.3.13 test --coverage)</pre>
+              <p>Expected: the gate passes at 0.8 and fails at 0.99 on both bun versions, which proves the exit code, not just the printed table.</p>
+            </section>
+          </article>
+
+          <section data-kind="verification">
+            <h4>Phase verification</h4>
+            <pre>bun run gate
+bun run test:zod3
+bun run coverage:diff --base 6171c87
+bun run mutate tests/mutations/guards.ts</pre>
+            <p>Expected: all exit 0; totals ≥93% lines and ≥96% functions; no lib file below 80%. Then the reviewer opens ONE PR for <code>test/suite-yield</code> (title e.g. "test: consolidate suite into contracts and properties; enforce coverage floor") and ships it.</p>
+          </section>
+
+          <section data-kind="adversary">
+            <h4>Adversary checklist (whole phase)</h4>
+            <div class="adversary">
+              <ul>
+                <li><code>cli/main.ts</code> is behaviour-preserving: exit codes 0/1/2, stdout vs stderr routing and <code>--json</code> single-document output are identical (the retained spawn smokes prove it end-to-end).</li>
+                <li>No secret appears in any new error-path assertion fixture output (<code>api_token</code>, access keys).</li>
+                <li>The coverage gate fails on the exit code. A CI run that prints a red table but exits 0 is a failure of this task.</li>
+                <li>The fail-after-N wrapper used for compensation is a fake backend wrapper, not <code>spyOn</code>.</li>
+                <li>The zod3 rerun stays without <code>--coverage</code> (double gating is wasted time and could diverge).</li>
+                <li>The <code>sst.ts</code> ignore pattern matches exactly that file and nothing else (e.g. not <code>tests/**/sst*</code> or a future <code>sst-*.ts</code>). Diff the lcov <code>SF</code> list before and after the change.</li>
+                <li>Final tally recorded in the proof: test count, test LOC, lines/functions %, per-file minimum, suite wall time.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section data-kind="proof">
+            <h4>Proof</h4>
+            <div class="proof">
+              <p>Commits on <code>test/suite-yield</code>: 4.0a <code>d8c605b</code> + <code>0ebd936</code> (<code>coverage:diff --by-content</code>); 4.0b <code>921c7e5</code> (hit-rate floors); 4.5 <code>7bd4b36</code> (<code>has_bun</code> seam); 4.1 <code>1c5b1f3</code>; 4.2 <code>c3f33f9</code>; 4.3 <code>a780e66</code> (<code>cli/main.ts</code>, <code>cwd</code> seam); 4.4 <code>aecadf6</code> (CLI error branches); 4.6 <code>ci: enforce per-file coverage in gate and CI</code>; 4.7 AGENTS.md + this proof.</p>
+              <p>Task 4.4: <code>coverage:diff --base a780e66 --by-content</code> reported no lost lines; <code>mutate tests/mutations/cli-errors.ts --base a780e66</code>: 13 mutants, all survived old and KILLED new, 0 regressions, 0 new-side survivors. One test defect caught in review: the failing-listing fake emitted its error when the iterator was created rather than consumed, so <code>collect_list</code> (which snapshots the error count first) missed it; the fake now emits during iteration like the real backends. Fresh per-file table: <code>cli/commands/{cat,show,versions,stores}.ts</code>, <code>cli/config-schema.ts</code>, <code>cli/load-config.ts</code>, <code>cli/wrangler.ts</code> all 100% lines and functions.</p>
+              <p>Task 4.6: bunfig <code>coveragePathIgnorePatterns = ["sst.ts", "tests/**"]</code>; <code>gate</code> and CI's <code>test</code> job run <code>bun test --coverage</code> (job name unchanged; zod3 rerun stays plain). Exit codes verified on both bun 1.3.13 (CI pin, installed to a temp dir) and local bun 1.4.4: clean tree exits 0; a probe file with 25% function coverage exits 1 on both, and the lcov/table output lists no <code>sst.ts</code> or <code>tests/**</code> rows.</p>
+              <p>Final tally (tip, bun lcov): tests 1164 → 995; lines 4699/5368 (87.5%) → 5081/5239 (97.0%); functions 714/780 (91.5%) → 753/775 (97.2%); no lib file under 80% lines or functions (lowest: <code>clone.ts</code> 83.3% functions, <code>output.ts</code>/<code>spinner.ts</code> ~89% functions). Suite wall time about 7 s. Test LOC (tests/ excluding fixtures) 17.1k including fakes, mutation manifests and support. This is above the plan's original ~750 test estimate because Phase 4 added the gap-closing tests; coverage targets were exceeded.</p>
+              <p>Final verification: <code>bun run gate</code> green; <code>test:zod3</code> 995 pass / 0 fail; <code>mutate tests/mutations/guards.ts</code> 0 regressions, 0 survivors; 4 concurrent <code>bun test</code> runs: 995 pass / 0 fail each.</p>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="expected-deltas">
+        <h2>Expected deltas</h2>
+        <table>
+          <thead><tr><th>Cluster</th><th>Tests before → after</th><th>Line effect</th></tr></thead>
+          <tbody>
+            <tr><td>C1 Result</td><td>81 → ~24</td><td>+21 (<code>merge_deep</code>, <code>at</code>)</td></tr>
+            <tr><td>C2 observation utils</td><td>64 → ~15</td><td>0</td></tr>
+            <tr><td>C3 codecs</td><td>28 → ~12</td><td>+15 (<code>encode_stream</code>)</td></tr>
+            <tr><td>C4 concurrency</td><td>18 → ~8</td><td>0 (−0.3 s)</td></tr>
+            <tr><td>C5 CLI policy</td><td>71 → ~48</td><td>0</td></tr>
+            <tr><td>C6 substrate</td><td>66 → ~32</td><td>+~35 (law failure branches, arb-v3)</td></tr>
+            <tr><td>C7 version-set</td><td>40 → ~14</td><td>0 to +5</td></tr>
+            <tr><td>C8 observations</td><td>149 → ~84</td><td>+~55 (layered 246-300, drizzle 323-393)</td></tr>
+            <tr><td>C9/C10 backend model + contract</td><td>341 → ~178</td><td>+~26 (<code>wrap_bytes_storage</code>)</td></tr>
+            <tr><td>C11 memory/layered</td><td>56 → ~35</td><td>0</td></tr>
+            <tr><td>C12-C15 gaps + CLI</td><td>16 → ~58</td><td>+~240 (corpus.ts, remote-d1, CLI); <code>cli/main.ts</code> enters the denominator; <code>sst.ts</code> (9 lines, 0 covered) leaves it</td></tr>
+            <tr><td><strong>Total</strong></td><td><strong>1164 → ~750</strong> (test LOC ~14.5k → ~9.5k)</td><td><strong>87.2% → ≥93% lines; 91.5% → ≥96% functions; 18 → 0 files under 80% (17 raised, <code>sst.ts</code> excluded)</strong></td></tr>
+          </tbody>
+        </table>
+        <p>Runtime stays at roughly 3-4 s. Cloudflare/remote equivalence adds about 0.5-1 s, offset by the in-process CLI (−0.7 s) and sleep-free concurrency (−0.3 s).</p>
+      </section>
+
+      <section id="breaking">
+        <h2>Breaking changes</h2>
+        <p>None for consumers. <code>cli/main.ts</code> is internal (not in <code>exports</code>), and bin behaviour is unchanged. The internal test helper <code>run_backend_contract_tests</code> loses ~27 assertions, which are now model-checked. Anyone adding a backend must now also add it as an equivalence provider and an observations-contract target (AGENTS.md is updated to say so).</p>
+        <p><strong>Public API addition (task 3.0), minor bump at the next release:</strong> optional <code>ObservationPutOpts.id</code> and an exported <code>observation_id_schema</code>. It is additive, but there are behaviour changes worth noting in the release notes:</p>
+        <ul>
+          <li>A repeated observation id is now rejected with <code>validation_error</code> on every backend. Before, memory overwrote silently, file duplicated the row, and drizzle returned <code>storage_error</code>.</li>
+          <li>Layered observations now share one id across write layers.</li>
+          <li>Layered <code>delete_by_source</code> reports the bottom layer's count instead of a summed one, and surfaces errors instead of swallowing them.</li>
+        </ul>
+        <p>The reviewer puts the release-notes line in the PR body.</p>
+      </section>
+
+      <section id="out-of-scope">
+        <h2>Out of scope</h2>
+        <ul>
+          <li>A <code>put_if_changed</code> store-level equivalence model (18 guard tests stay as is).</li>
+          <li>Full StrykerJS adoption or a mutation-score CI gate. Revisit if the manifests prove too narrow.</li>
+          <li>Branch coverage. Bun doesn't emit <code>BRDA</code>; the mutation manifests are the stand-in.</li>
+          <li>The data-key aliasing layout fix (still deferred, <code>task_b3439360</code>).</li>
+          <li><code>DataStorageHandle.size</code> is set by 4 adapters but read by no library code. Either surface it on <code>DataHandle</code> or remove it (found during Phase 3 brief verification).</li>
+          <li>A dedicated <code>CorpusError</code> kind for observation-id collisions. Today the collision is a <code>validation_error</code>; a new kind would be breaking, so it waits for the next major.</li>
+          <li>Layered <code>apply_batch</code> still writes transactional observations only to the bottom layer, so the cache layer misses them (an existing documented asymmetry).</li>
+          <li>The sequential transaction fallback still rejects observation ops with <code>invalid_config</code> (<code>corpus.ts</code> ≈ 785-789). Now that <code>ObservationPutOpts.id</code> exists, it could replay the buffered row with its id, so remote-backend transactions could include observations. That is a follow-up feature; Phase 4 only tests today's behaviour.</li>
+          <li>Any lib bug a new property uncovers is fixed in its own commit with a regression test and listed in the PR body. If it's non-trivial, it's split out instead.</li>
+          <li><code>compensate_op</code>'s <code>observation_put</code>, <code>meta_delete</code> and <code>observation_delete</code> arms (<code>corpus.ts</code> ≈ 800-809) are dead code: the sequential fallback rejects observation ops up front and treats <code>meta_delete</code> as non-undoable before compensation runs. Follow-up candidate: delete them or make them reachable (together with the observation-ops item above).</li>
+          <li>The same coverage-gate pattern for vault/pulse, mentioned in <code>task_c453a4e2</code>'s summary. That belongs in those repos.</li>
+        </ul>
+      </section>
+
+      <section id="agents-md-updates">
+        <h2>AGENTS.md updates</h2>
+        <p>Patterns or gotchas worth capturing in the project's <code>AGENTS.md</code>. The coder writes these straight into the project file at phase close; this section is the audit trail.</p>
+        <ul>
+          <li><strong>Testing:</strong>
+            <ul>
+              <li>New backends plug into <em>three</em> places: <code>run_backend_contract_tests</code>, <code>run_observations_contract_tests</code>, and a provider in <code>backend-equivalence</code> plus <code>observations-equivalence</code>.</li>
+              <li>Raw CRUD and listing semantics live in the model; the contract keeps edges, streaming, transactions and named guards.</li>
+            </ul>
+          </li>
+          <li><strong>Deletion rule:</strong> a test is deleted only with <code>bun run coverage:diff</code> clean and <code>bun run mutate &lt;manifest&gt;</code> showing K<sub>new</sub> ⊇ K<sub>old</sub>. The KEEP list (types, guards, fake fidelity, reference laws) is never deleted for low yield.</li>
+          <li><strong><code>tests/mutations/guards.ts</code>:</strong> re-introduces every documented regression; run it after touching any guarded area. A stale <code>find</code> string means the manifest needs updating, not deleting.</li>
+          <li><strong>Temp dirs:</strong> use <code>tests/support/tmp.ts</code>. Fixed temp paths collide under concurrent runs (mutation worktrees, per-test runs).</li>
+          <li><strong>Coverage:</strong> the gate is <code>bun test --coverage</code> with the per-file 80% lines+functions threshold in <code>bunfig.toml</code>, verified by exit code. <code>tests/</code>, <code>docs/</code>, <code>scripts/</code> and <code>sst.ts</code> (deliberately untested naming helper) are ignored. There is no ratchet; <code>bun run coverage:diff</code> is a manual tool for proving that a test deletion lost nothing. <code>cli/main.ts</code> exists so CLI coverage is visible in-process; spawn tests are limited to 3 smokes.</li>
+          <li><strong>Equivalence over HTTP fakes:</strong> the remote provider shares one <code>Bun.serve</code> transport per file and swaps fresh fake D1/S3 state per run. Fresh SUT <em>state</em> is what the law requires, not a fresh server. Never let state survive across runs.</li>
+          <li><strong>Observation ids (task 3.0):</strong> caller ids must match <code>observation_id_schema</code>, and a repeat is a <code>validation_error</code> (never an overwrite), enforced inside each adapter's atomic section. In-tx collisions give <code>transaction_aborted</code>. Layered put generates the id once and fans it out; <code>delete_by_source</code> reports the bottom layer's count.</li>
+          <li><strong>Laws:</strong> each law has a "fails when violated" test. A law that can't fail is a silent no-op.</li>
+          <li>Update the citations that moved: "applies tag filters before limit", the <code>observations-*</code> files, and the remote transaction fallback test location.</li>
+        </ul>
+      </section>
+
+      <section id="resolved-decisions">
+        <h2>Resolved decisions</h2>
+        <p>User answers, 2026-11-23. Plan approved the same day. Devpad tasks: Phase 1 <code>task_382d44fb-a46e-4d8b-91eb-c060e2fa4afe</code>, Phase 2 <code>task_caddb6cf-a52b-4414-b121-2e50453eda91</code>, Phase 3 <code>task_2bae1617-e27a-4fb5-b4dc-94e2a36cf41c</code>, Phase 4 <code>task_c453a4e2-dfec-4bac-aad6-703a80175519</code> (existing).</p>
+        <ol>
+          <li><span class="badge done">resolved</span> <strong>Q1: Cloudflare and remote in <code>backend-equivalence</code>:</strong> option (b).
+            <ul>
+              <li>Cloudflare gets a fresh fake D1/R2 per run.</li>
+              <li>Remote uses one shared <code>Bun.serve</code> transport per file with fresh fake D1/S3 state per run.</li>
+              <li>All providers run the full 200 runs.</li>
+              <li>Measure first and record per-provider cost in the Phase 3 proof (task 3.2).</li>
+            </ul>
+          </li>
+          <li><span class="badge done">resolved</span> <strong>Q2: Coverage floor:</strong>
+            <ul>
+              <li>Per-file 80% lines+functions in CI via <code>bunfig.toml</code>.</li>
+              <li>The exact-superset check against 6171c87 during the refactor.</li>
+              <li><strong>No permanent ratchet.</strong></li>
+              <li><code>sst.ts</code> is excluded via <code>coveragePathIgnorePatterns</code> with no test (AD-3, task 4.5).</li>
+            </ul>
+          </li>
+          <li><span class="badge done">resolved</span> <strong>Q3: CLI coverage:</strong> extract <code>cli/main.ts</code> (<code>run_cli(io) → exit code</code>), move the entrypoint tests in-process, and keep 3 spawn smokes (task 4.3).</li>
+          <li><span class="badge done">resolved</span> <strong>Q4: <code>remote-r2.test.ts</code>:</strong> delete the file (task 3.3). <em>Corrected 2026-11-24:</em> the planned <code>handle.size</code> fold is impossible, because <code>size</code> is not on the public <code>DataHandle</code> and nothing reads it. The file is deleted with no replacement assertion.</li>
+          <li><span class="badge done">resolved</span> <strong>Q7: layered observations bug</strong> (2026-11-24): <strong>option A</strong>. Optional <code>ObservationPutOpts.id</code>, with one shared id fanned out to every write layer. This is a public API addition, so it gets a release-notes entry and a minor bump at the next release (task 3.0).</li>
+          <li><span class="badge done">resolved</span> <strong>Q5: devpad:</strong> Phase 4 reuses <code>task_c453a4e2-dfec-4bac-aad6-703a80175519</code>. New devpad tasks are created for Phases 1-3 only, after approval.</li>
+          <li><span class="badge done">resolved</span> <strong>Q6: mutation tooling:</strong> <code>tests/mutations/*.ts</code> and <code>scripts/mutation-check.ts</code> (<code>bun run mutate</code>) are committed as durable repo tooling (task 1.3).</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

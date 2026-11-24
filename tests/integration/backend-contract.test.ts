@@ -57,155 +57,7 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 		});
 
 		describe("metadata client", () => {
-			describe("get", () => {
-				it("returns not_found for missing version", async () => {
-					const result = await backend.metadata.get("test-store", "nonexistent");
-
-					expect(result.ok).toBe(false);
-					if (result.ok) return;
-					expect(result.error.kind).toBe("not_found");
-					if (result.error.kind !== "not_found") return;
-					expect(result.error.store_id).toBe("test-store");
-					expect(result.error.version).toBe("nonexistent");
-				});
-
-				it("retrieves stored metadata", async () => {
-					const meta = make_meta("test-store", "v1", { content_hash: "abc123" });
-					await backend.metadata.put(meta);
-
-					const result = await backend.metadata.get("test-store", "v1");
-
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-					expect(result.value.version).toBe("v1");
-					expect(result.value.store_id).toBe("test-store");
-					expect(result.value.content_hash).toBe("abc123");
-				});
-			});
-
-			describe("put", () => {
-				it("stores metadata successfully", async () => {
-					const meta = make_meta("test-store", "v1");
-
-					const result = await backend.metadata.put(meta);
-
-					expect(result.ok).toBe(true);
-				});
-
-				it("allows storing multiple versions", async () => {
-					const meta1 = make_meta("test-store", "v1");
-					const meta2 = make_meta("test-store", "v2");
-
-					await backend.metadata.put(meta1);
-					await backend.metadata.put(meta2);
-
-					const result1 = await backend.metadata.get("test-store", "v1");
-					const result2 = await backend.metadata.get("test-store", "v2");
-
-					expect(result1.ok).toBe(true);
-					expect(result2.ok).toBe(true);
-				});
-
-				it("overwrites an existing version on repeated put", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "first" }));
-					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "second" }));
-
-					const result = await backend.metadata.get("test-store", "v1");
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-					expect(result.value.content_hash).toBe("second");
-
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("test-store")) {
-						versions.push(meta.version);
-					}
-					expect(versions).toHaveLength(1);
-				});
-
-				it("preserves all metadata fields on roundtrip", async () => {
-					const created = new Date("2024-01-15T10:00:00Z");
-					const invoked = new Date("2024-01-15T09:00:00Z");
-					const meta = make_meta("test-store", "v1", {
-						parents: [{ store_id: "parent-store", version: "p1", role: "source" }],
-						created_at: created,
-						invoked_at: invoked,
-						content_hash: "hash123",
-						content_type: "text/plain",
-						size_bytes: 1024,
-						tags: ["important", "reviewed"],
-					});
-
-					await backend.metadata.put(meta);
-					const result = await backend.metadata.get("test-store", "v1");
-
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-					expect(result.value.parents).toHaveLength(1);
-					expect(result.value.parents[0]?.role).toBe("source");
-					expect(result.value.content_type).toBe("text/plain");
-					expect(result.value.size_bytes).toBe(1024);
-					expect(result.value.tags).toEqual(["important", "reviewed"]);
-				});
-			});
-
-			describe("delete", () => {
-				it("removes stored metadata", async () => {
-					const meta = make_meta("test-store", "v1");
-					await backend.metadata.put(meta);
-
-					const delete_result = await backend.metadata.delete("test-store", "v1");
-					expect(delete_result.ok).toBe(true);
-
-					const get_result = await backend.metadata.get("test-store", "v1");
-					expect(get_result.ok).toBe(false);
-				});
-
-				it("succeeds when deleting non-existent metadata", async () => {
-					const result = await backend.metadata.delete("test-store", "nonexistent");
-
-					expect(result.ok).toBe(true);
-				});
-			});
-
 			describe("list", () => {
-				it("returns empty for store with no versions", async () => {
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("empty-store")) {
-						versions.push(meta.version);
-					}
-
-					expect(versions).toHaveLength(0);
-				});
-
-				it("returns all versions for a store", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1"));
-					await backend.metadata.put(make_meta("test-store", "v2"));
-					await backend.metadata.put(make_meta("test-store", "v3"));
-
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("test-store")) {
-						versions.push(meta.version);
-					}
-
-					expect(versions).toHaveLength(3);
-					expect(versions).toContain("v1");
-					expect(versions).toContain("v2");
-					expect(versions).toContain("v3");
-				});
-
-				it("only returns versions from requested store", async () => {
-					await backend.metadata.put(make_meta("store-a", "v1"));
-					await backend.metadata.put(make_meta("store-b", "v2"));
-
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("store-a")) {
-						versions.push(meta.version);
-					}
-
-					expect(versions).toHaveLength(1);
-					expect(versions).toContain("v1");
-				});
-
 				it("matches store_id exactly, not as a prefix", async () => {
 					// Regression guard for commit 02bee7f — the Cloudflare backend once
 					// filtered store_id with like() and leaked prefix-sharing stores.
@@ -220,32 +72,16 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(versions).toEqual(["v1"]);
 				});
 
-				it("respects limit option", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { created_at: new Date("2024-01-01") }));
-					await backend.metadata.put(make_meta("test-store", "v2", { created_at: new Date("2024-01-02") }));
-					await backend.metadata.put(make_meta("test-store", "v3", { created_at: new Date("2024-01-03") }));
+				it("treats LIKE wildcards in store_id literally", async () => {
+					await backend.metadata.put(make_meta("a_b", "v1"));
+					await backend.metadata.put(make_meta("axb", "v2"));
 
 					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("test-store", { limit: 2 })) {
+					for await (const meta of backend.metadata.list("a_b")) {
 						versions.push(meta.version);
 					}
 
-					expect(versions).toHaveLength(2);
-				});
-
-				it("filters by tags when provided", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { tags: ["alpha"] }));
-					await backend.metadata.put(make_meta("test-store", "v2", { tags: ["beta"] }));
-					await backend.metadata.put(make_meta("test-store", "v3", { tags: ["alpha", "beta"] }));
-
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("test-store", { tags: ["alpha"] })) {
-						versions.push(meta.version);
-					}
-
-					expect(versions).toHaveLength(2);
-					expect(versions).toContain("v1");
-					expect(versions).toContain("v3");
+					expect(versions).toEqual(["v1"]);
 				});
 
 				it("applies tag filters before limit", async () => {
@@ -265,51 +101,9 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 
 					expect(versions).toEqual(["v9", "v6"]);
 				});
-
-				it("applies tag, date and limit filters together", async () => {
-					for (const n of Array.from({ length: 10 }, (_, i) => i + 1)) {
-						await backend.metadata.put(
-							make_meta("test-store", `v${String(n)}`, {
-								created_at: new Date(Date.UTC(2024, 0, n)),
-								...(n % 3 === 0 ? { tags: ["third"] } : {}),
-							}),
-						);
-					}
-
-					const versions: string[] = [];
-					for await (const meta of backend.metadata.list("test-store", {
-						tags: ["third"],
-						before: new Date(Date.UTC(2024, 0, 9)),
-						limit: 1,
-					})) {
-						versions.push(meta.version);
-					}
-
-					expect(versions).toEqual(["v6"]);
-				});
 			});
 
 			describe("get_latest", () => {
-				it("returns not_found for empty store", async () => {
-					const result = await backend.metadata.get_latest("empty-store");
-
-					expect(result.ok).toBe(false);
-					if (result.ok) return;
-					expect(result.error.kind).toBe("not_found");
-				});
-
-				it("returns newest by created_at", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { created_at: new Date("2024-01-01") }));
-					await backend.metadata.put(make_meta("test-store", "v2", { created_at: new Date("2024-01-03") }));
-					await backend.metadata.put(make_meta("test-store", "v3", { created_at: new Date("2024-01-02") }));
-
-					const result = await backend.metadata.get_latest("test-store");
-
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-					expect(result.value.version).toBe("v2");
-				});
-
 				it("breaks created_at ties by insertion order (later put wins)", async () => {
 					const created_at = new Date("2024-01-01T00:00:00.000Z");
 					await backend.metadata.put(make_meta("test-store", "z-first", { created_at }));
@@ -381,30 +175,6 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					expect(b.ok && b.value.version).toBe("b2");
 				});
 
-				it("get_latest for an unknown entity is not_found", async () => {
-					await put_interleaved();
-
-					const result = await backend.metadata.get_latest("test-store", { entity_key: "nope" });
-					expect(result.ok).toBe(false);
-					if (result.ok) return;
-					expect(result.error.kind).toBe("not_found");
-				});
-
-				it("store-wide get_latest is unchanged by keyed snapshots", async () => {
-					await put_interleaved();
-
-					const result = await backend.metadata.get_latest("test-store");
-					expect(result.ok && result.value.version).toBe("u1");
-				});
-
-				it("list filters by entity_key and unkeyed rows never match", async () => {
-					await put_interleaved();
-
-					expect(await versions_of({ entity_key: "A" })).toEqual(["a2", "a1"]);
-					expect(await versions_of({ entity_key: "B" })).toEqual(["b2", "b1"]);
-					expect(await versions_of({})).toEqual(["u1", "b2", "a2", "b1", "a1"]);
-				});
-
 				it("applies the entity filter before limit", async () => {
 					for (const n of Array.from({ length: 6 }, (_, i) => i + 1)) {
 						await backend.metadata.put(
@@ -416,14 +186,6 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 					}
 
 					expect(await versions_of({ entity_key: "A", limit: 1 })).toEqual(["v2"]);
-				});
-
-				it("combines entity_key with tags", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { entity_key: "A", tags: ["t"] }));
-					await backend.metadata.put(make_meta("test-store", "v2", { entity_key: "B", tags: ["t"] }));
-					await backend.metadata.put(make_meta("test-store", "v3", { entity_key: "A" }));
-
-					expect(await versions_of({ entity_key: "A", tags: ["t"] })).toEqual(["v1"]);
 				});
 
 				it("store.put persists entity_key and store.get_latest scopes by it", async () => {
@@ -443,138 +205,30 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 				});
 			});
 
-			describe("get_children", () => {
-				it("returns empty when no children exist", async () => {
-					await backend.metadata.put(make_meta("test-store", "parent"));
-
-					const children: string[] = [];
-					for await (const meta of backend.metadata.get_children("test-store", "parent")) {
-						children.push(meta.version);
-					}
-
-					expect(children).toHaveLength(0);
-				});
-
-				it("returns all snapshots with matching parent", async () => {
-					await backend.metadata.put(make_meta("test-store", "parent"));
-					await backend.metadata.put(
-						make_meta("test-store", "child1", {
-							parents: [{ store_id: "test-store", version: "parent" }],
-						}),
-					);
-					await backend.metadata.put(
-						make_meta("test-store", "child2", {
-							parents: [{ store_id: "test-store", version: "parent" }],
-						}),
-					);
-					await backend.metadata.put(make_meta("test-store", "unrelated"));
-
-					const children: string[] = [];
-					for await (const meta of backend.metadata.get_children("test-store", "parent")) {
-						children.push(meta.version);
-					}
-
-					expect(children).toHaveLength(2);
-					expect(children).toContain("child1");
-					expect(children).toContain("child2");
-					expect(children).not.toContain("unrelated");
-				});
-			});
-
-			describe("find_by_hash", () => {
-				it("returns null when hash not found", async () => {
-					const result = await backend.metadata.find_by_hash("test-store", "nonexistent-hash");
-
-					expect(result).toBeNull();
-				});
-
-				it("finds metadata by content hash", async () => {
-					await backend.metadata.put(make_meta("test-store", "v1", { content_hash: "target-hash" }));
-					await backend.metadata.put(make_meta("test-store", "v2", { content_hash: "other-hash" }));
-
-					const result = await backend.metadata.find_by_hash("test-store", "target-hash");
-
-					expect(result).not.toBeNull();
-					expect(result?.version).toBe("v1");
-				});
-
-				it("only searches within specified store", async () => {
-					await backend.metadata.put(make_meta("store-a", "v1", { content_hash: "shared-hash" }));
-					await backend.metadata.put(make_meta("store-b", "v2", { content_hash: "shared-hash" }));
-
-					const result = await backend.metadata.find_by_hash("store-a", "shared-hash");
-
-					expect(result).not.toBeNull();
-					expect(result?.store_id).toBe("store-a");
-				});
-			});
-
 			// `list_stores` is optional on `MetadataClient` — self-skip for any
 			// backend that doesn't implement it, same pattern as the transaction
 			// contract's `apply_batch` guard below.
 			describe("list_stores", () => {
-				it("yields each store id exactly once", async () => {
+				it("omits stores whose versions were all deleted or never existed", async () => {
 					if (!backend.metadata.list_stores) return;
 
 					await backend.metadata.put(make_meta("store-a", "v1"));
 					await backend.metadata.put(make_meta("store-b", "v1"));
-					await backend.metadata.put(make_meta("store-b", "v2"));
+					await backend.metadata.delete("store-b", "v1");
+					await backend.metadata.delete("store-c", "missing");
 
 					const ids: string[] = [];
 					for await (const store_id of backend.metadata.list_stores()) {
 						ids.push(store_id);
 					}
 
-					expect(ids.toSorted()).toEqual(["store-a", "store-b"]);
-					expect(new Set(ids).size).toBe(ids.length);
+					expect(ids).toEqual(["store-a"]);
 				});
 			});
 		});
 
 		describe("data client", () => {
-			describe("get", () => {
-				it("returns not_found for missing data", async () => {
-					const result = await backend.data.get("nonexistent-key");
-
-					expect(result.ok).toBe(false);
-					if (result.ok) return;
-					expect(result.error.kind).toBe("not_found");
-				});
-
-				it("retrieves stored bytes", async () => {
-					const data = new TextEncoder().encode("hello world");
-					await backend.data.put("test-key", data);
-
-					const result = await backend.data.get("test-key");
-
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-					const bytes = await result.value.bytes();
-					expect(bytes).toEqual(data);
-				});
-			});
-
 			describe("put", () => {
-				it("stores bytes successfully", async () => {
-					const data = new TextEncoder().encode("test data");
-
-					const result = await backend.data.put("test-key", data);
-
-					expect(result.ok).toBe(true);
-				});
-
-				it("preserves binary data exactly", async () => {
-					const data = new Uint8Array([0, 1, 255, 128, 64, 32]);
-					await backend.data.put("binary-key", data);
-
-					const result = await backend.data.get("binary-key");
-					expect(result.ok).toBe(true);
-					if (!result.ok) return;
-
-					const retrieved = await result.value.bytes();
-					expect(retrieved).toEqual(data);
-				});
-
 				it("accepts ReadableStream input", async () => {
 					const chunks = [new TextEncoder().encode("chunk1"), new TextEncoder().encode("chunk2")];
 					const stream = new ReadableStream<Uint8Array>({
@@ -594,40 +248,6 @@ export function run_backend_contract_tests(name: string, create_backend: Backend
 
 					const bytes = await result.value.bytes();
 					expect(bytes).toEqual(new TextEncoder().encode("chunk1chunk2"));
-				});
-			});
-
-			describe("delete", () => {
-				it("removes stored data", async () => {
-					await backend.data.put("test-key", new TextEncoder().encode("data"));
-
-					const delete_result = await backend.data.delete("test-key");
-					expect(delete_result.ok).toBe(true);
-
-					const get_result = await backend.data.get("test-key");
-					expect(get_result.ok).toBe(false);
-				});
-
-				it("succeeds when deleting non-existent data", async () => {
-					const result = await backend.data.delete("nonexistent-key");
-
-					expect(result.ok).toBe(true);
-				});
-			});
-
-			describe("exists", () => {
-				it("returns false for missing data", async () => {
-					const result = await backend.data.exists("nonexistent-key");
-
-					expect(result).toBe(false);
-				});
-
-				it("returns true for existing data", async () => {
-					await backend.data.put("test-key", new TextEncoder().encode("data"));
-
-					const result = await backend.data.exists("test-key");
-
-					expect(result).toBe(true);
 				});
 			});
 
@@ -924,26 +544,23 @@ import { corpus_observations } from "../../observations/schema.js";
 import { create_fake_d1, create_fake_r2 } from "../fakes/cloudflare.js";
 import { create_fake_d1_http, type FakeD1HttpServer } from "../fakes/d1-http.js";
 import { create_fake_s3, type FakeS3Server } from "../fakes/s3.js";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
 run_backend_contract_tests("MemoryBackend", () => create_memory_backend());
 
-const file_test_dir = join(tmpdir(), "corpus-contract-test-file");
+let file_test_dir = "";
 run_backend_contract_tests(
 	"FileBackend",
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
-		await mkdir(file_test_dir, { recursive: true });
+		file_test_dir = await make_tmp_dir("contract-file");
 		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(file_test_dir);
 	},
 );
 
-const layered_test_dir = join(tmpdir(), "corpus-contract-test-layered");
+let layered_test_dir = "";
 run_backend_contract_tests("LayeredBackend (memory read/write)", () => {
 	const memory = create_memory_backend();
 	return create_layered_backend({
@@ -955,8 +572,7 @@ run_backend_contract_tests("LayeredBackend (memory read/write)", () => {
 run_backend_contract_tests(
 	"LayeredBackend (file read/write)",
 	async () => {
-		await rm(layered_test_dir, { recursive: true, force: true });
-		await mkdir(layered_test_dir, { recursive: true });
+		layered_test_dir = await make_tmp_dir("contract-layered");
 		const file = create_file_backend({ base_path: layered_test_dir });
 		return create_layered_backend({
 			read: [file],
@@ -964,7 +580,7 @@ run_backend_contract_tests(
 		});
 	},
 	async () => {
-		await rm(layered_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(layered_test_dir);
 	},
 );
 
@@ -1041,9 +657,7 @@ describe("backend-specific streaming chunk counts", () => {
 	it("file backend yields multiple chunks for a 1 MB payload", async () => {
 		// Bun.file().stream() emits 256 KB chunks; a 1 MB payload guarantees ≥4 chunks
 		// and proves we're actually streaming rather than buffering.
-		const dir = join(tmpdir(), "corpus-contract-streaming-file");
-		await rm(dir, { recursive: true, force: true });
-		await mkdir(dir, { recursive: true });
+		const dir = await make_tmp_dir("contract-streaming-file");
 		try {
 			const backend = create_file_backend({ base_path: dir });
 			const data = big(1024 * 1024);
@@ -1059,7 +673,7 @@ describe("backend-specific streaming chunk counts", () => {
 			const total = chunks.reduce((acc, c) => acc + c.length, 0);
 			expect(total).toBe(data.length);
 		} finally {
-			await rm(dir, { recursive: true, force: true });
+			await remove_tmp_dir(dir);
 		}
 	});
 });

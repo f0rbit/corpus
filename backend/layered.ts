@@ -16,6 +16,7 @@ import type {
 } from "../types.js";
 import type { ObservationQueryOpts } from "../observations/types.js";
 import { ok, err } from "../types.js";
+import { resolve_observation_id } from "../observations/id.js";
 import { to_bytes } from "../utils.js";
 import { first, to_nullable } from "../result.js";
 
@@ -231,6 +232,15 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 	};
 }
 
+/**
+ * Observation client over layered backends. `put` generates the id once and
+ * writes it to every write layer in order (rolling back earlier layers on
+ * failure), returning the first write layer's observation; `created_at` may
+ * differ by a few ms across layers and reads report the primary read layer's.
+ * `delete` fans out to every write layer; `delete_by_source` reports the bottom
+ * write layer's count. Transactional observations (`apply_batch`) still reach
+ * only the bottom layer.
+ */
 function create_layered_observations_client(
 	read_layers: Backend[],
 	write_layers: Backend[],
@@ -248,13 +258,22 @@ function create_layered_observations_client(
 			if (!head) {
 				return err({ kind: "invalid_config", message: "No write layers support observations" });
 			}
-			let result = await head.put(type, opts);
-			if (!result.ok) return result;
+			const resolved = resolve_observation_id(opts.id);
+			if (!resolved.ok) return resolved;
+			const id = resolved.value;
+			const with_id = { ...opts, id };
+			const first_result = await head.put(type, with_id);
+			if (!first_result.ok) return first_result;
+			const written = [head];
 			for (const client of rest) {
-				result = await client.put(type, opts);
-				if (!result.ok) return result;
+				const result = await client.put(type, with_id);
+				if (!result.ok) {
+					await Promise.allSettled(written.map((done) => done.delete(id)));
+					return result;
+				}
+				written.push(client);
 			}
-			return result;
+			return first_result;
 		},
 
 		async get(id) {
@@ -279,20 +298,19 @@ function create_layered_observations_client(
 			if (!head) {
 				return err({ kind: "observation_not_found", id });
 			}
-			let result = await head.delete(id);
-			for (const client of rest) {
-				result = await client.delete(id);
-			}
-			return result;
+			const results = await Promise.all([head, ...rest].map((client) => client.delete(id)));
+			const failure = results.find((r) => !r.ok && r.error.kind !== "observation_not_found");
+			if (failure) return failure;
+			return results.some((r) => r.ok) ? ok(undefined) : (results[0] ?? err({ kind: "observation_not_found", id }));
 		},
 
 		async delete_by_source(source) {
-			let total = 0;
-			for (const client of write_clients) {
-				const result = await client.delete_by_source(source);
-				if (result.ok) total += result.value;
-			}
-			return ok(total);
+			const results = [];
+			for (const client of write_clients) results.push(await client.delete_by_source(source));
+			const failure = results.find((r) => !r.ok);
+			if (failure) return failure;
+			const bottom = results.at(-1);
+			return bottom ?? ok(0);
 		},
 
 		async is_stale(pointer) {

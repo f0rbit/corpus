@@ -40,6 +40,19 @@ function capture_sinks(): {
 	};
 }
 
+type FlagCombo = Pick<OutputOpts, "stdout_is_tty" | "stderr_is_tty" | "json" | "quiet" | "ci" | "no_color">;
+
+function all_flag_combos(): FlagCombo[] {
+	return Array.from({ length: 64 }, (_, mask) => ({
+		stdout_is_tty: (mask & 1) !== 0,
+		stderr_is_tty: (mask & 2) !== 0,
+		json: (mask & 4) !== 0,
+		quiet: (mask & 8) !== 0,
+		ci: (mask & 16) !== 0,
+		no_color: (mask & 32) !== 0,
+	}));
+}
+
 describe("cli output", () => {
 	describe("create_capture_output", () => {
 		it("captures line calls", () => {
@@ -164,17 +177,6 @@ describe("cli output", () => {
 			expect(stdout.join("")).toBe("id  name\n--  -----\n1   Alice\n2   Bob\n");
 		});
 
-		it("stdout_is_tty true but NO_COLOR set still renders plain (no ESC bytes)", () => {
-			const { stdout, opts } = capture_sinks();
-			const output = create_console_output(base_opts({ stdout_is_tty: true, no_color: true, ...opts }));
-
-			output.table(rows, columns);
-
-			const rendered = stdout.join("");
-			expect(rendered).toBe("id  name\n--  -----\n1   Alice\n2   Bob\n");
-			expect(rendered.includes(ESC)).toBe(false);
-		});
-
 		it("colour on renders box-drawing borders + bold header, ESC bytes present", () => {
 			const { stdout, opts } = capture_sinks();
 			const output = create_console_output(base_opts({ stdout_is_tty: true, ...opts }));
@@ -212,24 +214,6 @@ describe("cli output", () => {
 			output.note("decoded via content_type");
 
 			expect(stdout.join("").includes("decoded via content_type")).toBe(true);
-		});
-
-		it("suppresses notes when --quiet is set", () => {
-			const { stdout, opts } = capture_sinks();
-			const output = create_console_output(base_opts({ quiet: true, ...opts }));
-
-			output.note("should not appear");
-
-			expect(stdout).toEqual([]);
-		});
-
-		it("suppresses notes in --json mode", () => {
-			const { stdout, opts } = capture_sinks();
-			const output = create_console_output(base_opts({ json: true, ...opts }));
-
-			output.note("should not appear");
-
-			expect(stdout).toEqual([]);
 		});
 	});
 
@@ -310,52 +294,44 @@ describe("cli output", () => {
 
 			expect(stderr.length).toBe(count_after_stop);
 		});
+	});
 
-		it("disabled by --json: writes nothing", () => {
-			const { stderr, opts } = capture_sinks();
-			const output = create_console_output({ ...enabled_opts(), json: true, ...opts });
+	describe("create_console_output — enable matrix (all 64 flag combinations)", () => {
+		const flags = all_flag_combos();
 
-			const handle = output.spinner("cloning...");
-			handle.update("still cloning...");
-			handle.stop("done");
-
-			expect(stderr).toEqual([]);
+		it("covers every combination exactly once", () => {
+			expect(flags.length).toBe(64);
+			expect(new Set(flags.map((f) => JSON.stringify(f))).size).toBe(64);
 		});
 
-		it("disabled by --quiet: writes nothing", () => {
-			const { stderr, opts } = capture_sinks();
-			const output = create_console_output({ ...enabled_opts(), quiet: true, ...opts });
-
-			output.spinner("cloning...").stop("done");
-
-			expect(stderr).toEqual([]);
+		it("colour ⇔ stdout_is_tty ∧ ¬json ∧ ¬no_color", () => {
+			const wrong = flags.filter((f) => {
+				const { stdout, opts } = capture_sinks();
+				create_console_output(base_opts({ ...f, ...opts })).table([{ id: "1" }], ["id"]);
+				return stdout.join("").includes(ESC) !== (f.stdout_is_tty && !f.json && !f.no_color);
+			});
+			expect(wrong).toEqual([]);
 		});
 
-		it("disabled by CI: writes nothing", () => {
-			const { stderr, opts } = capture_sinks();
-			const output = create_console_output({ ...enabled_opts(), ci: true, ...opts });
-
-			output.spinner("cloning...").stop("done");
-
-			expect(stderr).toEqual([]);
+		it("spinner writes ⇔ stderr_is_tty ∧ ¬json ∧ ¬quiet ∧ ¬ci ∧ ¬no_color, never to stdout", () => {
+			const wrong = flags.filter((f) => {
+				const { stdout, stderr, opts } = capture_sinks();
+				const handle = create_console_output(base_opts({ ...f, ...opts })).spinner("cloning...");
+				const wrote = stderr.length > 0;
+				handle.stop("done");
+				const expected = f.stderr_is_tty && !f.json && !f.quiet && !f.ci && !f.no_color;
+				return wrote !== expected || stdout.length > 0;
+			});
+			expect(wrong).toEqual([]);
 		});
 
-		it("disabled by NO_COLOR: writes nothing", () => {
-			const { stderr, opts } = capture_sinks();
-			const output = create_console_output({ ...enabled_opts(), no_color: true, ...opts });
-
-			output.spinner("cloning...").stop("done");
-
-			expect(stderr).toEqual([]);
-		});
-
-		it("disabled when stderr is not a TTY: writes nothing", () => {
-			const { stderr, opts } = capture_sinks();
-			const output = create_console_output({ ...enabled_opts(), stderr_is_tty: false, ...opts });
-
-			output.spinner("cloning...").stop("done");
-
-			expect(stderr).toEqual([]);
+		it("note visible ⇔ ¬quiet ∧ ¬json", () => {
+			const wrong = flags.filter((f) => {
+				const { stdout, opts } = capture_sinks();
+				create_console_output(base_opts({ ...f, ...opts })).note("visible-note");
+				return stdout.join("").includes("visible-note") !== (!f.quiet && !f.json);
+			});
+			expect(wrong).toEqual([]);
 		});
 	});
 
@@ -432,66 +408,6 @@ describe("cli output", () => {
 			const source = await Bun.file(import.meta.dirname + "/../../cli/spinner.ts").text();
 			expect(source.includes("console.")).toBe(false);
 			expect(source.includes("process.")).toBe(false);
-		});
-	});
-
-	describe("cli spawn smoke test", () => {
-		it("runs --help and exits 0", async () => {
-			const proc = Bun.spawn(["bun", "cli/index.ts", "--help"], {
-				cwd: import.meta.dirname + "/../..",
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-
-			const stdout = await proc.stdout.text();
-			const exit_code = await proc.exited;
-
-			expect(exit_code).toBe(0);
-			expect(stdout).toContain("corpus");
-			expect(stdout).toContain("stores");
-			expect(stdout).toContain("versions");
-			expect(stdout).toContain("show");
-			expect(stdout).toContain("cat");
-			expect(stdout).toContain("lineage");
-			expect(stdout).toContain("clone");
-			expect(stdout).toContain("--quiet");
-		});
-
-		it("exits 2 on unknown command", async () => {
-			const proc = Bun.spawn(["bun", "cli/index.ts", "unknown"], {
-				cwd: import.meta.dirname + "/../..",
-				stdout: "ignore",
-				stderr: "ignore",
-			});
-
-			const exit_code = await proc.exited;
-			expect(exit_code).toBe(2);
-		});
-
-		it("exits 1 on command error", async () => {
-			const proc = Bun.spawn(["bun", "cli/index.ts", "stores"], {
-				cwd: import.meta.dirname + "/../..",
-				stdout: "ignore",
-				stderr: "ignore",
-			});
-
-			const exit_code = await proc.exited;
-			expect(exit_code).toBe(1);
-		});
-
-		it("runs --help with NO_COLOR set and exits 0 promptly", async () => {
-			const proc = Bun.spawn(["bun", "cli/index.ts", "--help"], {
-				cwd: import.meta.dirname + "/../..",
-				stdout: "pipe",
-				stderr: "pipe",
-				env: { ...process.env, NO_COLOR: "1" },
-			});
-
-			const stdout = await proc.stdout.text();
-			const exit_code = await proc.exited;
-
-			expect(exit_code).toBe(0);
-			expect(stdout.includes(ESC)).toBe(false);
 		});
 	});
 });

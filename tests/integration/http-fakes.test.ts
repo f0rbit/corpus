@@ -135,6 +135,60 @@ describe("D1 HTTP Server Fake", () => {
 		expect(data.success).toBe(true);
 		expect(data.result[0]?.results?.rows.length ?? 0).toBeGreaterThan(0);
 	});
+
+	it("set_responder: a returned Response wins, undefined falls through to normal behaviour, reset() clears it", async () => {
+		const query = () =>
+			fetch(`${server.url}/accounts/test/d1/database/test/raw`, {
+				method: "POST",
+				headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" },
+				body: JSON.stringify({ sql: "SELECT COUNT(*) AS n FROM corpus_snapshots", params: [] }),
+			});
+
+		server.set_responder(() => new Response("boom", { status: 500 }));
+		expect((await query()).status).toBe(500);
+
+		server.set_responder(() => undefined);
+		const fallthrough = await query();
+		expect(fallthrough.status).toBe(200);
+		expect(d1_http_response_schema.parse(await fallthrough.json()).success).toBe(true);
+
+		server.set_responder(() => new Response("boom", { status: 500 }));
+		server.reset();
+		expect((await query()).status).toBe(200);
+	});
+
+	it("reset() drops state, keeps the schema and keeps serving", async () => {
+		const query = async (sql: string, params: unknown[] = []) => {
+			const response = await fetch(`${server.url}/accounts/test/d1/database/test/raw`, {
+				method: "POST",
+				headers: {
+					Authorization: "Bearer test-token",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ sql, params }),
+			});
+			return d1_http_response_schema.parse(await response.json());
+		};
+
+		const inserted = await query(
+			`INSERT INTO corpus_snapshots
+				(store_id, version, parents, created_at, content_hash, content_type, size_bytes, data_key)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			["test-store", "v1", "[]", "2024-01-01T00:00:00Z", "abc123", "application/json", 42, "test-key"],
+		);
+		expect(inserted.success).toBe(true);
+		const before = await query("SELECT * FROM corpus_snapshots");
+		expect(before.result[0]?.results?.rows.length).toBe(1);
+
+		server.reset();
+
+		const after = await query("SELECT * FROM corpus_snapshots");
+		expect(after.success).toBe(true);
+		expect(after.result[0]?.results?.rows).toEqual([]);
+		const observations = await query("SELECT * FROM corpus_observations");
+		expect(observations.success).toBe(true);
+		expect(server.sqlite.query("SELECT COUNT(*) AS n FROM corpus_snapshots").get()).toEqual({ n: 0 });
+	});
 });
 
 describe("S3 Server Fake", () => {
@@ -261,6 +315,35 @@ describe("S3 Server Fake", () => {
 		expect(get_response.status).toBe(200);
 		const retrieved = await get_response.arrayBuffer();
 		expect(new Uint8Array(retrieved)).toEqual(data);
+	});
+
+	it("reset() clears objects and keeps serving", async () => {
+		await fetch(`${server.url}/bucket/test/object.bin`, { method: "PUT", body: new Uint8Array([1, 2, 3]) });
+		expect(server.has("test/object.bin")).toBe(true);
+
+		server.reset();
+
+		expect(server.keys()).toEqual([]);
+		const missing = await fetch(`${server.url}/bucket/test/object.bin`, { method: "GET" });
+		expect(missing.status).toBe(404);
+		expect(await missing.text()).toContain("NoSuchKey");
+
+		const put_response = await fetch(`${server.url}/bucket/other`, { method: "PUT", body: new Uint8Array([9]) });
+		expect(put_response.status).toBe(200);
+		expect(server.keys()).toEqual(["other"]);
+	});
+
+	it("set_responder: a returned Response wins, undefined falls through to normal behaviour, reset() clears it", async () => {
+		await fetch(`${server.url}/bucket/k`, { method: "PUT", body: new Uint8Array([1]) });
+
+		server.set_responder((request) => (request.method === "HEAD" ? new Response("", { status: 500 }) : undefined));
+		expect((await fetch(`${server.url}/bucket/k`, { method: "HEAD" })).status).toBe(500);
+		expect((await fetch(`${server.url}/bucket/k`, { method: "GET" })).status).toBe(200);
+
+		server.reset();
+		server.set_responder(() => new Response("", { status: 500 }));
+		server.reset();
+		expect((await fetch(`${server.url}/bucket/k`, { method: "HEAD" })).status).toBe(404);
 	});
 
 	it("stores bytes exactly without corruption", async () => {

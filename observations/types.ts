@@ -131,6 +131,11 @@ export type ObservationPutOpts<T> = {
 	 * snapshot's `entity_key`; stored unkeyed if the source is missing or unkeyed.
 	 */
 	entity_key?: string;
+	/**
+	 * Caller-chosen id. Omit to have one generated. Must match `observation_id_schema`.
+	 * A put whose id already exists fails with `validation_error`; it never overwrites.
+	 */
+	id?: string;
 };
 
 /**

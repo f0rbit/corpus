@@ -3,10 +3,10 @@ import { create_file_backend } from "../../backend/file.js";
 import { define_observation_type } from "../../observations/index.js";
 import type { SnapshotMeta } from "../../types.js";
 import { z } from "zod";
-import { mkdir, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir } from "node:fs/promises";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
-const TEST_DIR = join(import.meta.dir, "../.tmp/file-concurrency");
+let test_dir = "";
 
 const make_meta = (store_id: string, version: string, data_key = `${store_id}/${version}`): SnapshotMeta => ({
 	store_id,
@@ -23,16 +23,15 @@ const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 describe("file backend - concurrency", () => {
 	beforeEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
-		await mkdir(TEST_DIR, { recursive: true });
+		test_dir = await make_tmp_dir("file-concurrency");
 	});
 
 	afterEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
+		await remove_tmp_dir(test_dir);
 	});
 
 	it("keeps every entry from 50 concurrent metadata.put calls on one store", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 		const versions = Array.from({ length: 50 }, (_, i) => `v${String(i)}`);
 
 		const results = await Promise.all(versions.map((v) => backend.metadata.put(make_meta("items", v))));
@@ -44,7 +43,7 @@ describe("file backend - concurrency", () => {
 	});
 
 	it("keeps concurrent puts and deletes on one store consistent", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 		await Promise.all(["a", "b", "c"].map((v) => backend.metadata.put(make_meta("items", v))));
 
 		await Promise.all([
@@ -60,7 +59,7 @@ describe("file backend - concurrency", () => {
 	});
 
 	it("does not lose a concurrent non-transactional put when apply_batch commits the same store", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 		const solo = Array.from({ length: 20 }, (_, i) => `solo${String(i)}`);
 
 		const [batch, ...puts] = await Promise.all([
@@ -81,16 +80,15 @@ describe("file backend - concurrency", () => {
 
 describe("file backend - observation concurrency", () => {
 	beforeEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
-		await mkdir(TEST_DIR, { recursive: true });
+		test_dir = await make_tmp_dir("file-concurrency");
 	});
 
 	afterEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
+		await remove_tmp_dir(test_dir);
 	});
 
 	it("keeps every observation from 30 concurrent observations.put calls", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 		const note_type = define_observation_type("note", z.object({ n: z.number() }));
 		const source = { store_id: "items", version: "v1" };
 
@@ -107,16 +105,15 @@ describe("file backend - observation concurrency", () => {
 
 describe("file backend - data key aliasing guard", () => {
 	beforeEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
-		await mkdir(TEST_DIR, { recursive: true });
+		test_dir = await make_tmp_dir("file-concurrency");
 	});
 
 	afterEach(async () => {
-		await rm(TEST_DIR, { recursive: true, force: true });
+		await remove_tmp_dir(test_dir);
 	});
 
 	it("rejects a second distinct key that maps to the same file name", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 
 		const first = await backend.data.put("a/b", bytes("first"));
 		expect(first.ok).toBe(true);
@@ -135,14 +132,14 @@ describe("file backend - data key aliasing guard", () => {
 	});
 
 	it("allows rewriting the same key", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 
 		expect((await backend.data.put("a/b", bytes("one"))).ok).toBe(true);
 		expect((await backend.data.put("a/b", bytes("two"))).ok).toBe(true);
 	});
 
 	it("aborts apply_batch on a colliding data_put with nothing visible", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 		expect((await backend.data.put("a/b", bytes("first"))).ok).toBe(true);
 
 		const result = await backend.apply_batch!([
@@ -153,14 +150,14 @@ describe("file backend - data key aliasing guard", () => {
 		if (result.ok) return;
 		expect(result.error.kind).toBe("transaction_aborted");
 
-		expect((await readdir(TEST_DIR)).filter((e) => e.startsWith(".tx-"))).toHaveLength(0);
+		expect((await readdir(test_dir)).filter((e) => e.startsWith(".tx-"))).toHaveLength(0);
 		expect((await backend.metadata.get("items", "v1")).ok).toBe(false);
 		const got = await backend.data.get("a/b");
 		if (got.ok) expect(new TextDecoder().decode(await got.value.bytes())).toBe("first");
 	});
 
 	it("aborts apply_batch on a collision inside the batch and claims nothing", async () => {
-		const backend = create_file_backend({ base_path: TEST_DIR });
+		const backend = create_file_backend({ base_path: test_dir });
 
 		const result = await backend.apply_batch!([
 			{ type: "data_put", data_key: "x/y", bytes: bytes("1") },

@@ -1,7 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { z } from "zod";
 import {
 	create_corpus,
@@ -91,9 +89,7 @@ describe("store streaming", () => {
 		it("stream() yields multiple chunks for a multi-chunk source", async () => {
 			// File backend uses Bun.file().stream(), which emits 256 KB chunks. A 1 MB
 			// payload guarantees ≥ 2 chunks and proves we're streaming, not buffering.
-			const dir = join(tmpdir(), "corpus-store-streaming-test");
-			await rm(dir, { recursive: true, force: true });
-			await mkdir(dir, { recursive: true });
+			const dir = await make_tmp_dir("store-streaming");
 			try {
 				const corpus = create_corpus()
 					.with_backend(create_file_backend({ base_path: dir }))
@@ -117,7 +113,7 @@ describe("store streaming", () => {
 				expect(chunks.length).toBeGreaterThanOrEqual(2);
 				expect(chunks.join("")).toBe(big_text);
 			} finally {
-				await rm(dir, { recursive: true, force: true });
+				await remove_tmp_dir(dir);
 			}
 		});
 	});

@@ -28,8 +28,9 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # --coverage enforces the per-file 80% floor from bunfig.toml
       - name: Run tests
-        run: bun test
+        run: bun test --coverage
 
       - name: Lint
         run: bun run lint && bun run fmt:check

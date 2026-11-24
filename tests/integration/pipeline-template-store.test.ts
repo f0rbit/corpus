@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { z } from "zod";
 import type { Backend } from "../../index";
 import { pipeline_template_store } from "../../index.js";
@@ -145,19 +143,18 @@ function run_pipeline_template_tests(name: string, factory: BackendFactory, clea
 
 run_pipeline_template_tests("MemoryBackend", () => create_memory_backend());
 
-const file_test_dir = join(tmpdir(), "corpus-pipeline-template-test-file");
+let file_test_dir = "";
 run_pipeline_template_tests(
 	"FileBackend",
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
-		await mkdir(file_test_dir, { recursive: true });
+		file_test_dir = await make_tmp_dir("pipeline-template-file");
 		return create_file_backend({ base_path: file_test_dir });
 	},
 	async () => {
-		await rm(file_test_dir, { recursive: true, force: true });
+		await remove_tmp_dir(file_test_dir);
 	},
 );
 
 afterAll(async () => {
-	await rm(file_test_dir, { recursive: true, force: true });
+	if (file_test_dir) await remove_tmp_dir(file_test_dir);
 });

@@ -29,7 +29,8 @@ import { ok, err } from "./types.js";
 import { try_catch, try_catch_async, pipe } from "./result.js";
 import { storage_error } from "./backend/errors.js";
 import { as_error, compute_hash, concat_bytes, generate_version, stream_to_bytes } from "./utils.js";
-import { create_pointer, resolve_path, apply_span, generate_observation_id } from "./observations/utils.js";
+import { create_pointer, resolve_path, apply_span } from "./observations/utils.js";
+import { resolve_observation_id } from "./observations/id.js";
 import { create_observation_row } from "./observations/storage.js";
 
 // Internal construction shapes for the public conditional types. `stream` /
@@ -580,7 +581,9 @@ function build_corpus<Stores extends Record<string, Store<any>>>(
 						message: validation.error.message,
 					});
 				}
-				const id = generate_observation_id();
+				const resolved = resolve_observation_id(opts.id);
+				if (!resolved.ok) return resolved;
+				const id = resolved.value;
 				const row = create_observation_row(id, type.name, opts.source, validation.data, {
 					confidence: opts.confidence,
 					observed_at: opts.observed_at,

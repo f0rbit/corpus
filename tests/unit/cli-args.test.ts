@@ -1,6 +1,65 @@
 import { describe, it, expect } from "bun:test";
 import { parse_global_args, parse_command_args } from "../../cli/args.js";
 import type { CommandSpec } from "../../cli/args.js";
+import * as testing from "../../testing/index.js";
+
+const fc = testing.fc;
+
+type Item =
+	| { k: "env"; v: string; form: "long" | "short" | "inline" }
+	| { k: "json" }
+	| { k: "quiet"; short: boolean }
+	| { k: "counts" }
+	| { k: "limit"; v: string; inline: boolean }
+	| { k: "tag"; v: string; inline: boolean }
+	| { k: "pos"; v: string };
+
+const word = fc.stringMatching(/^[a-z0-9]{1,6}$/);
+
+const global_item_arb = fc.oneof(
+	fc.record({
+		k: fc.constant("env" as const),
+		v: word,
+		form: fc.constantFrom("long" as const, "short" as const, "inline" as const),
+	}),
+	fc.constant({ k: "json" as const }),
+	fc.record({ k: fc.constant("quiet" as const), short: fc.boolean() }),
+);
+
+const command_item_arb = fc.oneof(
+	fc.constant({ k: "counts" as const }),
+	fc.record({ k: fc.constant("limit" as const), v: word, inline: fc.boolean() }),
+	fc.record({ k: fc.constant("tag" as const), v: word, inline: fc.boolean() }),
+	fc.record({ k: fc.constant("pos" as const), v: word }),
+);
+
+const item_arb = fc.oneof(global_item_arb, command_item_arb);
+
+const command_spec: CommandSpec = {
+	options: {
+		counts: { type: "boolean" },
+		limit: { type: "string" },
+		tag: { type: "string", multiple: true },
+	},
+};
+
+function render(item: Item): string[] {
+	switch (item.k) {
+		case "env":
+			return item.form === "long" ? ["--env", item.v] : item.form === "short" ? ["-e", item.v] : [`--env=${item.v}`];
+		case "json":
+			return ["--json"];
+		case "quiet":
+			return [item.short ? "-q" : "--quiet"];
+		case "counts":
+			return ["--counts"];
+		case "limit":
+		case "tag":
+			return item.inline ? [`--${item.k}=${item.v}`] : [`--${item.k}`, item.v];
+		case "pos":
+			return [item.v];
+	}
+}
 
 // Regression coverage for a real bug found during phase-5 verification:
 // node:util.parseArgs's `strict: false` mode treats every UNCONFIGURED long
@@ -14,46 +73,32 @@ import type { CommandSpec } from "../../cli/args.js";
 // the decode path instead of streaming raw bytes.
 
 describe("parse_global_args + parse_command_args (two-stage CLI parse)", () => {
-	it("threads a bare command-specific boolean flag through to the command parse", () => {
-		const global = parse_global_args(["stores", "--file", "/tmp/x", "--counts"]);
-		expect(global.command).toBe("stores");
-		expect(global.file).toBe("/tmp/x");
+	it("globals are set exactly, and the command parse sees every non-global token in order", () => {
+		fc.assert(
+			fc.property(fc.array(global_item_arb, { maxLength: 3 }), fc.array(item_arb, { maxLength: 8 }), (prefix, rest) => {
+				const items = [...prefix, ...rest];
+				const argv = [...prefix.flatMap(render), "versions", ...rest.flatMap(render)];
 
-		const spec: CommandSpec = { options: { counts: { type: "boolean" } } };
-		const { args } = parse_command_args(global.positionals, spec);
-		expect(args.counts).toBe(true);
-	});
+				const global = parse_global_args(argv);
+				const env_values = items.flatMap((i) => (i.k === "env" ? [i.v] : []));
+				expect(global.command).toBe("versions");
+				expect(global.env).toBe(env_values.at(-1));
+				expect(global.json).toBe(items.some((i) => i.k === "json"));
+				expect(global.quiet).toBe(items.some((i) => i.k === "quiet"));
+				expect(global.file).toBeUndefined();
+				expect(global.config).toBeUndefined();
+				expect(global.help).toBe(false);
 
-	it("preserves a space-separated value for a command-specific string flag", () => {
-		const global = parse_global_args(["versions", "store_a", "--limit", "5", "--file", "/tmp/x"]);
-		expect(global.command).toBe("versions");
-
-		const spec: CommandSpec = { positionals: ["store"], options: { limit: { type: "string" } } };
-		const { args, positionals } = parse_command_args(global.positionals, spec);
-		expect(positionals).toEqual(["store_a"]);
-		expect(args.limit).toBe("5");
-	});
-
-	it("preserves repeated multi-valued command-specific flags in order", () => {
-		const global = parse_global_args(["versions", "store_a", "--tag", "a", "--tag", "b"]);
-
-		const spec: CommandSpec = { positionals: ["store"], options: { tag: { type: "string", multiple: true } } };
-		const { args } = parse_command_args(global.positionals, spec);
-		expect(args.tag).toEqual(["a", "b"]);
-	});
-
-	it("supports inline --flag=value form for command-specific options", () => {
-		const global = parse_global_args(["versions", "store_a", "--limit=9"]);
-
-		const spec: CommandSpec = { positionals: ["store"], options: { limit: { type: "string" } } };
-		const { args } = parse_command_args(global.positionals, spec);
-		expect(args.limit).toBe("9");
-	});
-
-	it("does not leak command-specific flags into global values", () => {
-		const global = parse_global_args(["cat", "store_a", "v1", "--raw", "--json"]);
-		expect(global.json).toBe(true);
-		expect(global.positionals).toEqual(["store_a", "v1", "--raw"]);
+				const { args, positionals } = parse_command_args(global.positionals, command_spec);
+				const limits = items.flatMap((i) => (i.k === "limit" ? [i.v] : []));
+				const tags = items.flatMap((i) => (i.k === "tag" ? [i.v] : []));
+				expect(args.counts).toBe(items.some((i) => i.k === "counts") ? true : undefined);
+				expect(args.limit).toBe(limits.at(-1));
+				expect(args.tag).toEqual(tags.length > 0 ? tags : undefined);
+				expect(positionals).toEqual(items.flatMap((i) => (i.k === "pos" ? [i.v] : [])));
+			}),
+			{ numRuns: 300 },
+		);
 	});
 
 	it("resolves the command name as the first true positional even when a command flag precedes it", () => {

@@ -3,6 +3,7 @@
  * @description Utility functions for working with SnapshotPointers and observations.
  */
 
+import { z } from "zod/v4";
 import type { SnapshotPointer } from "./types.js";
 import type { Result, CorpusError } from "../types.js";
 import { ok, err } from "../types.js";
@@ -236,6 +237,14 @@ export function generate_observation_id(): string {
 	const random = Math.random().toString(36).substring(2, 10);
 	return `obs_${timestamp}_${random}`;
 }
+
+/**
+ * Format accepted for observation ids (generated and caller-supplied).
+ *
+ * @category Utilities
+ * @group Observation Utilities
+ */
+export const observation_id_schema = z.string().regex(/^obs_[A-Za-z0-9_-]{1,64}$/);
 
 /**
  * Checks if two SnapshotPointers reference the same location.

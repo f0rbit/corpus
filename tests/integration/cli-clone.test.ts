@@ -8,13 +8,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { create_file_backend } from "../../backend/file.js";
 import { create_capture_output } from "../../cli/output.js";
 import { cat_command } from "../../cli/commands/cat.js";
 import { clone_command } from "../../cli/commands/clone.js";
 import type { Backend, SnapshotMeta } from "../../types.js";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
 function make_meta(
 	overrides: Partial<SnapshotMeta> & Pick<SnapshotMeta, "store_id" | "version" | "data_key">,
@@ -43,24 +42,22 @@ async function list_versions(backend: Backend, store_id: string): Promise<Snapsh
 }
 
 describe("CLI clone and cat commands", () => {
-	const TMP_SRC = join(import.meta.dir, ".test-cli-src");
-	const TMP_DEST = join(import.meta.dir, ".test-cli-dest");
+	let tmp_src = "";
+	let tmp_dest = "";
 
 	beforeEach(async () => {
-		await rm(TMP_SRC, { recursive: true, force: true });
-		await rm(TMP_DEST, { recursive: true, force: true });
-		await mkdir(TMP_SRC, { recursive: true });
-		await mkdir(TMP_DEST, { recursive: true });
+		tmp_src = await make_tmp_dir("cli-src");
+		tmp_dest = await make_tmp_dir("cli-dest");
 	});
 
 	afterEach(async () => {
-		await rm(TMP_SRC, { recursive: true, force: true });
-		await rm(TMP_DEST, { recursive: true, force: true });
+		await remove_tmp_dir(tmp_src);
+		await remove_tmp_dir(tmp_dest);
 	});
 
 	describe("clone command", () => {
 		it("clones file → file", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 
 			// Seed source with test data
 			const bytes_a = new TextEncoder().encode("hello-a");
@@ -71,7 +68,7 @@ describe("CLI clone and cat commands", () => {
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: {},
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -81,7 +78,7 @@ describe("CLI clone and cat commands", () => {
 			expect(result.ok).toBe(true);
 
 			// Verify destination has the same data
-			const dest = create_file_backend({ base_path: TMP_DEST });
+			const dest = create_file_backend({ base_path: tmp_dest });
 			const dest_versions = await list_versions(dest, "docs");
 			expect(dest_versions.length).toBe(2);
 			expect(dest_versions[0]?.version).toBe("v1");
@@ -89,14 +86,14 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("second clone is idempotent (all skip)", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 
 			const output1 = create_capture_output();
 			const result1 = await clone_command.run({
 				args: {},
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output: output1,
 				cwd: import.meta.dir,
@@ -107,7 +104,7 @@ describe("CLI clone and cat commands", () => {
 			const output2 = create_capture_output();
 			const result2 = await clone_command.run({
 				args: {},
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output: output2,
 				cwd: import.meta.dir,
@@ -121,7 +118,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("respects --store filter", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 			await seed(source, make_meta({ store_id: "notes", version: "v1", data_key: "notes/hash-v1" }), bytes);
@@ -129,7 +126,7 @@ describe("CLI clone and cat commands", () => {
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: { store: ["docs"] },
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -139,7 +136,7 @@ describe("CLI clone and cat commands", () => {
 			expect(result.ok).toBe(true);
 
 			// Only docs should be in destination
-			const dest = create_file_backend({ base_path: TMP_DEST });
+			const dest = create_file_backend({ base_path: tmp_dest });
 			const dest_stores: string[] = [];
 			if (dest.metadata.list_stores) {
 				for await (const store of dest.metadata.list_stores()) dest_stores.push(store);
@@ -148,14 +145,14 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("rejects remote destination (v1 restriction)", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: {},
-				positionals: [TMP_SRC, "remote-env"],
+				positionals: [tmp_src, "remote-env"],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -169,14 +166,14 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("--dry-run leaves destination empty", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: { "dry-run": true },
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -186,7 +183,7 @@ describe("CLI clone and cat commands", () => {
 			expect(result.ok).toBe(true);
 
 			// Destination should exist but be empty
-			const dest = create_file_backend({ base_path: TMP_DEST });
+			const dest = create_file_backend({ base_path: tmp_dest });
 			const dest_stores: string[] = [];
 			if (dest.metadata.list_stores) {
 				for await (const store of dest.metadata.list_stores()) dest_stores.push(store);
@@ -195,14 +192,14 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("--json emits exactly one document — the CopySummary, no progress lines", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: {},
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -227,14 +224,14 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("--dry-run table omits data-object/byte counts (never known in dry-run)", async () => {
-			const source = create_file_backend({ base_path: TMP_SRC });
+			const source = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(source, make_meta({ store_id: "docs", version: "v1", data_key: "docs/hash-v1" }), bytes);
 
 			const output = create_capture_output();
 			const result = await clone_command.run({
 				args: { "dry-run": true },
-				positionals: [TMP_SRC, TMP_DEST],
+				positionals: [tmp_src, tmp_dest],
 				backend_selector: {},
 				output,
 				cwd: import.meta.dir,
@@ -254,7 +251,7 @@ describe("CLI clone and cat commands", () => {
 
 	describe("cat command", () => {
 		it("cats with --raw streams literal bytes", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("raw bytes");
 			await seed(backend, make_meta({ store_id: "data", version: "v1", data_key: "data/hash-v1" }), bytes);
 
@@ -262,7 +259,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: { raw: true },
 				positionals: ["data", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -276,7 +273,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("resolves latest alias", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("test");
 			await seed(backend, make_meta({ store_id: "data", version: "v1", data_key: "data/hash-v1" }), bytes);
 			await seed(backend, make_meta({ store_id: "data", version: "v2", data_key: "data/hash-v2" }), bytes);
@@ -285,7 +282,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: { raw: true },
 				positionals: ["data", "latest"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -295,7 +292,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("decodes with config codec (text store)", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("hello world");
 			await seed(
 				backend,
@@ -312,7 +309,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: {},
 				positionals: ["text_data", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -326,7 +323,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("fallback renders text/* without config", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("fallback text");
 			await seed(
 				backend,
@@ -343,7 +340,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: {},
 				positionals: ["text_store", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -357,7 +354,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("fallback renders JSON without config", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const json_bytes = new TextEncoder().encode('{"key":"value"}');
 			await seed(
 				backend,
@@ -374,7 +371,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: {},
 				positionals: ["json_store", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -388,7 +385,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("errors on binary content without config", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("binary");
 			await seed(
 				backend,
@@ -405,7 +402,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: {},
 				positionals: ["binary_store", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -418,7 +415,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("--raw --json emits the stable {store, version, ...} document, base64-encoded", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("raw bytes");
 			await seed(backend, make_meta({ store_id: "data", version: "v1", data_key: "data/hash-v1" }), bytes);
 
@@ -426,7 +423,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: { raw: true },
 				positionals: ["data", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
@@ -451,7 +448,7 @@ describe("CLI clone and cat commands", () => {
 		});
 
 		it("fallback --json emits utf8-encoded content for text/* without config", async () => {
-			const backend = create_file_backend({ base_path: TMP_SRC });
+			const backend = create_file_backend({ base_path: tmp_src });
 			const bytes = new TextEncoder().encode("fallback text");
 			await seed(
 				backend,
@@ -468,7 +465,7 @@ describe("CLI clone and cat commands", () => {
 			const result = await cat_command.run({
 				args: {},
 				positionals: ["text_store", "v1"],
-				backend_selector: { file: TMP_SRC },
+				backend_selector: { file: tmp_src },
 				output,
 				cwd: import.meta.dir,
 				env_vars: {},
