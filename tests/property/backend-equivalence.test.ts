@@ -235,6 +235,12 @@ const bump = (type: string): void => {
 	command_counts.set(type, (command_counts.get(type) ?? 0) + 1);
 };
 
+// Outcome labels ("get_meta:hit") prove a command reached an interesting branch, not just ran.
+const outcome_counts = new Map<string, number>();
+const note = (label: string, happened: boolean): void => {
+	if (happened) outcome_counts.set(label, (outcome_counts.get(label) ?? 0) + 1);
+};
+
 const put_meta_commands = meta_arb.map((meta) =>
 	equivalence_command<BackendModel, Backend, Result<void, CorpusError>>({
 		label: `put_meta(${meta.store_id}:${meta.version})`,
@@ -276,6 +282,8 @@ const get_meta_commands = fc.record({ store_id: store_id_arb, version: version_a
 		on_model: (m) => {
 			bump("get_meta");
 			const meta = m.meta.get(meta_key(store_id, version));
+			note("get_meta:hit", meta !== undefined);
+			note("get_meta:miss", meta === undefined);
 			return meta === undefined ? err({ kind: "not_found", store_id, version }) : ok(norm_meta(meta));
 		},
 		on_sut: async (b) => {
@@ -310,13 +318,18 @@ const ordered_filtered = (m: BackendModel, store_id: string, opts: ListOpts): No
 	return (opts.limit === undefined ? sorted : sorted.slice(0, opts.limit)).map(norm_meta);
 };
 
+// fc.option's nil share tops out at 50%; filters are ANDed, so each is absent ~75% of the time
+// to keep filtered listings regularly non-empty and limit-truncated.
+const sparse = <T>(arb: fc.Arbitrary<T>): fc.Arbitrary<T | undefined> =>
+	fc.oneof({ weight: 3, arbitrary: fc.constant(undefined) }, { weight: 1, arbitrary: arb });
+
 const list_opts_arb: fc.Arbitrary<ListOpts> = fc
 	.record({
-		limit: fc.option(fc.integer({ min: 1, max: 4 }), { nil: undefined }),
-		tags: fc.option(fc.uniqueArray(fc.constantFrom("draft", "reviewed", "hot"), { maxLength: 2 }), { nil: undefined }),
-		before: fc.option(created_arb, { nil: undefined }),
-		after: fc.option(created_arb, { nil: undefined }),
-		entity_key: fc.option(entity_arb, { nil: undefined }),
+		limit: fc.option(fc.integer({ min: 1, max: 2 }), { nil: undefined, freq: 2 }),
+		tags: sparse(fc.uniqueArray(fc.constantFrom("draft", "reviewed", "hot"), { maxLength: 2 })),
+		before: sparse(created_arb),
+		after: sparse(created_arb),
+		entity_key: sparse(entity_arb),
 	})
 	.map((o) => ({
 		...(o.limit === undefined ? {} : { limit: o.limit }),
@@ -341,14 +354,27 @@ const list_meta_commands = store_id_arb.map((store_id) =>
 	}),
 );
 
+// Filtered listings mostly target "alpha": a limit only truncates a store holding more metas than the limit.
+const list_store_id_arb = fc.oneof(
+	{ weight: 3, arbitrary: fc.constant<(typeof STORE_IDS)[number]>("alpha") },
+	{ weight: 1, arbitrary: store_id_arb },
+);
+
 const list_meta_filtered_commands = fc
-	.record({ store_id: store_id_arb, opts: list_opts_arb })
+	.record({ store_id: list_store_id_arb, opts: list_opts_arb })
 	.map(({ store_id, opts }) =>
 		equivalence_command<BackendModel, Backend, Result<NormMeta[], CorpusError>>({
 			label: `list_meta_filtered(${store_id})`,
 			on_model: (m) => {
 				bump("list_meta_filtered");
-				return ok(ordered_filtered(m, store_id, opts));
+				const result = ordered_filtered(m, store_id, opts);
+				note("list_meta_filtered:nonempty", result.length > 0);
+				note("list_meta_filtered:empty", result.length === 0);
+				note(
+					"list_meta_filtered:limited",
+					result.length < ordered_filtered(m, store_id, { ...opts, limit: undefined }).length,
+				);
+				return ok(result);
 			},
 			on_sut: async (b) => {
 				const collected: SnapshotMeta[] = [];
@@ -372,6 +398,13 @@ const get_latest_commands = fc
 					(best, meta) => (best === undefined || meta.created_at >= best.created_at ? meta : best),
 					undefined,
 				);
+				note("get_latest:hit", latest !== undefined);
+				note("get_latest:miss", latest === undefined);
+				note(
+					"get_latest:tie",
+					latest !== undefined &&
+						candidates.filter((meta) => meta.created_at.getTime() === latest.created_at.getTime()).length >= 2,
+				);
 				return latest === undefined ? err({ kind: "not_found", store_id, version: "latest" }) : ok(norm_meta(latest));
 			},
 			on_sut: async (b) => {
@@ -389,6 +422,7 @@ const get_children_commands = fc.record({ store_id: store_id_arb, version: versi
 			const children = [...m.meta.values()].filter((meta) =>
 				meta.parents.some((p) => p.store_id === store_id && p.version === version),
 			);
+			note("get_children:nonempty", children.length > 0);
 			return ok(canonical(children.map(norm_meta)));
 		},
 		on_sut: async (b) => {
@@ -407,6 +441,8 @@ const find_by_hash_commands = fc.record({ store_id: store_id_arb, hash: hash_arb
 		on_model: (m) => {
 			bump("find_by_hash");
 			const hit = [...m.meta.values()].some((meta) => meta.store_id === store_id && meta.content_hash === hash);
+			note("find_by_hash:found", hit);
+			note("find_by_hash:absent", !hit);
 			return hit ? { found: true, store_id, content_hash: hash } : { found: false };
 		},
 		// Backends may return ANY matching version: never compare it.
@@ -502,6 +538,21 @@ const ALL_COMMAND_TYPES = [
 	"get_data",
 	"delete_data",
 	"exists_data",
+] as const;
+
+// Each must be >=2% of its command's calls: the model exercises both sides of the branch.
+const HIT_LABELS = [
+	"get_meta:hit",
+	"get_meta:miss",
+	"list_meta_filtered:nonempty",
+	"list_meta_filtered:empty",
+	"list_meta_filtered:limited",
+	"get_latest:hit",
+	"get_latest:miss",
+	"get_latest:tie",
+	"find_by_hash:found",
+	"find_by_hash:absent",
+	"get_children:nonempty",
 ] as const;
 
 const map_storage = (): BytesStorage => {
@@ -648,6 +699,12 @@ describe("property: cross-backend model-based equivalence", () => {
 		for (const type of ALL_COMMAND_TYPES) {
 			const share = (command_counts.get(type) ?? 0) / total;
 			expect(share).toBeGreaterThanOrEqual(0.03);
+		}
+
+		for (const label of HIT_LABELS) {
+			const calls = command_counts.get(label.split(":")[0] ?? "") ?? 0;
+			const rate = (outcome_counts.get(label) ?? 0) / calls;
+			expect({ label, ok: rate >= 0.02, rate }).toEqual({ label, ok: true, rate });
 		}
 	}, 60_000);
 });

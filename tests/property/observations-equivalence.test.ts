@@ -184,23 +184,27 @@ type Filters = {
 	limit?: number;
 };
 
+// Filters are ANDed: each is absent ~75% of the time so queries regularly return rows.
+const sparse = <T>(arb: fc.Arbitrary<T>): fc.Arbitrary<T | undefined> =>
+	fc.oneof({ weight: 3, arbitrary: fc.constant(undefined) }, { weight: 1, arbitrary: arb });
+
 const filters_arb: fc.Arbitrary<Filters> = fc
 	.record({
-		type: maybe(fc.oneof(type_arb, fc.subarray([...TYPE_NAMES], { minLength: 1 }))),
-		source_store: maybe(store_arb),
-		source_version: maybe(version_arb),
-		exclude_source_version: maybe(version_arb),
-		source_prefix: maybe(fc.constantFrom(...PREFIXES)),
-		after: maybe(observed_arb),
-		before: maybe(observed_arb),
-		entity_key: maybe(fc.constantFrom("e1", "e2")),
-		version_filter: maybe(
+		type: sparse(fc.oneof(type_arb, fc.subarray([...TYPE_NAMES], { minLength: 1 }))),
+		source_store: sparse(store_arb),
+		source_version: sparse(version_arb),
+		exclude_source_version: sparse(version_arb),
+		source_prefix: sparse(fc.constantFrom(...PREFIXES)),
+		after: sparse(observed_arb),
+		before: sparse(observed_arb),
+		entity_key: sparse(fc.constantFrom("e1", "e2")),
+		version_filter: sparse(
 			fc.record({
 				kind: fc.constantFrom("set", "array", "sync", "async"),
 				versions: fc.subarray([...VERSIONS]),
 			}),
 		),
-		limit: maybe(fc.integer({ min: 1, max: 5 })),
+		limit: sparse(fc.integer({ min: 1, max: 5 })),
 	})
 	.map((f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined)) as Filters);
 
@@ -285,6 +289,15 @@ const command_counts = new Map<string, number>();
 const bump = (type: string): void => {
 	command_counts.set(type, (command_counts.get(type) ?? 0) + 1);
 };
+
+// Outcome labels ("query:nonempty") prove a command reached an interesting branch, not just ran.
+const outcome_counts = new Map<string, number>();
+const note = (label: string, happened: boolean): void => {
+	if (happened) outcome_counts.set(label, (outcome_counts.get(label) ?? 0) + 1);
+};
+
+// Each must be >=2% of its command's calls.
+const HIT_LABELS = ["query:nonempty", "delete_by_source:removed>0", "is_stale:true", "is_stale:false"] as const;
 
 const obs_of = (backend: Backend): ObservationsClient => {
 	if (!backend.observations) throw new Error("backend has no observations client");
@@ -413,6 +426,7 @@ const delete_by_source_commands = fc.record({ store_id: store_arb, version: vers
 					row.source.version === p.version &&
 					(p.path === undefined || row.source.path === p.path),
 			);
+			note("delete_by_source:removed>0", doomed.length > 0);
 			doomed.forEach((row) => m.obs.delete(row.id));
 			return ok(doomed.length);
 		},
@@ -430,7 +444,9 @@ const query_commands = filters_arb.map((f) =>
 		label: `query(${describe_filters(f)})`,
 		on_model: (m) => {
 			bump("query");
-			return ok(model_query(m, f).map((row) => norm(row, true)));
+			const rows = model_query(m, f);
+			note("query:nonempty", rows.length > 0);
+			return ok(rows.map((row) => norm(row, true)));
 		},
 		on_sut: async (b) => {
 			const found: NormObs[] = [];
@@ -460,7 +476,10 @@ const is_stale_commands = fc.record({ store_id: store_arb, version: version_arb 
 		label: `is_stale(${store_id}:${version})`,
 		on_model: (m) => {
 			bump("is_stale");
-			return model_is_stale(m, store_id, version);
+			const stale = model_is_stale(m, store_id, version);
+			note("is_stale:true", stale);
+			note("is_stale:false", !stale);
+			return stale;
 		},
 		on_sut: (b) => obs_of(b).is_stale({ store_id, version }),
 	}),
@@ -584,6 +603,12 @@ describe("property: observations model-based equivalence", () => {
 		for (const type of ALL_COMMAND_TYPES) {
 			const share = (command_counts.get(type) ?? 0) / total;
 			expect(share).toBeGreaterThanOrEqual(0.03);
+		}
+
+		for (const label of HIT_LABELS) {
+			const calls = command_counts.get(label.split(":")[0] ?? "") ?? 0;
+			const rate = (outcome_counts.get(label) ?? 0) / calls;
+			expect({ label, ok: rate >= 0.02, rate }).toEqual({ label, ok: true, rate });
 		}
 	}, 120_000);
 });
