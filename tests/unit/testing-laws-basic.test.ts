@@ -5,6 +5,7 @@
 
 import { test, expect } from "bun:test";
 import * as testing from "../../testing/index.js";
+import { default_equals } from "../../testing/laws/equality.js";
 
 const json_codec = {
 	encode: (x: unknown) => new TextEncoder().encode(JSON.stringify(x)),
@@ -123,6 +124,16 @@ test("round_trip: JSON with custom equals", async () => {
 
 test("provider_equivalence: an honest SUT agrees with the model", async () => {
 	await counter_law(0);
+});
+
+test("default_equals: without Bun it throws naming the law and opts.equals", () => {
+	expect(() => default_equals("round_trip", false)).toThrow(/round_trip.*opts\.equals/);
+});
+
+test("default_equals: with Bun it deep-compares", () => {
+	const equals = default_equals<unknown>("x", true);
+	expect(equals({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })).toBe(true);
+	expect(equals({ a: [1] }, { a: [2] })).toBe(false);
 });
 
 for (const [label, needle, run] of violated_laws) {

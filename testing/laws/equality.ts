@@ -10,8 +10,8 @@
  * barrel.
  */
 
-export function default_equals<T>(law: string): (a: T, b: T) => boolean {
-	if (typeof Bun !== "undefined") {
+export function default_equals<T>(law: string, has_bun: boolean = typeof Bun !== "undefined"): (a: T, b: T) => boolean {
+	if (has_bun) {
 		return (a: T, b: T) => Bun.deepEquals(a, b);
 	}
 	throw new Error(
