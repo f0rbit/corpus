@@ -29,11 +29,25 @@ export const manifest = {
 		"tests/unit/testing-walker.test.ts",
 		"tests/integration/layered-backend.test.ts",
 		"tests/integration/observations-id.test.ts",
+		"tests/unit/cli-main.test.ts",
 	],
 	// Not listed (unkillable): `desc(sql`rowid`)` tie-break removal in drizzle list/get_latest is an equivalent mutant
-	// while idx_store_created exists (a reverse index scan already yields ties in rowid-desc order); the selector-key
-	// presence guard needs the in-process CLI entry (cli/main.ts) to be exercised without a spawn.
+	// while idx_store_created exists (a reverse index scan already yields ties in rowid-desc order).
 	mutations: [
+		{
+			id: "guards/selector-builder-leaks-undefined",
+			file: "cli/main.ts",
+			find: "...(g.file !== undefined && { file: g.file }),",
+			replace: "file: g.file,",
+			guards: "build_backend_selector emits only keys with values (no `file: undefined` leak)",
+		},
+		{
+			id: "guards/resolve-backend-file-key-presence",
+			file: "cli/resolve-backend.ts",
+			find: "if (selector.file !== undefined) {",
+			replace: 'if ("file" in selector) {',
+			guards: "resolve_backend tests the selector's file VALUE, never key presence",
+		},
 		{
 			id: "guards/list-store-id-like-not-eq",
 			file: drizzle,

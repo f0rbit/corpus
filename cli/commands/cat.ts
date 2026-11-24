@@ -44,7 +44,7 @@ export const cat_command: Command = {
 		}
 
 		// Load config and wrangler
-		const config_result = await load_cli_config(ctx.backend_selector.config);
+		const config_result = await load_cli_config(ctx.backend_selector.config, ctx.cwd);
 		if (!config_result.ok) return config_result;
 
 		const wrangler_result = await sniff_wrangler(ctx.cwd);

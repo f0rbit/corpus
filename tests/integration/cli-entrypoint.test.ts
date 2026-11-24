@@ -3,17 +3,19 @@
  * backend_selector -> resolve_backend -> remote backend. Command tests call
  * `run(ctx)` directly and bypass all of this, which is how a selector
  * key-presence bug (`"file" in selector`) shipped unnoticed. These tests spawn
- * `bun cli/index.ts` against the in-process D1-HTTP and S3 fakes; the fake
- * endpoints reach the child via a throwaway `corpus.config.ts`
- * (`d1_base_url` / `r2_endpoint` — non-secret). Secrets go through env vars.
+ * call `run_cli` in-process (three spawn smokes cover the shim) against the
+ * D1-HTTP and S3 fakes; the fake endpoints reach the CLI via a throwaway
+ * `corpus.config.ts` (`d1_base_url` / `r2_endpoint` — non-secret). Secrets go
+ * through env vars.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { create_remote_backend } from "../../backend/remote.js";
+import { run_cli } from "../../cli/main.js";
+import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 import { create_corpus, define_store, json_codec } from "../../index.js";
 import { corpus_observations } from "../../observations/schema.js";
 import { corpus_snapshots } from "../../schema.js";
@@ -51,17 +53,37 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 	let work_dir: string;
 	let version: string;
 
-	const spawn_cli = async (argv: string[], env: Record<string, string | undefined> = {}): Promise<Spawned> => {
-		const merged: Record<string, string | undefined> = {
-			...process.env,
-			CLOUDFLARE_ACCOUNT_ID: "test-account",
-			CLOUDFLARE_API_TOKEN: "test-token",
-			CORPUS_D1_DATABASE_ID: database_uuid,
-			CORPUS_R2_BUCKET: "test-bucket",
-			CORPUS_R2_ACCESS_KEY_ID: "test-access-key-id",
-			CORPUS_R2_SECRET_ACCESS_KEY: "test-secret-access-key",
-			...env,
-		};
+	const cli_env = (env: Record<string, string | undefined>): Record<string, string | undefined> => ({
+		CLOUDFLARE_ACCOUNT_ID: "test-account",
+		CLOUDFLARE_API_TOKEN: "test-token",
+		CORPUS_D1_DATABASE_ID: database_uuid,
+		CORPUS_R2_BUCKET: "test-bucket",
+		CORPUS_R2_ACCESS_KEY_ID: "test-access-key-id",
+		CORPUS_R2_SECRET_ACCESS_KEY: "test-secret-access-key",
+		...env,
+	});
+
+	const run_in_process = async (argv: string[], env: Record<string, string | undefined> = {}): Promise<Spawned> => {
+		const out: string[] = [];
+		const errs: string[] = [];
+		const code = await run_cli({
+			argv,
+			env: cli_env(env),
+			cwd: work_dir,
+			stdout_is_tty: false,
+			stderr_is_tty: false,
+			stdout_write: (chunk) => {
+				out.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			},
+			stderr_write: (chunk) => {
+				errs.push(chunk);
+			},
+		});
+		return { code, stdout: out.join(""), stderr: errs.join("") };
+	};
+
+	const spawn_real = async (argv: string[], env: Record<string, string | undefined> = {}): Promise<Spawned> => {
+		const merged = { ...process.env, ...cli_env(env) };
 		const proc = Bun.spawn(["bun", cli_path, ...argv], {
 			cwd: work_dir,
 			env: Object.fromEntries(Object.entries(merged).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
@@ -82,7 +104,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 			database_id: database_uuid,
 		});
 		s3 = create_fake_s3();
-		work_dir = await mkdtemp(join(tmpdir(), "corpus-cli-entry-"));
+		work_dir = await make_tmp_dir("cli-entry");
 
 		await writeFile(
 			join(work_dir, "corpus.config.ts"),
@@ -113,11 +135,32 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 	afterEach(async () => {
 		d1.stop();
 		s3.stop();
-		await rm(work_dir, { recursive: true, force: true });
+		await remove_tmp_dir(work_dir);
+	});
+
+	describe("spawn smoke", () => {
+		it("--help exits 0 with usage on stdout", async () => {
+			const result = await spawn_real(["--help"]);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("Usage: corpus");
+		});
+
+		it("an unknown command exits 2", async () => {
+			const result = await spawn_real(["unknown"]);
+			expect(result.code).toBe(2);
+		});
+
+		it("stores --json round-trips through the shim (reads process.*)", async () => {
+			const result = await spawn_real(["stores", "--json"]);
+			expect(result.stderr).toBe("");
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("items");
+			expect(() => JSON.parse(result.stdout) as unknown).not.toThrow();
+		});
 	});
 
 	it("stores --json reaches the remote backend (no file selector leak)", async () => {
-		const result = await spawn_cli(["stores", "--json"]);
+		const result = await run_in_process(["stores", "--json"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain("items");
@@ -125,7 +168,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 	});
 
 	it("versions --json lists the seeded version", async () => {
-		const result = await spawn_cli(["versions", "items", "--json"]);
+		const result = await run_in_process(["versions", "items", "--json"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain(version);
@@ -133,7 +176,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 
 	it("clone --dry-run --json emits null data counts and dry_run: true", async () => {
 		const dest = join(work_dir, "clone-dest");
-		const result = await spawn_cli(["clone", "fake", dest, "--dry-run", "--json"]);
+		const result = await run_in_process(["clone", "fake", dest, "--dry-run", "--json"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		const summary = dry_run_summary_schema.parse(JSON.parse(result.stdout));
@@ -147,7 +190,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 	});
 
 	it("a failing command writes to stderr and exits 1 (never silent)", async () => {
-		const result = await spawn_cli(["stores"], { CLOUDFLARE_API_TOKEN: undefined });
+		const result = await run_in_process(["stores"], { CLOUDFLARE_API_TOKEN: undefined });
 		expect(result.code).toBe(1);
 		expect(result.stderr).toContain("CLOUDFLARE_API_TOKEN");
 		expect(result.stderr).not.toContain("test-secret-access-key");
@@ -155,7 +198,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 
 	describe("listing failures are never an empty database", () => {
 		it("a bad token fails `stores` with the root cause on stderr and nothing on stdout", async () => {
-			const result = await spawn_cli(["stores"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
+			const result = await run_in_process(["stores"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("error:");
@@ -164,7 +207,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 
 		it("a bad token fails `versions <store>` the same way", async () => {
-			const result = await spawn_cli(["versions", "items"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
+			const result = await run_in_process(["versions", "items"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("error:");
@@ -172,7 +215,9 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 
 		it("a wrong database id fails instead of listing nothing", async () => {
-			const result = await spawn_cli(["stores"], { CORPUS_D1_DATABASE_ID: "22222222-2222-4222-8222-222222222222" });
+			const result = await run_in_process(["stores"], {
+				CORPUS_D1_DATABASE_ID: "22222222-2222-4222-8222-222222222222",
+			});
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("404");
@@ -180,7 +225,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 
 		it("a bad token fails `clone` instead of reporting an empty successful copy", async () => {
 			const dest = join(work_dir, "clone-bad-token");
-			const result = await spawn_cli(["clone", "fake", dest], { CLOUDFLARE_API_TOKEN: "wrong-token" });
+			const result = await run_in_process(["clone", "fake", dest], { CLOUDFLARE_API_TOKEN: "wrong-token" });
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("error:");
@@ -189,7 +234,9 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 
 		it("a bad token fails `clone --dry-run` too", async () => {
 			const dest = join(work_dir, "clone-bad-token-dry");
-			const result = await spawn_cli(["clone", "fake", dest, "--dry-run"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
+			const result = await run_in_process(["clone", "fake", dest, "--dry-run"], {
+				CLOUDFLARE_API_TOKEN: "wrong-token",
+			});
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("error:");
@@ -197,7 +244,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 
 		it("--json errors are one { error: { kind, message } } document on stdout with exit 1", async () => {
-			const result = await spawn_cli(["stores", "--json"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
+			const result = await run_in_process(["stores", "--json"], { CLOUDFLARE_API_TOKEN: "wrong-token" });
 			expect(result.code).toBe(1);
 			const doc = z
 				.object({ error: z.object({ kind: z.string(), message: z.string() }) })
@@ -213,14 +260,14 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 
 		it("CORPUS_D1_DATABASE_ID beats the placeholder and lists stores", async () => {
-			const result = await spawn_cli(["stores", "--json"]);
+			const result = await run_in_process(["stores", "--json"]);
 			expect(result.stderr).toBe("");
 			expect(result.code).toBe(0);
 			expect(result.stdout).toContain("items");
 		});
 
 		it("without the env var, the placeholder is an error naming the fix", async () => {
-			const result = await spawn_cli(["stores"], { CORPUS_D1_DATABASE_ID: undefined });
+			const result = await run_in_process(["stores"], { CORPUS_D1_DATABASE_ID: undefined });
 			expect(result.code).toBe(1);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("placeholder-will-be-set-by-sst");
@@ -253,7 +300,7 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 				await Bun.sleep(5);
 			}
 
-			const result = await spawn_cli(["versions", "tagged", "--tag", "chamber:house", "--limit", "2", "--json"]);
+			const result = await run_in_process(["versions", "tagged", "--tag", "chamber:house", "--limit", "2", "--json"]);
 			expect(result.stderr).toBe("");
 			expect(result.code).toBe(0);
 			const doc = z.object({ versions: z.array(z.object({ version: z.string() })) }).parse(JSON.parse(result.stdout));
@@ -263,19 +310,19 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 
 	describe("missing stores", () => {
 		it("`versions no-such-store` fails with a store-level message", async () => {
-			const result = await spawn_cli(["versions", "no-such-store"]);
+			const result = await run_in_process(["versions", "no-such-store"]);
 			expect(result.code).toBe(1);
 			expect(result.stderr).toContain('error: store "no-such-store" not found (no versions)');
 		});
 
 		it("`show no-such-store latest` fails the same way", async () => {
-			const result = await spawn_cli(["show", "no-such-store", "latest"]);
+			const result = await run_in_process(["show", "no-such-store", "latest"]);
 			expect(result.code).toBe(1);
 			expect(result.stderr).toContain('store "no-such-store" not found');
 		});
 
 		it("`show items latest` resolves via get_latest", async () => {
-			const result = await spawn_cli(["show", "items", "latest", "--json"]);
+			const result = await run_in_process(["show", "items", "latest", "--json"]);
 			expect(result.code).toBe(0);
 			expect(result.stdout).toContain(version);
 		});

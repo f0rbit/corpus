@@ -11,7 +11,10 @@ function config_export_of(imported: unknown): unknown {
 	return mod.default ?? mod.config ?? imported;
 }
 
-export async function load_cli_config(explicit_path?: string): Promise<Result<CorpusCliConfig | null, CorpusError>> {
+export async function load_cli_config(
+	explicit_path?: string,
+	cwd: string = process.cwd(),
+): Promise<Result<CorpusCliConfig | null, CorpusError>> {
 	let config_path: string | null;
 
 	if (explicit_path) {
@@ -21,8 +24,7 @@ export async function load_cli_config(explicit_path?: string): Promise<Result<Co
 		}
 		config_path = explicit_path;
 	} else {
-		config_path =
-			(await find_upward(process.cwd(), "corpus.config.ts")) || (await find_upward(process.cwd(), "corpus.config.js"));
+		config_path = (await find_upward(cwd, "corpus.config.ts")) || (await find_upward(cwd, "corpus.config.js"));
 	}
 
 	if (!config_path) {
