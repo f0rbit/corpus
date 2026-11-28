@@ -23,6 +23,15 @@ const chain_text = (error: Error): string => {
 
 const d1_cases: ReadonlyArray<readonly [string, () => Response, string]> = [
 	["non-2xx", () => new Response("boom", { status: 500 }), "D1 HTTP error 500"],
+	[
+		"non-2xx with a D1 envelope",
+		() =>
+			Response.json(
+				{ success: false, errors: [{ code: 7500, message: "near x: syntax error" }], result: [] },
+				{ status: 400 },
+			),
+		"D1 HTTP error 400: near x: syntax error",
+	],
 	["non-JSON 200", () => new Response("not json", { status: 200 }), "Failed to parse D1 HTTP response"],
 	["wrong shape", () => Response.json({ hello: 1 }), "Invalid D1 HTTP response structure"],
 	[

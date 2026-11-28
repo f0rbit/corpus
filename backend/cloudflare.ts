@@ -16,6 +16,7 @@ import {
 	meta_insert_stmt,
 	obs_delete_stmt,
 	obs_insert_stmt,
+	schema_drift_error,
 } from "./drizzle-storage.js";
 import { storage_error, to_error } from "./errors.js";
 
@@ -141,7 +142,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 		},
 	};
 
-	const storage = create_drizzle_observations_storage(db);
+	const storage = create_drizzle_observations_storage(db, emit);
 	const observations = create_observations_client(storage, metadata, emit);
 
 	/**
@@ -214,7 +215,11 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			async () => {
 				await db.batch([head, ...rest] as readonly [Stmt, ...Stmt[]]);
 			},
-			(cause): CorpusError => ({ kind: "transaction_aborted", reason: "apply_batch_failed", cause: to_error(cause) }),
+			(cause): CorpusError => ({
+				kind: "transaction_aborted",
+				reason: "apply_batch_failed",
+				cause: to_error(schema_drift_error(cause) ?? cause),
+			}),
 		);
 	}
 

@@ -108,8 +108,16 @@ wrangler deploy                    # only after the migration is applied
 ```
 
 <Aside type="caution" title="Migrate before you deploy">
-Corpus selects columns explicitly, so a Worker on 0.9.0 against an un-migrated D1 database fails every snapshot and observation query. The new columns are nullable, so a 0.8.x Worker keeps working against the migrated database during the rollout.
+Corpus refuses to read or write a table that is missing a schema column. Against an un-migrated D1 database every snapshot and observation operation fails with a `storage_error` whose cause names the table and column:
+
+```text
+corpus_snapshots is missing column "entity_key" — run your drizzle-kit migration for the installed @f0rbit/corpus schema before deploying (see the Cloudflare guide's upgrade section)
+```
+
+Listings (`list`, `list_stores`, `observations.query`) yield nothing and report the same error as an `error` event. The new columns are nullable, so a 0.8.x Worker keeps working against the migrated database during the rollout.
 </Aside>
+
+Releases up to and including 0.10.0 did not refuse: some reads against an un-migrated table returned the literal string `"entity_key"` as every row's `entity_key`, and a `copy()` / `corpus clone` from such a source wrote that value into the replica. If you ran one, check the destination for `entity_key = 'entity_key'`.
 
 File and memory backends need no migration — existing `_meta.json` files without `entity_key` read as unkeyed.
 

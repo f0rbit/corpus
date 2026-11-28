@@ -66,6 +66,21 @@ export const d1_http_response_schema = z.object({
 
 export type D1HttpResponse = z.infer<typeof d1_http_response_schema>;
 
+// Non-2xx bodies only need their error list; `result` may be missing or null there.
+const d1_http_error_envelope_schema = z.object({ errors: z.array(d1_http_error_schema) });
+
+// The error text of a non-2xx D1 response, or undefined when the body isn't a D1 envelope.
+// Only Cloudflare's own error messages are echoed — never request config.
+async function non_2xx_detail(response: Response): Promise<string | undefined> {
+	try {
+		const parsed = d1_http_error_envelope_schema.safeParse(await response.json());
+		if (!parsed.success || parsed.data.errors.length === 0) return undefined;
+		return parsed.data.errors.map((e) => e.message).join("; ");
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Compute the D1 HTTP endpoint URL for a given config.
  * Exported for testability (so tests can override base_url).
@@ -134,9 +149,11 @@ export function create_d1_http_db(config: D1HttpConfig): DrizzleDb {
 			throw new Error(`D1 HTTP request failed: ${error.message}`, { cause: e });
 		}
 
-		// Handle non-2xx status codes
+		// Handle non-2xx status codes. D1 answers some SQL errors (e.g. "no such column") with a 400 plus the
+		// usual envelope, so keep its error text — schema_drift_error's cause walk needs it.
 		if (!response.ok) {
-			throw new Error(`D1 HTTP error ${String(response.status)}: ${response.statusText}`);
+			const detail = await non_2xx_detail(response);
+			throw new Error(`D1 HTTP error ${String(response.status)}: ${detail ?? response.statusText}`);
 		}
 
 		let parsed_response: unknown;
