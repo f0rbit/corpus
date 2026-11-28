@@ -183,10 +183,11 @@ for await (const obs of corpus.observations.query({
   type: 'sentiment',
   after: new Date('2024-07-08'),
 })) {
-  if (obs.content.score > 0.5) {
-    console.log(`Positive sentiment about ${obs.content.subject}`)
-    console.log(`  Score: ${obs.content.score}`)
-    console.log(`  Keywords: ${obs.content.keywords.join(', ')}`)
+  const content = obs.content as { score: number; subject: string; keywords: string[] }
+  if (content.score > 0.5) {
+    console.log(`Positive sentiment about ${content.subject}`)
+    console.log(`  Score: ${content.score}`)
+    console.log(`  Keywords: ${content.keywords.join(', ')}`)
     console.log(`  Source: ${obs.source.store_id}:${obs.source.version}`)
   }
 }
@@ -464,6 +465,7 @@ const entities = await corpus.observations.put(EntityExtractionObservation, {
   source: { store_id: 'documents', version: docVersion },
   content: { entities: ['Apple', 'Microsoft'] },
 })
+if (!entities.ok) throw entities.error
 
 // Stage 2: Disambiguate entities (linking back to stage 1)
 const disambiguation = await corpus.observations.put(DisambiguationObservation, {
@@ -473,6 +475,7 @@ const disambiguation = await corpus.observations.put(DisambiguationObservation, 
   ] },
   derived_from: [entities.value.source]  // Link to stage 1
 })
+if (!disambiguation.ok) throw disambiguation.error
 
 // Stage 3: Final annotation (linking back to stage 2)
 const final = await corpus.observations.put(FinalAnnotationObservation, {
@@ -535,6 +538,7 @@ await corpus.observations.delete_by_source({
 
 // Store updated document
 const result = await corpus.stores.articles.put(updated_data)
+if (!result.ok) throw result.error
 const new_version = result.value.version
 
 // Create new observations
@@ -550,6 +554,7 @@ for (const fact of extract_facts(updated_data)) {
 ```typescript
 // Just store updated document and create new observations
 const result = await corpus.stores.articles.put(updated_data)
+if (!result.ok) throw result.error
 const new_version = result.value.version
 
 for (const fact of extract_facts(updated_data)) {
@@ -618,36 +623,40 @@ import { describe, it, expect, beforeEach } from 'bun:test'
 import { create_memory_backend } from '@f0rbit/corpus'
 
 describe('sentiment analysis', () => {
-  let corpus: ReturnType<typeof createCorpus>
+  let corpus: ReturnType<typeof createTestCorpus>
 
-  beforeEach(() => {
-    // Fresh backend for each test
-    corpus = create_corpus()
+  function createTestCorpus() {
+    return create_corpus()
       .with_backend(create_memory_backend())
       .with_store(define_store('articles', json_codec(ArticleSchema)))
       .with_observations([SentimentObservation])
       .build()
+  }
+
+  beforeEach(() => {
+    // Fresh backend for each test
+    corpus = createTestCorpus()
   })
 
   it('extracts sentiment from articles', async () => {
     // Store article
     const result = await corpus.stores.articles.put(testArticle)
-    expect(result.ok).toBe(true)
+    if (!result.ok) throw result.error
 
     // Create observation
-    const obsResult = await corpus.observations.put(SentimentObservation, {
+    const obsResult = await corpus.observations!.put(SentimentObservation, {
       source: { store_id: 'articles', version: result.value.version },
       content: { subject: 'test', score: 0.8, keywords: ['good'] },
     })
-    expect(obsResult.ok).toBe(true)
+    if (!obsResult.ok) throw obsResult.error
 
     // Query observations
     const observations = []
-    for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
+    for await (const obs of corpus.observations!.query({ type: 'sentiment' })) {
       observations.push(obs)
     }
     expect(observations).toHaveLength(1)
-    expect(observations[0].content.score).toBe(0.8)
+    expect((observations[0].content as { score: number }).score).toBe(0.8)
   })
 })
 ```

@@ -52,6 +52,13 @@ export default define_lint_config({
 			rules: { "functional/no-throw-statements": "off" },
 		},
 		{
+			// the docs-snippet harness's only try/finally: guarantees the generated temp workspace
+			// under os.tmpdir() is removed even when a subprocess (tsc) or file write fails mid-run;
+			// no Result-bearing control flow exists across the finally boundary
+			files: ["scripts/check-docs-snippets.ts"],
+			rules: { "functional/no-try-statements": "off" },
+		},
+		{
 			// unwrap()/or_throw()/null_on()/fallback_on() throw by contract — including
 			// non-Error error values (E is unconstrained); try_catch/try_catch_async ARE
 			// the sanctioned try/catch → Result boundary

@@ -131,10 +131,9 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
               console.log('Backend failed:', snapshot.error.operation)
               break
           }
-          return
+        } else {
+          console.log('Post title:', snapshot.value.data.title)
         }
-
-        console.log('Post title:', snapshot.value.data.title)
         ```
       </div>
     </div>
@@ -180,7 +179,7 @@ TypeScript type definitions with no runtime code. Use for type annotations in sh
 ### Drizzle Schemas
 
 ```typescript
-import { snapshots, observations, lineage } from '@f0rbit/corpus/schema'
+import { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 ```
 
 Drizzle ORM table definitions for the Corpus data model. Use when you need to query Corpus tables directly or integrate with existing Drizzle schemas.

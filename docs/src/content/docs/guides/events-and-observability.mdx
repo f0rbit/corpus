@@ -35,8 +35,11 @@ type EventHandler = (event: CorpusEvent) => void
 Pass it during backend creation:
 
 ```typescript
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
+
+const ArticleSchema = z.object({ title: z.string(), body: z.string() })
 
 const corpus = create_corpus()
   .with_backend(create_file_backend({
@@ -104,6 +107,9 @@ The `error` field is a full `CorpusError` object (discriminated union on `kind`)
 Debug what operations are happening:
 
 ```typescript
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const corpus = create_corpus()
   .with_backend(create_file_backend({
     base_path: './data',
@@ -126,6 +132,9 @@ const corpus = create_corpus()
 Collect metrics on storage operations:
 
 ```typescript
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+
 type Metrics = {
   reads: number
   writes: number
@@ -171,13 +180,13 @@ setInterval(() => {
   console.log('Corpus metrics:', metrics)
 }, 60000)
 ```
-
 ### Example 3: Routing Errors to a Logger
 
 Send all errors to your logging service:
 
 ```typescript
-import { create_corpus, create_file_backend } from '@f0rbit/corpus'
+import { create_corpus } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 async function log_error_to_service(error: CorpusError) {
   await fetch('https://logs.example.com/api/errors', {
@@ -215,7 +224,7 @@ const corpus = create_corpus()
 
 Event handlers receive fully-formed `CorpusError` objects. Switch on `error.kind` for type-safe handling:
 
-```typescript
+```typescript nocheck
 on_event: (event) => {
   if (event.type === 'error') {
     const error = event.error

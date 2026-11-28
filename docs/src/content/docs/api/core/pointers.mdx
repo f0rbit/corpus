@@ -15,7 +15,7 @@ Pointer utilities help you work with `SnapshotPointer` types - the universal add
 
 ## create_pointer
 
-```ts
+```ts nocheck
 function create_pointer(
   store_id: string, version: string, path?: string, span?: { start: number; end: number }
 ): SnapshotPointer
@@ -33,7 +33,7 @@ const excerpt = create_pointer('hansard', 'AZJx4vM', '$.speeches[0].text', { sta
 
 ## pointer_to_key
 
-```ts
+```ts nocheck
 function pointer_to_key(pointer: SnapshotPointer): string
 ```
 
@@ -48,7 +48,7 @@ pointer_to_key({ store_id: 'hansard', version: 'abc', path: '$.foo' }) // => 'ha
 
 ## key_to_pointer
 
-```ts
+```ts nocheck
 function key_to_pointer(key: string): SnapshotPointer | null
 ```
 
@@ -68,7 +68,7 @@ key_to_pointer('invalid') // => null
 
 ## resolve_path
 
-```ts
+```ts nocheck
 function resolve_path<T = unknown>(value: unknown, path: string): Result<T, CorpusError>
 ```
 
@@ -88,7 +88,7 @@ resolve_path(data, '$')                   // => ok({ speeches: [...] })
 
 ## apply_span
 
-```ts
+```ts nocheck
 function apply_span(value: string, span: { start: number; end: number }): Result<string, CorpusError>
 ```
 
@@ -103,7 +103,7 @@ apply_span('Hi', { start: 0, end: 10 })          // => err({ kind: 'validation_e
 
 ## pointers_equal
 
-```ts
+```ts nocheck
 function pointers_equal(a: SnapshotPointer, b: SnapshotPointer): boolean
 ```
 
@@ -119,7 +119,7 @@ pointers_equal(p1, create_pointer('hansard', 'xyz', '$.foo')) // false
 
 ## pointer_to_snapshot
 
-```ts
+```ts nocheck
 function pointer_to_snapshot(pointer: SnapshotPointer): SnapshotPointer
 ```
 
@@ -134,7 +134,7 @@ pointer_to_snapshot(detailed) // => { store_id: 'hansard', version: 'abc' }
 
 ## generate_observation_id
 
-```ts
+```ts nocheck
 function generate_observation_id(): string
 ```
 

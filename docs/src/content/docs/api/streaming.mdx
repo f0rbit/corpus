@@ -114,7 +114,13 @@ const meta = await corpus.stores.uploads.put_stream(response.body)
 `SnapshotHandle.stream` and `Store.put_stream` are conditional types. When `T` is not `string | Uint8Array`, both fields resolve to `never` and calling them is a type error. No runtime branch needed — the checker rejects misuse.
 
 ```ts
-const users = define_store('users', json_codec(UserSchema))
+import { z } from 'zod'
+
+const UserSchema = z.object({ id: z.string() })
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('users', json_codec(UserSchema)))
+  .build()
 
 // @ts-expect-error — put_stream is `never` for json-backed stores.
 await corpus.stores.users.put_stream(some_stream)

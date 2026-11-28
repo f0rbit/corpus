@@ -3,7 +3,7 @@ title: Cloudflare
 description: Cloudflare Workers storage backend using D1 and R2
 ---
 
-```ts
+```ts nocheck
 function create_cloudflare_backend(config: CloudflareBackendConfig): Backend
 ```
 
@@ -101,7 +101,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Create `drizzle.config.ts`:
 
-```ts
+```ts nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
@@ -229,7 +229,7 @@ export default {
 :::caution[Use the Cloudflare Import]
 Always import from `@f0rbit/corpus/cloudflare` when deploying to Workers:
 
-```ts
+```ts nocheck
 // ✅ Correct - Cloudflare-compatible, excludes Node.js code
 import { ... } from '@f0rbit/corpus/cloudflare'
 
@@ -244,7 +244,7 @@ The `/cloudflare` entry point excludes the file backend, which uses Node.js-spec
 
 Handle Cloudflare-specific errors gracefully:
 
-```ts
+```ts nocheck
 const result = await corpus.stores.data.put(item)
 
 if (!result.ok) {

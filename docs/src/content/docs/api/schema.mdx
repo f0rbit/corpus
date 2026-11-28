@@ -136,7 +136,7 @@ const existing = await db
 
 Link observations to your domain tables:
 
-```ts
+```ts nocheck
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import { corpus_observations } from '@f0rbit/corpus'
@@ -203,7 +203,7 @@ Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from sch
 export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 ```
 
-```ts
+```ts nocheck
 // drizzle.config.ts
 import { defineConfig } from 'drizzle-kit'
 

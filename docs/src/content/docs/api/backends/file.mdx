@@ -3,7 +3,7 @@ title: File System
 description: File-system storage backend for local persistence
 ---
 
-```ts
+```ts nocheck
 function create_file_backend(config: FileBackendConfig): Backend
 ```
 
@@ -19,7 +19,8 @@ The file backend provides durable local storage using the file system. Metadata 
 ## Basic Usage
 
 ```ts
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
 
 const DocumentSchema = z.object({
@@ -99,7 +100,8 @@ Perfect for local CLI tools that need persistent configuration or data:
 ```ts
 #!/usr/bin/env bun
 
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
 
 const ConfigSchema = z.object({
@@ -143,7 +145,12 @@ console.log(`Theme: ${config.theme}`)
 Use file backend during development for data that persists across restarts:
 
 ```ts
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { z } from 'zod'
+
+const SessionSchema = z.object({ userId: z.string(), startedAt: z.string() })
+const CacheSchema = z.object({ payload: z.unknown() })
 
 const corpus = create_corpus()
   .with_backend(create_file_backend({ 

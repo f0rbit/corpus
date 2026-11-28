@@ -21,29 +21,32 @@ If the second write fails after the first commits, downstream readers see incons
 ## API
 
 ```typescript
-const result = await corpus.transaction(async (tx) => {
-  const event = await tx.put(corpus.stores.timeline, payload, { tags: ['evt'] })
-  if (!event.ok) return event
+async function run_together() {
+  const result = await corpus.transaction(async (tx) => {
+    const event = await tx.put(corpus.stores.timeline, payload, { tags: ['evt'] })
+    if (!event.ok) return event
 
-  const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
-    parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
+    const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
+      parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
+    })
+    if (!idx.ok) return idx
+
+    return ok({ event_version: event.value.version })
   })
-  if (!idx.ok) return idx
 
-  return ok({ event_version: event.value.version })
-})
+  if (!result.ok) {
+    // result.error.kind: 'transaction_aborted' | 'partial_commit' | 'invalid_config' | ...
+    return result
+  }
 
-if (!result.ok) {
-  // result.error.kind: 'transaction_aborted' | 'partial_commit' | 'invalid_config' | ...
-  return result
+  // result.value: { value: { event_version: string }, commits: SnapshotMeta[], observations: Observation[] }
+  return result.value
 }
-
-// result.value: { value: { event_version: string }, commits: SnapshotMeta[], observations: Observation[] }
 ```
 
 The handle exposes:
 
-```typescript
+```typescript nocheck
 type TransactionHandle = {
   put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
@@ -57,7 +60,7 @@ The body must return a `Result`. Returning `err()` aborts the transaction with `
 
 The transaction result wraps the body's return value alongside an ordered log of writes:
 
-```typescript
+```typescript nocheck
 type TransactionResult<R> = {
   value: R                     // whatever the body returned via ok(...)
   commits: SnapshotMeta[]      // every tx.put, in put-order
@@ -91,7 +94,8 @@ Switch on `reason` to react to the abort cause:
 
 ```typescript
 const result = await corpus.transaction(async (tx) => {
-  // ...
+  // ... puts/gets against tx, ending in a Result ...
+  return ok(undefined)
 })
 
 if (!result.ok) {

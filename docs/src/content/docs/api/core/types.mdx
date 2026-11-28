@@ -106,7 +106,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one remaining throw is a guard for untyped callers: `build()` throws if no backend was configured, but typed code can't reach it because `build` only exists after `with_backend()`.
 
-```ts
+```ts nocheck
 type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }

@@ -12,7 +12,7 @@ The corpus library provides extended utilities for working with `Result<T, E>` t
 
 All operations return a `Result<T, E>` type rather than throwing exceptions:
 
-```typescript
+```typescript nocheck
 type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }
@@ -41,7 +41,7 @@ const message = match(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function match<T, E, R>(
   result: Result<T, E>,
   on_ok: (value: T) => R,
@@ -63,7 +63,7 @@ const count = unwrap_or(await getCount(), 0)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function unwrap_or<T, E>(result: Result<T, E>, default_value: T): T
 ```
 
@@ -90,7 +90,7 @@ These functions throw if the Result is in the unexpected state. Prefer `match`, 
 </Aside>
 
 **Signatures:**
-```typescript
+```typescript nocheck
 function unwrap<T, E>(result: Result<T, E>): T      // throws if error
 function unwrap_err<T, E>(result: Result<T, E>): E  // throws if ok
 ```
@@ -117,7 +117,7 @@ if (result.ok) {
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function try_catch<T, E>(
   fn: () => T,
   on_error: (e: unknown) => E
@@ -140,7 +140,7 @@ const result = await try_catch_async(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function try_catch_async<T, E>(
   fn: () => Promise<T>,
   on_error: (e: unknown) => E
@@ -198,7 +198,7 @@ const validatedResult = await fetch_result(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function fetch_result<T, E>(
   input: string | URL | Request,
   init: RequestInit | undefined,
@@ -310,7 +310,7 @@ pipe.fetch(url, init, on_error)    // Pipe<T, E>
 const result = await pipe(getConfig())
   .map(config => config.apiUrl)
   .flat_map(url => fetch_result(url, undefined, formatError))
-  .map(data => data.items)
+  .map(data => (data as { items: unknown[] }).items)
   .tap(items => console.log(`Fetched ${items.length} items`))
   .tap_err(err => metrics.increment('api_error'))
   .map_err(e => ({ kind: 'api_error', cause: e }))
@@ -330,9 +330,10 @@ import { to_nullable } from '@f0rbit/corpus'
 
 const user = to_nullable(await store.get(userId))
 if (!user) {
-  return <NotFound />
+  respond.notFound()
+} else {
+  respond.profile(user)
 }
-return <Profile user={user} />
 ```
 
 ---
@@ -344,7 +345,7 @@ Convert a Result to its value or a fallback. Useful for list endpoints where emp
 ```typescript
 import { to_fallback } from '@f0rbit/corpus'
 
-const items = to_fallback(await store.list(), [])
+const items = to_fallback(await fetch_page(), [])
 ```
 
 ---
@@ -364,7 +365,7 @@ const user = null_on(
 
 // Returns 0 for not_found, throws for storage_error
 const count = fallback_on(
-  await store.count(),
+  await count_items(),
   e => e.kind === 'not_found',
   0
 )
@@ -427,7 +428,7 @@ const config = merge_deep(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function merge_deep<T extends Record<string, unknown>>(
   base: T,
   overrides: DeepPartial<T>
@@ -455,7 +456,7 @@ const tenth = at(items, 10)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function at<T>(
   array: readonly T[],
   index: number
@@ -479,7 +480,7 @@ const empty = first([])
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function first<T>(
   array: readonly T[]
 ): Result<T, { kind: 'empty_array' }>
@@ -502,19 +503,16 @@ const empty = last([])
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function last<T>(
   array: readonly T[]
 ): Result<T, { kind: 'empty_array' }>
 ```
 
 <Aside type="tip">
-Use `first` and `last` with `pipe` for safe array operations:
+Use `first` and `last` with the converters (`to_nullable` / `to_fallback`) for safe array operations:
 ```typescript
-const name = await pipe(ok(users))
-  .flat_map(first)
-  .map(user => user.name)
-  .unwrap_or('No users')
+const name = to_fallback(first(users), 'No users')
 ```
 </Aside>
 
@@ -616,20 +614,14 @@ const selected = to_fallback(at(options, selectedIndex), options[0])
 For more complex transformations, combine with `pipe`:
 
 ```typescript
-import { pipe, first, ok } from '@f0rbit/corpus'
+import { first, to_fallback, to_nullable } from '@f0rbit/corpus'
 
-// Transform the first element, or use a default
-const firstName = await pipe(ok(users))
-  .flat_map(first)
-  .map(user => user.name.toUpperCase())
-  .unwrap_or('ANONYMOUS')
+// First element or a default
+const firstName = to_fallback(first(users), 'ANONYMOUS')
 
-// Chain multiple operations
-const primaryEmail = await pipe(ok(contacts))
-  .flat_map(first)
-  .map(contact => contact.emails)
-  .flat_map(first)
-  .unwrap_or('no-email@example.com')
+// Compose through converters
+const contact = to_nullable(first(contacts)) as { emails: string[] } | null
+const primaryEmail = contact?.emails[0] ?? 'no-email@example.com'
 ```
 
 ### Why This Matters
@@ -699,7 +691,7 @@ const results = await parallel_map(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function parallel_map<T, R>(
   items: T[],
   mapper: (item: T, index: number) => Promise<R>,
@@ -716,7 +708,7 @@ function parallel_map<T, R>(
 
 ## Hashing & Versioning
 
-These two helpers underpin Corpus's content-addressable storage and lexicographic version ordering. Both are exposed for callers that want to pre-compute hashes (e.g. to short-circuit a `put`) or generate compatible version strings outside of a `put` call.
+These two helpers underpin Corpus's content-addressable storage and version generation. Both are exposed for callers that want to pre-compute hashes (e.g. to short-circuit a `put`) or generate compatible version strings outside of a `put` call.
 
 ### `compute_hash(data)`
 
@@ -731,7 +723,7 @@ const hash = await compute_hash(bytes)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function compute_hash(data: Uint8Array): Promise<string>
 ```
 
@@ -741,7 +733,7 @@ Use case: pre-compute the hash of a payload and check the store for an existing 
 
 ### `generate_version()`
 
-Returns a unique, lexicographically sortable version string. Format is a base64url-encoded big-endian timestamp, with an optional `.N` suffix when multiple versions are generated inside the same millisecond.
+Returns a unique version string. Format is a base64url-encoded big-endian timestamp, with an optional `.N` suffix when multiple versions are generated inside the same millisecond.
 
 ```typescript
 import { generate_version } from '@f0rbit/corpus'
@@ -750,12 +742,13 @@ const v1 = generate_version() // => 'AZJx4vM'
 const v2 = generate_version() // => 'AZJx4vM.1' (same ms)
 const v3 = generate_version() // => 'AZJx4vN' (next ms)
 
-// Lexicographic sort matches chronological order
-[v3, v1, v2].sort() // => [v1, v2, v3]
+// Versions are NOT safely string-comparable: the `.N` suffix breaks
+// lexicographic order (`.10` sorts before `.2`). Order versions via
+// list()/get_latest() or `created_at`, never by comparing strings.
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function generate_version(): string
 ```
 
@@ -856,7 +849,7 @@ async function summarizeBatch(documents: string[]): Promise<string[]> {
 
 Use `null_on` and `to_fallback` for graceful degradation:
 
-```typescript
+```typescript nocheck
 import { null_on, to_fallback, pipe } from '@f0rbit/corpus'
 
 async function renderDashboard(userId: string) {
@@ -878,13 +871,6 @@ async function renderDashboard(userId: string) {
       .unwrap_or({ theme: 'light', notifications: true })
   ])
   
-  return (
-    <Dashboard 
-      user={user}
-      posts={posts}
-      notifications={notifications}
-      preferences={preferences}
-    />
-  )
+  return { user, posts, notifications, preferences }
 }
 ```

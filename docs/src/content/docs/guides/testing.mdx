@@ -162,7 +162,7 @@ test('returns not_found for missing version', async () => {
   expect(result.ok).toBe(false)
   if (result.ok) return
 
-  expect(result.error.kind).toBe('not_found')
+  if (result.error.kind !== 'not_found') throw new Error(`expected not_found, got ${result.error.kind}`)
   expect(result.error.version).toBe('nonexistent')
 })
 

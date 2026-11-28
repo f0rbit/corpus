@@ -267,7 +267,7 @@ Namespace re-export: `law` (e.g. `import { law } from '@f0rbit/corpus'`)
 
 > Cloudflare Workers storage backend using D1 and R2
 
-```ts
+```ts nocheck
 function create_cloudflare_backend(config: CloudflareBackendConfig): Backend
 ```
 
@@ -365,7 +365,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Create `drizzle.config.ts`:
 
-```ts
+```ts nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
@@ -493,7 +493,7 @@ export default {
 :::caution[Use the Cloudflare Import]
 Always import from `@f0rbit/corpus/cloudflare` when deploying to Workers:
 
-```ts
+```ts nocheck
 // ✅ Correct - Cloudflare-compatible, excludes Node.js code
 import { ... } from '@f0rbit/corpus/cloudflare'
 
@@ -508,7 +508,7 @@ The `/cloudflare` entry point excludes the file backend, which uses Node.js-spec
 
 Handle Cloudflare-specific errors gracefully:
 
-```ts
+```ts nocheck
 const result = await corpus.stores.data.put(item)
 
 if (!result.ok) {
@@ -557,7 +557,7 @@ if (!result.ok) {
 
 > File-system storage backend for local persistence
 
-```ts
+```ts nocheck
 function create_file_backend(config: FileBackendConfig): Backend
 ```
 
@@ -573,7 +573,8 @@ The file backend provides durable local storage using the file system. Metadata 
 ## Basic Usage
 
 ```ts
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
 
 const DocumentSchema = z.object({
@@ -653,7 +654,8 @@ Perfect for local CLI tools that need persistent configuration or data:
 ```ts
 #!/usr/bin/env bun
 
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
 
 const ConfigSchema = z.object({
@@ -697,7 +699,12 @@ console.log(`Theme: ${config.theme}`)
 Use file backend during development for data that persists across restarts:
 
 ```ts
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { z } from 'zod'
+
+const SessionSchema = z.object({ userId: z.string(), startedAt: z.string() })
+const CacheSchema = z.object({ payload: z.unknown() })
 
 const corpus = create_corpus()
   .with_backend(create_file_backend({ 
@@ -807,7 +814,7 @@ For high-throughput scenarios, consider the [Layered](/corpus/api/backends/layer
 
 > Combine multiple backends for caching, replication, and migration
 
-```ts
+```ts nocheck
 function create_layered_backend(options: LayeredBackendOptions): Backend
 ```
 
@@ -837,8 +844,13 @@ The layered backend is a meta-backend that combines multiple backends with confi
 import { 
   create_layered_backend, 
   create_memory_backend, 
-  create_file_backend 
+  define_store, 
+  json_codec 
 } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { z } from 'zod'
+
+const ItemSchema = z.object({ name: z.string(), qty: z.number() })
 
 const cache = create_memory_backend()
 const storage = create_file_backend({ base_path: './data' })
@@ -891,6 +903,9 @@ const backend = create_layered_backend({
 The most common pattern: memory cache with persistent storage. All data is written to both, reads hit the cache first.
 
 ```ts
+import { create_memory_backend } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const cache = create_memory_backend()
 const disk = create_file_backend({ base_path: './data' })
 
@@ -910,6 +925,9 @@ const backend = create_layered_backend({
 Cache is populated on read, but writes only go to primary storage. Useful when you want the cache to naturally fill based on access patterns.
 
 ```ts
+import { create_memory_backend, type Store } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const cache = create_memory_backend()
 const primary = create_file_backend({ base_path: './data' })
 
@@ -919,12 +937,11 @@ const backend = create_layered_backend({
 })
 
 // To populate cache on read, wrap the backend:
-async function getWithCache(store, version) {
+async function getWithCache(store: Store<unknown>, version: string) {
   const result = await store.get(version)
   if (result.ok) {
-    // Manually write to cache for next time
+    // Manually populate the cache layer for next time
     await cache.metadata.put(result.value.meta)
-    await cache.data.put(result.value.meta.data_key, /* ... */)
   }
   return result
 }
@@ -935,6 +952,8 @@ async function getWithCache(store, version) {
 Gradually migrate from old storage to new storage without downtime:
 
 ```ts
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const oldStorage = create_file_backend({ base_path: './old-data' })
 const newStorage = create_file_backend({ base_path: './new-data' })
 
@@ -975,6 +994,8 @@ For true multi-region replication, you'd typically use a database with built-in 
 Use different backends based on environment:
 
 ```ts
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 function createBackend() {
   if (process.env.NODE_ENV === 'production') {
     return create_cloudflare_backend({
@@ -1051,7 +1072,7 @@ For high-throughput scenarios:
 
 import { Aside } from '@astrojs/starlight/components';
 
-```ts
+```ts nocheck
 function create_memory_backend(options?: MemoryBackendOptions): Backend
 ```
 
@@ -1186,7 +1207,9 @@ describe('shopping cart', () => {
     // This test has a fresh backend - no data from previous test
     const result = await corpus.stores.carts.get_latest()
     expect(result.ok).toBe(false)
-    expect(result.error.kind).toBe('not_found')
+    if (!result.ok) {
+      expect(result.error.kind).toBe('not_found')
+    }
   })
 })
 ```
@@ -1232,6 +1255,7 @@ it('tracks lineage across stores', async () => {
     .build()
 
   const source = await corpus.stores.sources.put({ data: 'input' })
+  if (!source.ok) throw source.error
   
   await corpus.stores.derived.put(
     { result: 'output' },
@@ -1398,7 +1422,7 @@ Codecs define how data is serialized for storage and deserialized on retrieval. 
 
   **Migration:** wrap the body of an existing sync codec in `async` (one-line change). Built-in codecs were updated in 0.4.0 — consumers using only `store.put` / `store.get` see no break. Consumers calling `codec.encode` / `codec.decode` directly need `await`.
 
-  ```ts
+  ```ts nocheck
   // before
   encode: (value) => new TextEncoder().encode(value)
   // after
@@ -1408,8 +1432,8 @@ Codecs define how data is serialized for storage and deserialized on retrieval. 
 
 ## json_codec
 
-```ts
-function json_codec<T>(schema: ZodLike<T>): Codec<T>
+```ts nocheck
+function json_codec<T>(schema: Parser<T>): Codec<T>
 ```
 
 Creates a JSON codec with Zod schema validation. Data is validated on decode (read), ensuring type safety when retrieving stored data.
@@ -1435,7 +1459,7 @@ Works with both Zod 3.x and 4.x through structural typing:
 
 ```ts
 // Any object with a parse method works
-type ZodLike<T> = { parse: (data: unknown) => T }
+type Parser<T> = { parse: (data: unknown) => T }
 ```
 
 ### Validation Example
@@ -1460,7 +1484,7 @@ if (!result.ok && result.error.kind === 'decode_error') {
 
 ## text_codec
 
-```ts
+```ts nocheck
 function text_codec(): Codec<string>
 ```
 
@@ -1500,7 +1524,7 @@ if (latest.ok) {
 
 ## binary_codec
 
-```ts
+```ts nocheck
 function binary_codec(): Codec<Uint8Array>
 ```
 
@@ -1518,6 +1542,9 @@ const documents = define_store('documents', binary_codec())
 ### Example
 
 ```ts
+import { create_corpus, define_store, binary_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const corpus = create_corpus()
   .with_backend(create_file_backend({ base_path: './data' }))
   .with_store(define_store('images', binary_codec()))
@@ -1549,7 +1576,7 @@ if (result.ok) {
 
 ## compose
 
-```ts
+```ts nocheck
 function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T>
 ```
 
@@ -1591,7 +1618,7 @@ This propagates to the [`Store<T>` type](/corpus/api/streaming#compile-time-guar
 
 ## gzip_codec
 
-```ts
+```ts nocheck
 function gzip_codec(): BytesCodec
 ```
 
@@ -1618,7 +1645,7 @@ Both `encode_stream` and `decode_stream` are present, so a `compose(text_codec()
 
 ## encrypt_codec
 
-```ts
+```ts nocheck
 function encrypt_codec(key: CryptoKey): BytesCodec
 ```
 
@@ -1688,7 +1715,7 @@ type Codec<T> = {
 
 ### MessagePack Example
 
-```ts
+```ts nocheck
 import { encode, decode } from '@msgpack/msgpack'
 
 function msgpack_codec<T>(schema: Parser<T>): Codec<T> {
@@ -1777,7 +1804,7 @@ type ContentType =
 
 import { Aside } from '@astrojs/starlight/components';
 
-```ts
+```ts nocheck
 function create_corpus(): CorpusBuilder<{}>
 ```
 
@@ -1886,7 +1913,7 @@ Untyped (plain JS) callers who invoke `build()` without a backend still get a ru
 
 import { Aside } from '@astrojs/starlight/components';
 
-```ts
+```ts nocheck
 function create_store<T>(
   backend: Backend, 
   definition: StoreDefinition<string, T>
@@ -1940,12 +1967,14 @@ Stores automatically deduplicate content. If you store the same data twice, it c
 const v1 = await store.put({ name: 'Same' })
 const v2 = await store.put({ name: 'Same' })
 
-// Same content hash, same data_key
-v1.value.content_hash === v2.value.content_hash // true
-v1.value.data_key === v2.value.data_key // true
+if (v1.ok && v2.ok) {
+  // Same content hash, same data_key
+  v1.value.content_hash === v2.value.content_hash // true
+  v1.value.data_key === v2.value.data_key // true
 
-// But different versions
-v1.value.version !== v2.value.version // true
+  // But different versions
+  v1.value.version !== v2.value.version // true
+}
 ```
 
 ## See Also
@@ -1960,7 +1989,7 @@ v1.value.version !== v2.value.version // true
 
 > Create a type-safe store definition
 
-```ts
+```ts nocheck
 function define_store<Id extends string, T>(
   id: Id,
   codec: Codec<T>,
@@ -2035,12 +2064,11 @@ const hansard = define_store('hansard', text_codec(), {
   }
 })
 
-// Usage
+// Usage — corpus generates the version; data_key_fn builds the path from it
 await corpus.stores.hansard.put(transcript, {
-  version: 'v1',
   tags: ['date:2024-03-15', 'chamber:house']
 })
-// Stored at: australia-house/raw/2024-03-15/v1
+// Stored at: australia-house/raw/2024-03-15/<generated version>
 ```
 
 ### Example: Custom Namespace Prefixes
@@ -2098,7 +2126,7 @@ Observations let you extract structured facts from versioned documents with auto
 
 ## define_observation_type
 
-```ts
+```ts nocheck
 function define_observation_type<T>(
   name: string,
   schema: SchemaLike<T>
@@ -2462,7 +2490,7 @@ Pointer utilities help you work with `SnapshotPointer` types - the universal add
 
 ## create_pointer
 
-```ts
+```ts nocheck
 function create_pointer(
   store_id: string, version: string, path?: string, span?: { start: number; end: number }
 ): SnapshotPointer
@@ -2480,7 +2508,7 @@ const excerpt = create_pointer('hansard', 'AZJx4vM', '$.speeches[0].text', { sta
 
 ## pointer_to_key
 
-```ts
+```ts nocheck
 function pointer_to_key(pointer: SnapshotPointer): string
 ```
 
@@ -2495,7 +2523,7 @@ pointer_to_key({ store_id: 'hansard', version: 'abc', path: '$.foo' }) // => 'ha
 
 ## key_to_pointer
 
-```ts
+```ts nocheck
 function key_to_pointer(key: string): SnapshotPointer | null
 ```
 
@@ -2515,7 +2543,7 @@ key_to_pointer('invalid') // => null
 
 ## resolve_path
 
-```ts
+```ts nocheck
 function resolve_path<T = unknown>(value: unknown, path: string): Result<T, CorpusError>
 ```
 
@@ -2535,7 +2563,7 @@ resolve_path(data, '$')                   // => ok({ speeches: [...] })
 
 ## apply_span
 
-```ts
+```ts nocheck
 function apply_span(value: string, span: { start: number; end: number }): Result<string, CorpusError>
 ```
 
@@ -2550,7 +2578,7 @@ apply_span('Hi', { start: 0, end: 10 })          // => err({ kind: 'validation_e
 
 ## pointers_equal
 
-```ts
+```ts nocheck
 function pointers_equal(a: SnapshotPointer, b: SnapshotPointer): boolean
 ```
 
@@ -2566,7 +2594,7 @@ pointers_equal(p1, create_pointer('hansard', 'xyz', '$.foo')) // false
 
 ## pointer_to_snapshot
 
-```ts
+```ts nocheck
 function pointer_to_snapshot(pointer: SnapshotPointer): SnapshotPointer
 ```
 
@@ -2581,7 +2609,7 @@ pointer_to_snapshot(detailed) // => { store_id: 'hansard', version: 'abc' }
 
 ## generate_observation_id
 
-```ts
+```ts nocheck
 function generate_observation_id(): string
 ```
 
@@ -2707,7 +2735,7 @@ Value types that can be chunked across a `ReadableStream`. Streaming reads/write
 
 All corpus operations return a `Result` type for explicit error handling — no thrown exceptions. The one remaining throw is a guard for untyped callers: `build()` throws if no backend was configured, but typed code can't reach it because `build` only exists after `with_backend()`.
 
-```ts
+```ts nocheck
 type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }
@@ -2895,7 +2923,7 @@ type MetadataStorage = {
 ### Example: Postgres Metadata Adapter
 
 ```typescript
-import { SnapshotMeta } from '@f0rbit/corpus'
+import type { SnapshotMeta } from '@f0rbit/corpus'
 
 type MetadataStorage = {
   get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
@@ -2969,7 +2997,6 @@ type DataStorage = {
 type DataStorageHandle = {
   bytes: () => Promise<Uint8Array>
   stream?: () => ReadableStream<Uint8Array>
-  size?: number
 }
 ```
 
@@ -2984,7 +3011,7 @@ The handle's `bytes()` is mandatory; `stream()` is optional. If you don't provid
 
 ### Example Sketch: R2-Compatible Storage
 
-```typescript
+```typescript nocheck
 export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStorage> {
   return {
     async get(data_key) {
@@ -2993,7 +3020,6 @@ export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStor
       return {
         bytes: async () => new Uint8Array(await obj.arrayBuffer()),
         stream: () => obj.body as ReadableStream<Uint8Array>,
-        size: obj.size,
       }
     },
 
@@ -3019,7 +3045,7 @@ Before 0.4.0, `DataStorage.get` returned `Promise<Uint8Array | null>`. From 0.4.
 
 For backends that genuinely only have a bytes-getter, use the `wrap_bytes_storage` helper to keep the migration to a single line:
 
-```typescript
+```typescript nocheck
 import { create_data_client, wrap_bytes_storage } from '@f0rbit/corpus/backend/base'
 
 // before — pre-0.4.0
@@ -3037,7 +3063,7 @@ The consumer-facing `DataHandle` (the shape returned by `DataClient.get`) is unc
 
 Use the factory functions from `backend/base.ts` to wrap adapters and get error handling + event emission for free:
 
-```typescript
+```typescript nocheck
 import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
 import type { Backend, EventHandler } from '@f0rbit/corpus'
 
@@ -3095,7 +3121,7 @@ Ops arrive in the order the body emitted them. The implementation is free to reo
 - On success, return `ok(undefined)`. Every op in the batch is visible to subsequent reads.
 - On failure, return `err({ kind: 'transaction_aborted', reason: 'apply_batch_failed', cause })`. **No op** in the batch should be visible to subsequent reads. If your storage cannot guarantee this (e.g. the operation is not natively transactional and you've already written some ops), surface `partial_commit` honestly with `ops_completed` / `ops_failed` counts:
 
-```typescript
+```typescript nocheck
 return err({
   kind: 'partial_commit',
   ops_completed: 3,
@@ -3123,7 +3149,7 @@ This is intentionally best-effort. **Backends with non-trivial atomicity needs �
 
 A Postgres-backed backend wrapping `pg`'s transaction helper:
 
-```typescript
+```typescript nocheck
 import type { BatchOp, Backend, CorpusError, Result } from '@f0rbit/corpus'
 import { ok, err } from '@f0rbit/corpus'
 
@@ -3230,7 +3256,7 @@ const client = create_observations_client(storage, metadata_client)
 
 Here's a skeleton for a custom backend combining all pieces:
 
-```typescript
+```typescript nocheck
 import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
 import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
 import type { Backend, MetadataStorage, DataStorage, EventHandler } from '@f0rbit/corpus'
@@ -3274,7 +3300,7 @@ The wrapper automatically logs errors via the `on_event` handler if provided.
 
 Use the integration test suite to validate your backend:
 
-```typescript
+```typescript nocheck
 import { runBackendContractTests } from '@f0rbit/corpus'
 
 describe('custom backend', () => {
@@ -3434,7 +3460,7 @@ const existing = await db
 
 Link observations to your domain tables:
 
-```ts
+```ts nocheck
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import { corpus_observations } from '@f0rbit/corpus'
@@ -3501,7 +3527,7 @@ Never hand-write SQL migrations. Use Drizzle Kit to generate migrations from sch
 export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 ```
 
-```ts
+```ts nocheck
 // drizzle.config.ts
 import { defineConfig } from 'drizzle-kit'
 
@@ -3657,7 +3683,13 @@ const meta = await corpus.stores.uploads.put_stream(response.body)
 `SnapshotHandle.stream` and `Store.put_stream` are conditional types. When `T` is not `string | Uint8Array`, both fields resolve to `never` and calling them is a type error. No runtime branch needed — the checker rejects misuse.
 
 ```ts
-const users = define_store('users', json_codec(UserSchema))
+import { z } from 'zod'
+
+const UserSchema = z.object({ id: z.string() })
+const corpus = create_corpus()
+  .with_backend(create_memory_backend())
+  .with_store(define_store('users', json_codec(UserSchema)))
+  .build()
 
 // @ts-expect-error — put_stream is `never` for json-backed stores.
 await corpus.stores.users.put_stream(some_stream)
@@ -3702,7 +3734,7 @@ The corpus library provides extended utilities for working with `Result<T, E>` t
 
 All operations return a `Result<T, E>` type rather than throwing exceptions:
 
-```typescript
+```typescript nocheck
 type Result<T, E = CorpusError> =
   | { ok: true; value: T }
   | { ok: false; error: E }
@@ -3731,7 +3763,7 @@ const message = match(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function match<T, E, R>(
   result: Result<T, E>,
   on_ok: (value: T) => R,
@@ -3753,7 +3785,7 @@ const count = unwrap_or(await getCount(), 0)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function unwrap_or<T, E>(result: Result<T, E>, default_value: T): T
 ```
 
@@ -3780,7 +3812,7 @@ These functions throw if the Result is in the unexpected state. Prefer `match`, 
 </Aside>
 
 **Signatures:**
-```typescript
+```typescript nocheck
 function unwrap<T, E>(result: Result<T, E>): T      // throws if error
 function unwrap_err<T, E>(result: Result<T, E>): E  // throws if ok
 ```
@@ -3807,7 +3839,7 @@ if (result.ok) {
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function try_catch<T, E>(
   fn: () => T,
   on_error: (e: unknown) => E
@@ -3830,7 +3862,7 @@ const result = await try_catch_async(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function try_catch_async<T, E>(
   fn: () => Promise<T>,
   on_error: (e: unknown) => E
@@ -3888,7 +3920,7 @@ const validatedResult = await fetch_result(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function fetch_result<T, E>(
   input: string | URL | Request,
   init: RequestInit | undefined,
@@ -4000,7 +4032,7 @@ pipe.fetch(url, init, on_error)    // Pipe<T, E>
 const result = await pipe(getConfig())
   .map(config => config.apiUrl)
   .flat_map(url => fetch_result(url, undefined, formatError))
-  .map(data => data.items)
+  .map(data => (data as { items: unknown[] }).items)
   .tap(items => console.log(`Fetched ${items.length} items`))
   .tap_err(err => metrics.increment('api_error'))
   .map_err(e => ({ kind: 'api_error', cause: e }))
@@ -4020,9 +4052,10 @@ import { to_nullable } from '@f0rbit/corpus'
 
 const user = to_nullable(await store.get(userId))
 if (!user) {
-  return <NotFound />
+  respond.notFound()
+} else {
+  respond.profile(user)
 }
-return <Profile user={user} />
 ```
 
 ---
@@ -4034,7 +4067,7 @@ Convert a Result to its value or a fallback. Useful for list endpoints where emp
 ```typescript
 import { to_fallback } from '@f0rbit/corpus'
 
-const items = to_fallback(await store.list(), [])
+const items = to_fallback(await fetch_page(), [])
 ```
 
 ---
@@ -4054,7 +4087,7 @@ const user = null_on(
 
 // Returns 0 for not_found, throws for storage_error
 const count = fallback_on(
-  await store.count(),
+  await count_items(),
   e => e.kind === 'not_found',
   0
 )
@@ -4117,7 +4150,7 @@ const config = merge_deep(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function merge_deep<T extends Record<string, unknown>>(
   base: T,
   overrides: DeepPartial<T>
@@ -4145,7 +4178,7 @@ const tenth = at(items, 10)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function at<T>(
   array: readonly T[],
   index: number
@@ -4169,7 +4202,7 @@ const empty = first([])
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function first<T>(
   array: readonly T[]
 ): Result<T, { kind: 'empty_array' }>
@@ -4192,19 +4225,16 @@ const empty = last([])
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function last<T>(
   array: readonly T[]
 ): Result<T, { kind: 'empty_array' }>
 ```
 
 <Aside type="tip">
-Use `first` and `last` with `pipe` for safe array operations:
+Use `first` and `last` with the converters (`to_nullable` / `to_fallback`) for safe array operations:
 ```typescript
-const name = await pipe(ok(users))
-  .flat_map(first)
-  .map(user => user.name)
-  .unwrap_or('No users')
+const name = to_fallback(first(users), 'No users')
 ```
 </Aside>
 
@@ -4306,20 +4336,14 @@ const selected = to_fallback(at(options, selectedIndex), options[0])
 For more complex transformations, combine with `pipe`:
 
 ```typescript
-import { pipe, first, ok } from '@f0rbit/corpus'
+import { first, to_fallback, to_nullable } from '@f0rbit/corpus'
 
-// Transform the first element, or use a default
-const firstName = await pipe(ok(users))
-  .flat_map(first)
-  .map(user => user.name.toUpperCase())
-  .unwrap_or('ANONYMOUS')
+// First element or a default
+const firstName = to_fallback(first(users), 'ANONYMOUS')
 
-// Chain multiple operations
-const primaryEmail = await pipe(ok(contacts))
-  .flat_map(first)
-  .map(contact => contact.emails)
-  .flat_map(first)
-  .unwrap_or('no-email@example.com')
+// Compose through converters
+const contact = to_nullable(first(contacts)) as { emails: string[] } | null
+const primaryEmail = contact?.emails[0] ?? 'no-email@example.com'
 ```
 
 ### Why This Matters
@@ -4389,7 +4413,7 @@ const results = await parallel_map(
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function parallel_map<T, R>(
   items: T[],
   mapper: (item: T, index: number) => Promise<R>,
@@ -4406,7 +4430,7 @@ function parallel_map<T, R>(
 
 ## Hashing & Versioning
 
-These two helpers underpin Corpus's content-addressable storage and lexicographic version ordering. Both are exposed for callers that want to pre-compute hashes (e.g. to short-circuit a `put`) or generate compatible version strings outside of a `put` call.
+These two helpers underpin Corpus's content-addressable storage and version generation. Both are exposed for callers that want to pre-compute hashes (e.g. to short-circuit a `put`) or generate compatible version strings outside of a `put` call.
 
 ### `compute_hash(data)`
 
@@ -4421,7 +4445,7 @@ const hash = await compute_hash(bytes)
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function compute_hash(data: Uint8Array): Promise<string>
 ```
 
@@ -4431,7 +4455,7 @@ Use case: pre-compute the hash of a payload and check the store for an existing 
 
 ### `generate_version()`
 
-Returns a unique, lexicographically sortable version string. Format is a base64url-encoded big-endian timestamp, with an optional `.N` suffix when multiple versions are generated inside the same millisecond.
+Returns a unique version string. Format is a base64url-encoded big-endian timestamp, with an optional `.N` suffix when multiple versions are generated inside the same millisecond.
 
 ```typescript
 import { generate_version } from '@f0rbit/corpus'
@@ -4440,12 +4464,13 @@ const v1 = generate_version() // => 'AZJx4vM'
 const v2 = generate_version() // => 'AZJx4vM.1' (same ms)
 const v3 = generate_version() // => 'AZJx4vN' (next ms)
 
-// Lexicographic sort matches chronological order
-[v3, v1, v2].sort() // => [v1, v2, v3]
+// Versions are NOT safely string-comparable: the `.N` suffix breaks
+// lexicographic order (`.10` sorts before `.2`). Order versions via
+// list()/get_latest() or `created_at`, never by comparing strings.
 ```
 
 **Signature:**
-```typescript
+```typescript nocheck
 function generate_version(): string
 ```
 
@@ -4546,7 +4571,7 @@ async function summarizeBatch(documents: string[]): Promise<string[]> {
 
 Use `null_on` and `to_fallback` for graceful degradation:
 
-```typescript
+```typescript nocheck
 import { null_on, to_fallback, pipe } from '@f0rbit/corpus'
 
 async function renderDashboard(userId: string) {
@@ -4568,14 +4593,7 @@ async function renderDashboard(userId: string) {
       .unwrap_or({ theme: 'light', notifications: true })
   ])
   
-  return (
-    <Dashboard 
-      user={user}
-      posts={posts}
-      notifications={notifications}
-      preferences={preferences}
-    />
-  )
+  return { user, posts, notifications, preferences }
 }
 ```
 
@@ -4812,12 +4830,12 @@ A wrangler `database_id` that isn't a UUID (e.g. an SST/IaC placeholder like `pl
 Create a `corpus.config.ts` file in your workspace root (or pass `--config <path>` to override). Use `define_config` to get type checking:
 
 ```typescript
-import { define_config } from '@f0rbit/corpus/cli'
+import { define_config } from '@f0rbit/corpus'
 
 export default define_config({
   stores: [
-    { id: 'users', codec: /* optional */ },
-    { id: 'posts', codec: /* optional */ },
+    { id: 'users' },   // codec optional — used by `corpus cat` to decode snapshot data
+    { id: 'posts' },
   ],
   environments: {
     remote: {
@@ -4844,8 +4862,8 @@ The `stores` array lists store definitions. If present, only these stores are co
 <Aside type="tip">
 For true single-source-of-truth, import your store definitions from your application instead of duplicating them:
 
-```typescript
-import { define_config } from '@f0rbit/corpus/cli'
+```typescript nocheck
+import { define_config } from '@f0rbit/corpus'
 import { my_stores } from '@myapp/schema'  // Import your real store defs
 
 export default define_config({
@@ -4860,7 +4878,7 @@ export default define_config({
 Name your environments and define connection parameters:
 
 **Remote (Cloudflare D1 + R2):**
-```typescript
+```typescript nocheck
 remote: {
   account_id: 'your-cf-account-id',        // Falls back to CLOUDFLARE_ACCOUNT_ID / wrangler sniff if omitted
   database_id: 'your-d1-database-id',      // Falls back to wrangler sniff / CORPUS_D1_DATABASE_ID if omitted
@@ -4873,7 +4891,7 @@ remote: {
 All fields here are individually optional in the schema — resolution falls through to wrangler sniffing and then environment variables per the precedence table above. A run only fails if `account_id`, `database_id`, `bucket`, or the `CLOUDFLARE_API_TOKEN` env var can't be resolved from *any* source.
 
 **File (local file system):**
-```typescript
+```typescript nocheck
 local: {
   file: './corpus-data',  // Path to corpus data directory
 }
@@ -5478,10 +5496,9 @@ Get up and running with Corpus in minutes. You'll define a schema, create a corp
               console.log('Backend failed:', snapshot.error.operation)
               break
           }
-          return
+        } else {
+          console.log('Post title:', snapshot.value.data.title)
         }
-
-        console.log('Post title:', snapshot.value.data.title)
         ```
       </div>
     </div>
@@ -5527,7 +5544,7 @@ TypeScript type definitions with no runtime code. Use for type annotations in sh
 ### Drizzle Schemas
 
 ```typescript
-import { snapshots, observations, lineage } from '@f0rbit/corpus/schema'
+import { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 ```
 
 Drizzle ORM table definitions for the Corpus data model. Use when you need to query Corpus tables directly or integrate with existing Drizzle schemas.
@@ -5621,7 +5638,7 @@ create_memory_backend({
 Local filesystem storage using Bun's file APIs.
 
 ```typescript
-import { create_file_backend } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 const backend = create_file_backend({
   base_path: './data/corpus'
@@ -5677,9 +5694,9 @@ Combines multiple backends with read/write separation for caching and replicatio
 ```typescript
 import { 
   create_layered_backend, 
-  create_memory_backend, 
-  create_file_backend 
+  create_memory_backend
 } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 const cache = create_memory_backend()
 const storage = create_file_backend({ base_path: './data' })
@@ -5745,23 +5762,24 @@ const backend = create_layered_backend({
 You can create custom backends by implementing the `Backend` interface:
 
 ```typescript
-import type { Backend, MetadataClient, DataClient } from '@f0rbit/corpus'
+import { ok } from '@f0rbit/corpus'
+import type { Backend, SnapshotMeta, DataHandle } from '@f0rbit/corpus'
 
 const customBackend: Backend = {
   metadata: {
-    get: async (store_id, version) => { /* ... */ },
-    put: async (meta) => { /* ... */ },
-    delete: async (store_id, version) => { /* ... */ },
-    list: async function* (store_id, opts) { /* ... */ },
-    get_latest: async (store_id) => { /* ... */ },
-    get_children: async function* (parent_store_id, parent_version) { /* ... */ },
-    find_by_hash: async (store_id, content_hash) => { /* ... */ },
+    get: async (store_id, version) => ok({} as SnapshotMeta),        // Result<SnapshotMeta, CorpusError>
+    put: async (meta) => ok(undefined),                              // Result<void, CorpusError>
+    delete: async (store_id, version) => ok(undefined),
+    list: async function* (store_id, opts) { /* yield SnapshotMeta values */ },
+    get_latest: async (store_id, opts) => ok({} as SnapshotMeta),
+    get_children: async function* (parent_store_id, parent_version) { /* yield SnapshotMeta values */ },
+    find_by_hash: async (store_id, content_hash) => null,          // SnapshotMeta | null
   },
   data: {
-    get: async (data_key) => { /* ... */ },
-    put: async (data_key, data) => { /* ... */ },
-    delete: async (data_key) => { /* ... */ },
-    exists: async (data_key) => { /* ... */ },
+    get: async (data_key) => ok({} as DataHandle),                   // Result<DataHandle, CorpusError>
+    put: async (data_key, data) => ok(undefined),
+    delete: async (data_key) => ok(undefined),
+    exists: async (data_key) => true,                                // boolean
   },
   on_event: (event) => { /* optional event handler */ },
 }
@@ -5850,7 +5868,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Create `drizzle.config.ts` in your project root and point it at that file:
 
-```typescript
+```typescript nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
@@ -6105,7 +6123,7 @@ function getCorpus(env: Env) {
 
 Always check the `Result` type from operations:
 
-```typescript
+```typescript nocheck
 const result = await corpus.stores.cache.get(version)
 
 if (!result.ok) {
@@ -6291,8 +6309,11 @@ type EventHandler = (event: CorpusEvent) => void
 Pass it during backend creation:
 
 ```typescript
-import { create_corpus, create_file_backend, define_store, json_codec } from '@f0rbit/corpus'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 import { z } from 'zod'
+
+const ArticleSchema = z.object({ title: z.string(), body: z.string() })
 
 const corpus = create_corpus()
   .with_backend(create_file_backend({
@@ -6360,6 +6381,9 @@ The `error` field is a full `CorpusError` object (discriminated union on `kind`)
 Debug what operations are happening:
 
 ```typescript
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const corpus = create_corpus()
   .with_backend(create_file_backend({
     base_path: './data',
@@ -6382,6 +6406,9 @@ const corpus = create_corpus()
 Collect metrics on storage operations:
 
 ```typescript
+import { create_file_backend } from '@f0rbit/corpus/file'
+import { create_corpus, define_store, json_codec } from '@f0rbit/corpus'
+
 type Metrics = {
   reads: number
   writes: number
@@ -6427,13 +6454,13 @@ setInterval(() => {
   console.log('Corpus metrics:', metrics)
 }, 60000)
 ```
-
 ### Example 3: Routing Errors to a Logger
 
 Send all errors to your logging service:
 
 ```typescript
-import { create_corpus, create_file_backend } from '@f0rbit/corpus'
+import { create_corpus } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 async function log_error_to_service(error: CorpusError) {
   await fetch('https://logs.example.com/api/errors', {
@@ -6471,7 +6498,7 @@ const corpus = create_corpus()
 
 Event handlers receive fully-formed `CorpusError` objects. Switch on `error.kind` for type-safe handling:
 
-```typescript
+```typescript nocheck
 on_event: (event) => {
   if (event.type === 'error') {
     const error = event.error
@@ -6701,10 +6728,11 @@ for await (const obs of corpus.observations.query({
   type: 'sentiment',
   after: new Date('2024-07-08'),
 })) {
-  if (obs.content.score > 0.5) {
-    console.log(`Positive sentiment about ${obs.content.subject}`)
-    console.log(`  Score: ${obs.content.score}`)
-    console.log(`  Keywords: ${obs.content.keywords.join(', ')}`)
+  const content = obs.content as { score: number; subject: string; keywords: string[] }
+  if (content.score > 0.5) {
+    console.log(`Positive sentiment about ${content.subject}`)
+    console.log(`  Score: ${content.score}`)
+    console.log(`  Keywords: ${content.keywords.join(', ')}`)
     console.log(`  Source: ${obs.source.store_id}:${obs.source.version}`)
   }
 }
@@ -6982,6 +7010,7 @@ const entities = await corpus.observations.put(EntityExtractionObservation, {
   source: { store_id: 'documents', version: docVersion },
   content: { entities: ['Apple', 'Microsoft'] },
 })
+if (!entities.ok) throw entities.error
 
 // Stage 2: Disambiguate entities (linking back to stage 1)
 const disambiguation = await corpus.observations.put(DisambiguationObservation, {
@@ -6991,6 +7020,7 @@ const disambiguation = await corpus.observations.put(DisambiguationObservation, 
   ] },
   derived_from: [entities.value.source]  // Link to stage 1
 })
+if (!disambiguation.ok) throw disambiguation.error
 
 // Stage 3: Final annotation (linking back to stage 2)
 const final = await corpus.observations.put(FinalAnnotationObservation, {
@@ -7053,6 +7083,7 @@ await corpus.observations.delete_by_source({
 
 // Store updated document
 const result = await corpus.stores.articles.put(updated_data)
+if (!result.ok) throw result.error
 const new_version = result.value.version
 
 // Create new observations
@@ -7068,6 +7099,7 @@ for (const fact of extract_facts(updated_data)) {
 ```typescript
 // Just store updated document and create new observations
 const result = await corpus.stores.articles.put(updated_data)
+if (!result.ok) throw result.error
 const new_version = result.value.version
 
 for (const fact of extract_facts(updated_data)) {
@@ -7136,36 +7168,40 @@ import { describe, it, expect, beforeEach } from 'bun:test'
 import { create_memory_backend } from '@f0rbit/corpus'
 
 describe('sentiment analysis', () => {
-  let corpus: ReturnType<typeof createCorpus>
+  let corpus: ReturnType<typeof createTestCorpus>
 
-  beforeEach(() => {
-    // Fresh backend for each test
-    corpus = create_corpus()
+  function createTestCorpus() {
+    return create_corpus()
       .with_backend(create_memory_backend())
       .with_store(define_store('articles', json_codec(ArticleSchema)))
       .with_observations([SentimentObservation])
       .build()
+  }
+
+  beforeEach(() => {
+    // Fresh backend for each test
+    corpus = createTestCorpus()
   })
 
   it('extracts sentiment from articles', async () => {
     // Store article
     const result = await corpus.stores.articles.put(testArticle)
-    expect(result.ok).toBe(true)
+    if (!result.ok) throw result.error
 
     // Create observation
-    const obsResult = await corpus.observations.put(SentimentObservation, {
+    const obsResult = await corpus.observations!.put(SentimentObservation, {
       source: { store_id: 'articles', version: result.value.version },
       content: { subject: 'test', score: 0.8, keywords: ['good'] },
     })
-    expect(obsResult.ok).toBe(true)
+    if (!obsResult.ok) throw obsResult.error
 
     // Query observations
     const observations = []
-    for await (const obs of corpus.observations.query({ type: 'sentiment' })) {
+    for await (const obs of corpus.observations!.query({ type: 'sentiment' })) {
       observations.push(obs)
     }
     expect(observations).toHaveLength(1)
-    expect(observations[0].content.score).toBe(0.8)
+    expect((observations[0].content as { score: number }).score).toBe(0.8)
   })
 })
 ```
@@ -7339,7 +7375,7 @@ type CorpusInfra = {
 
 ### SST Config
 
-```typescript
+```typescript nocheck
 // sst.config.ts
 import { createCorpusInfra } from '@f0rbit/corpus'
 
@@ -7374,7 +7410,7 @@ export default $config({
 
 ### Worker Code
 
-```typescript
+```typescript nocheck
 // src/index.ts
 import { Resource } from 'sst'
 import { 
@@ -7428,7 +7464,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Then configure `drizzle.config.ts`:
 
-```typescript
+```typescript nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
@@ -7644,7 +7680,7 @@ test('returns not_found for missing version', async () => {
   expect(result.ok).toBe(false)
   if (result.ok) return
 
-  expect(result.error.kind).toBe('not_found')
+  if (result.error.kind !== 'not_found') throw new Error(`expected not_found, got ${result.error.kind}`)
   expect(result.error.version).toBe('nonexistent')
 })
 
@@ -7795,29 +7831,32 @@ If the second write fails after the first commits, downstream readers see incons
 ## API
 
 ```typescript
-const result = await corpus.transaction(async (tx) => {
-  const event = await tx.put(corpus.stores.timeline, payload, { tags: ['evt'] })
-  if (!event.ok) return event
+async function run_together() {
+  const result = await corpus.transaction(async (tx) => {
+    const event = await tx.put(corpus.stores.timeline, payload, { tags: ['evt'] })
+    if (!event.ok) return event
 
-  const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
-    parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
+    const idx = await tx.put(corpus.stores.timeline_index, build_index(payload), {
+      parents: [{ store_id: 'timeline', version: event.value.version, role: 'source' }],
+    })
+    if (!idx.ok) return idx
+
+    return ok({ event_version: event.value.version })
   })
-  if (!idx.ok) return idx
 
-  return ok({ event_version: event.value.version })
-})
+  if (!result.ok) {
+    // result.error.kind: 'transaction_aborted' | 'partial_commit' | 'invalid_config' | ...
+    return result
+  }
 
-if (!result.ok) {
-  // result.error.kind: 'transaction_aborted' | 'partial_commit' | 'invalid_config' | ...
-  return result
+  // result.value: { value: { event_version: string }, commits: SnapshotMeta[], observations: Observation[] }
+  return result.value
 }
-
-// result.value: { value: { event_version: string }, commits: SnapshotMeta[], observations: Observation[] }
 ```
 
 The handle exposes:
 
-```typescript
+```typescript nocheck
 type TransactionHandle = {
   put: <T>(store: Store<T>, data: T, opts?: PutOpts) => Promise<Result<PutResult, CorpusError>>
   get: <T>(store: Store<T>, version: string) => Promise<Result<Snapshot<T>, CorpusError>>
@@ -7831,7 +7870,7 @@ The body must return a `Result`. Returning `err()` aborts the transaction with `
 
 The transaction result wraps the body's return value alongside an ordered log of writes:
 
-```typescript
+```typescript nocheck
 type TransactionResult<R> = {
   value: R                     // whatever the body returned via ok(...)
   commits: SnapshotMeta[]      // every tx.put, in put-order
@@ -7865,7 +7904,8 @@ Switch on `reason` to react to the abort cause:
 
 ```typescript
 const result = await corpus.transaction(async (tx) => {
-  // ...
+  // ... puts/gets against tx, ending in a Result ...
+  return ok(undefined)
 })
 
 if (!result.ok) {
@@ -8423,17 +8463,17 @@ Laws are pre-built property checkers that verify your code respects a contract. 
 Use this for any codec, serializer, or bidirectional transformation.
 
 ```typescript
-import { testing, text_codec } from "@f0rbit/corpus";
+import { testing } from "@f0rbit/corpus";
 
-const text_codec = {
+const my_codec = {
   encode: (x: string) => new TextEncoder().encode(x),
   decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
 };
 
 await testing.law.round_trip(
   testing.fc.string(),
-  text_codec.encode,
-  text_codec.decode
+  my_codec.encode,
+  my_codec.decode
 );
 ```
 
@@ -8444,12 +8484,14 @@ The law generates 100 random strings by default, encodes each, decodes it, and a
 - `equals` — custom equality check; defaults to `Bun.deepEquals` under Bun (required on Node)
 
 ```typescript
+import { testing } from "@f0rbit/corpus";
+
 await testing.law.round_trip(
   testing.arb(UserSchema),
   user => JSON.stringify(user),
   json => JSON.parse(json),
   {
-    equals: (a, b) => a.id === b.id && a.name === b.name,
+    equals: (a, b) => (a as User).id === (b as User).id && (a as User).name === (b as User).name,
     numRuns: 200,
   }
 );
@@ -8488,13 +8530,12 @@ Use this for types that implement the functor laws (arrays, optionals, Results, 
 import { testing } from "@f0rbit/corpus";
 
 const arr = [1, 2, 3];
-const f = (x: number) => x * 2;
-const g = (x: number) => x + 1;
 
 await testing.law.functor({
   arb: testing.arb(ArraySchema),
-  map: (arr, fn) => arr.map(fn),
+  map: (arr, fn) => (arr as unknown[]).map(fn),
   equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  fn_arb: testing.fc.constant((x: unknown) => x),
 });
 ```
 
@@ -8518,24 +8559,30 @@ The headline law: compile-time exhaustiveness (TypeScript enforces you handle ev
 
 ```typescript
 import { testing } from "@f0rbit/corpus";
-import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing";
 import type { Result } from "@f0rbit/corpus";
+
+// A custom tagged error union (any `{ kind: string }` union works)
+type GetUserError =
+  | { kind: "not_found"; user_id: string }
+  | { kind: "decode_error"; cause: Error }
+  | { kind: "timeout"; duration: number };
+
+const GET_USER_BRAND = Symbol("GetUserError");
 
 // Example: a function that returns multiple error kinds
 async function get_user(
   id: string,
   opts?: { timeout?: number }
-): Promise<Result<User, CorpusError>> {
-  // Can return: not_found, decode_error, timeout, or ok
+): Promise<Result<User, GetUserError>> {
+  return err({ kind: "not_found", user_id: id });
 }
 
 await testing.law.error_path_exhaustive(get_user, {
-  error_brand: CORPUS_ERROR_BRAND,
+  error_brand: GET_USER_BRAND,
   provoke: {
     not_found: (f) => [f.user_id],
     decode_error: (f) => [corrupt_bytes(f)],
-    timeout: (f) => [undefined, { timeout: f.duration }],
-    // TypeScript enforces every variant is listed here
+    timeout: (f) => ['user-id', { timeout: f.duration }],
   },
   only: ["not_found", "decode_error"], // optional: test only a subset
   numRuns: 200,
@@ -8594,20 +8641,21 @@ const increment_cmd = testing.law.equivalence_command<CounterModel, Counter, Res
   on_sut: (c) => c.increment(),
 });
 
-const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, void>({
+const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, Result<void, CounterError>>({
   label: "reset()",
   on_model: (m) => {
     m.count = 0;
+    return ok(undefined);
   },
   on_sut: (c) => c.reset(),
 });
 
 await testing.law.provider_equivalence({
   model: () => ({ count: 0 }),
-  providers: {
-    memory: () => new MemoryCounter(),
-    persistent: () => new FileBackedCounter(),
-  },
+  providers: [
+    { label: "memory", build: () => new MemoryCounter() },
+    { label: "persistent", build: () => new FileBackedCounter() },
+  ],
   commands: [increment_cmd, reset_cmd],
   equivalence: {
     results_agree: (a, b) => a === b,
@@ -8646,7 +8694,7 @@ The command carries both results and compares them automatically.
 
 **Options:**
 - `model()` — factory returning a fresh model instance per run (must return fresh, not reused)
-- `providers` — labelled object of provider factories (one per SUT)
+- `providers` — labelled provider factories, one per system-under-test (`{ label, build }` entries)
 - `commands` — pool of `equivalence_command` instances and/or arbitraries of commands
 - `equivalence.results_agree(model_r, sut_r)` — equality check for ok-values (or raw results when non-Result-shaped)
 - `numRuns` — property runs; default 100
@@ -8668,20 +8716,20 @@ The command carries both results and compares them automatically.
 Use `testing.cover()` (Hedgehog-style) to assert parts of your test space got exercised:
 
 ```typescript
-await testing.law.round_trip(
-  testing.compose((draw) => {
-    const x = draw(testing.fc.integer());
-    testing.cover(x > 0, "positive");
-    testing.cover(x < 0, "negative");
-    testing.cover(x === 0, "zero");
-    return x;
-  }),
-  encode,
-  decode,
-  { numRuns: 200 }
+await testing.cover(
+  testing.fc.integer(),
+  async () => true,
+  {
+    labels: [
+      { name: "negative", min_percent: 25, matches: (n) => n < 0 },
+      { name: "zero", min_percent: 1, matches: (n) => n === 0 },
+      { name: "positive", min_percent: 25, matches: (n) => n > 0 },
+    ],
+  }
 );
 
-// If the labels don't hit, the law throws with coverage stats
+// If the labels don't hit their minimum, the checker throws CoverageError
+// listing every label's observed vs. minimum percentage
 ```
 
 ### Opting Out of Shrinking
@@ -8702,8 +8750,8 @@ await testing.law.round_trip(
   {
     equals: (a, b) => {
       // Ignore the `_internal_cache` field
-      const { _internal_cache: _, ...a_clean } = a;
-      const { _internal_cache: __, ...b_clean } = b;
+      const { _internal_cache: _, ...a_clean } = a as Record<string, unknown>;
+      const { _internal_cache: __, ...b_clean } = b as Record<string, unknown>;
       return JSON.stringify(a_clean) === JSON.stringify(b_clean);
     },
   }
@@ -8728,10 +8776,10 @@ Traditional example-based tests check a few handpicked cases. Property tests gen
 
 ```typescript
 // Example-based: you pick specific cases
-test("round-trip encodes and decodes", () => {
+test("round-trip encodes and decodes", async () => {
   const text = "hello";
-  const encoded = text_codec.encode(text);
-  const decoded = text_codec.decode(encoded);
+  const encoded = await text_codec().encode(text);
+  const decoded = await text_codec().decode(encoded);
   expect(decoded).toBe(text);
 });
 
@@ -8741,8 +8789,8 @@ import { testing, text_codec } from "@f0rbit/corpus";
 test("round-trip works for all strings", async () => {
   await testing.law.round_trip(
     testing.fc.string(),
-    text_codec.encode,
-    text_codec.decode
+    text_codec().encode,
+    text_codec().decode
   );
 });
 ```
@@ -8784,8 +8832,8 @@ The testing substrate is exposed under two paths — pick whichever fits your us
 // Direct entry point (preferred in hot-path tests — skips main barrel)
 import * as testing from "@f0rbit/corpus/testing";
 
-// Or via the main barrel (only one import for everything)
-import { testing } from "@f0rbit/corpus";
+// Or via the main barrel (only one import for everything):
+// import { testing } from "@f0rbit/corpus";
 
 // Both resolve to the same API
 const arb = testing.arb(MySchema);
@@ -8845,7 +8893,7 @@ The `"corpus": { "testing": ... }` path points to a module — the **registrar**
 
 A registrar is **import-safe**: nothing registers at module load. All registration happens inside an exported `register()` function, so downstream code can import your brand symbols for identity without touching the registry.
 
-```typescript
+```typescript nocheck
 // src/testing/register.ts
 import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
 import type { ArbBrand } from "@f0rbit/corpus/testing";
@@ -8931,11 +8979,11 @@ import { testing } from "@f0rbit/corpus";
 // Load from a directory
 const result = await testing.load_from("./fixtures/my-package");
 if (!result.ok) {
-  console.error("Failed to load:", result.error.message);
+  console.error("Failed to load:", result.error);
 }
 
 // Or by npm package name (resolves via import.meta.resolve)
-const result = await testing.load_from("@my/auth");
+const result2 = await testing.load_from("@my/auth");
 ```
 
 Explicit loads are **additive** — they don't stop auto-discovery. A later `lookup()` will still walk the full dependency graph as usual.
@@ -8976,7 +9024,7 @@ beforeEach(async () => {
   // Load only the fixture registrar, not the full dependency graph
   const result = await testing.load_from("./fixtures/test-package");
   if (!result.ok) {
-    throw new Error(`Failed to load fixture: ${result.error.message}`);
+    throw new Error(`Failed to load fixture: ${result.error.kind}`);
   }
 });
 ```
@@ -9045,7 +9093,7 @@ The first `lookup()` call walks the dependency graph and imports each registrar.
 
 Here's a full example from a hypothetical `@my/auth` package:
 
-```typescript
+```typescript nocheck
 // src/testing/register.ts
 import { arbitrary, failure, compose, fc } from "@f0rbit/corpus/testing";
 import type { ArbBrand } from "@f0rbit/corpus/testing";
@@ -9148,7 +9196,6 @@ export type DataStorageHandle = {
 	bytes: () => Promise<Uint8Array>;
 	/** Optional native stream. If absent, `create_data_client` falls back to a one-chunk wrapper around `bytes()`. */
 	stream?: () => ReadableStream<Uint8Array>;
-	size?: number;
 };
 
 export type DataStorage = {
@@ -9184,7 +9231,6 @@ export function wrap_bytes_storage(storage: BytesStorage): DataStorage {
 			return {
 				bytes: async () => bytes,
 				stream: () => one_chunk_stream(bytes),
-				size: bytes.byteLength,
 			};
 		},
 		put: storage.put,
@@ -10033,6 +10079,7 @@ import { ok, err } from "../types.js";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
+import { storage_error } from "./errors.js";
 import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
 import { z } from "zod/v4";
@@ -10255,7 +10302,6 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			return {
 				bytes: async () => new Uint8Array(await file.arrayBuffer()),
 				stream: () => file.stream(),
-				size: file.size,
 			};
 		},
 
@@ -10538,8 +10584,12 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			return ok(undefined);
 		} catch (cause) {
 			// Staging-phase failure: nothing was visible to readers, so this
-			// is a clean abort. Nuke the staging dir.
-			await rm(tx_dir, { recursive: true, force: true }).catch(() => {});
+			// is a clean abort. Nuke the staging dir. If the cleanup itself
+			// fails, surface it as an error event but return the ORIGINAL
+			// transaction error — the cleanup failure must not mask it.
+			await rm(tx_dir, { recursive: true, force: true }).catch((cleanup_cause: unknown) => {
+				emit({ type: "error", error: storage_error("apply_batch.cleanup")(cleanup_cause) });
+			});
 			return err({
 				kind: "transaction_aborted",
 				reason: "apply_batch_failed",
@@ -11066,7 +11116,6 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 							controller.close();
 						},
 					}),
-				size: bytes.byteLength,
 			};
 		},
 
@@ -11458,7 +11507,6 @@ type S3FileLike = {
 	stream: () => ReadableStream<Uint8Array>;
 	write: (data: Uint8Array) => Promise<unknown>;
 	delete: () => Promise<void>;
-	size: number;
 };
 
 /**
@@ -11530,7 +11578,6 @@ export function create_r2_data_storage(config: R2S3Config): DataStorage {
 					return new Uint8Array(buffer);
 				},
 				stream: () => file.stream(),
-				size: file.size,
 			};
 
 			return handle;
