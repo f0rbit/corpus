@@ -176,7 +176,7 @@ corpus show <store> <version> --json       # Machine-readable format
 }
 ```
 
-Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are detected and marked `(cycle)` to prevent infinite output.
+`<version>` may be `latest` (resolved like `cat`). With `--observations`, `observations` is always present (an empty array when there are none); without it the key is omitted. A store with no versions at all fails with `error: store "<store>" not found (no versions)` and exit 1.
 
 ### cat
 

@@ -682,6 +682,51 @@ describe("lineage branches", () => {
 		});
 		expect(failure(r).kind).toBe("not_found");
 	});
+
+	it("`latest` resolves to the newest version and walks from it", async () => {
+		const backend = create_memory_backend();
+		await seed(backend, make_meta({ store_id: "s", version: "v1" }));
+		await seed(
+			backend,
+			make_meta({
+				store_id: "s",
+				version: "v2",
+				created_at: new Date("2024-07-01T00:00:00.000Z"),
+				parents: [{ store_id: "s", version: "v1" }],
+			}),
+		);
+
+		const plain = await run(lineage_command, {
+			cwd: import.meta.dir,
+			positionals: ["s", "latest"],
+			_test_backend: backend,
+		});
+		expect(plain.result.ok).toBe(true);
+		const out = lines(plain.output);
+		expect(out[0]).toBe("s/v2");
+		expect(out[1]).toContain("s/v1");
+		expect(out.join("\n")).not.toContain("(missing)");
+
+		const json = await run(lineage_command, {
+			cwd: import.meta.dir,
+			positionals: ["s", "latest"],
+			json: true,
+			_test_backend: backend,
+		});
+		const doc = jsons(json.output)[0] as { root: { store: string; version: string } };
+		expect(doc.root).toEqual({ store: "s", version: "v2" });
+	});
+
+	it("`latest` on an empty store is the store-level not_found", async () => {
+		const error = failure(
+			await run(lineage_command, {
+				cwd: import.meta.dir,
+				positionals: ["ghost", "latest"],
+				_test_backend: create_memory_backend(),
+			}),
+		);
+		expect(error).toEqual({ kind: "not_found", store_id: "ghost", version: "", message: "no versions" });
+	});
 });
 
 describe("cli/lookup.ts", () => {
