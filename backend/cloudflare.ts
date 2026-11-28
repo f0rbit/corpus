@@ -18,7 +18,7 @@ import {
 	obs_insert_stmt,
 	schema_drift_error,
 } from "./drizzle-storage.js";
-import { storage_error, to_error } from "./errors.js";
+import { data_not_found, storage_error, to_error } from "./errors.js";
 
 // Structural stand-ins for the Workers bindings (no workers-types import, so the emitted .d.ts stays
 // self-contained). Real bindings must assign to these: return types we never read are `unknown`
@@ -105,7 +105,7 @@ export function create_cloudflare_backend(config: CloudflareBackendConfig): Back
 			});
 
 			if (!object) {
-				return err({ kind: "not_found", store_id: data_key, version: "" });
+				return err(data_not_found(data_key));
 			}
 
 			return ok({

@@ -40,24 +40,23 @@ export const manifest = {
 		{
 			id: "remote-errors/r2-exists-catch-true",
 			file: r2,
-			find: `			const result = await try_catch_async(
-				() => file.exists(),
-				() => false,
-			);
-			return result.ok ? result.value : false;`,
-			replace: `			const result = await try_catch_async(
-				() => file.exists(),
-				() => true,
-			);
-			return result.ok ? result.value : true;`,
+			find: "return file.exists();",
+			replace: "return file.exists().catch(() => true);",
 			guards: "a failing existence probe reports false",
 		},
 		{
-			id: "remote-errors/r2-get-handle-on-probe-error",
+			id: "remote-errors/r2-exists-swallows-probe-error",
 			file: r2,
-			find: "if (!exists_result.ok || !exists_result.value) {",
-			replace: "if (exists_result.ok && !exists_result.value) {",
-			guards: "get returns null when the existence probe errors",
+			find: "return file.exists();",
+			replace: "return file.exists().catch(() => false);",
+			guards: "a failing existence probe emits a storage_error event",
+		},
+		{
+			id: "remote-errors/r2-get-probe-error-as-miss",
+			file: r2,
+			find: "if (!(await file.exists())) return null;",
+			replace: "if (!(await file.exists().catch(() => false))) return null;",
+			guards: "get is storage_error, not not_found, when the existence probe errors",
 		},
 	],
 } satisfies MutationManifest;

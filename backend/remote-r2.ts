@@ -89,28 +89,31 @@ type S3ClientLike = {
 export function create_r2_data_storage(config: R2S3Config): DataStorage {
 	const endpoint = config.endpoint ?? `https://${config.account_id}.r2.cloudflarestorage.com`;
 
-	// Construct client using Bun.S3Client. Public surface uses structural typing
-	// to avoid leaking the Bun global into emitted .d.ts.
-	const s3_client: S3ClientLike = new Bun.S3Client({
-		accessKeyId: config.access_key_id,
-		secretAccessKey: config.secret_access_key,
-		bucket: config.bucket,
-		endpoint,
-	});
+	// Built lazily, and never with empty credentials: a credential-less caller
+	// gets a rejection per op (mapped to storage_error by create_data_client)
+	// rather than an unsigned client whose 403s look like misses. Public surface
+	// uses structural typing to avoid leaking the Bun global into emitted .d.ts.
+	let client: S3ClientLike | undefined;
+	const s3_file = async (data_key: string): Promise<S3FileLike> => {
+		if (!config.access_key_id || !config.secret_access_key) {
+			return Promise.reject(new Error("R2 credentials missing: access_key_id and secret_access_key are required"));
+		}
+		client ??= new Bun.S3Client({
+			accessKeyId: config.access_key_id,
+			secretAccessKey: config.secret_access_key,
+			bucket: config.bucket,
+			endpoint,
+		});
+		return client.file(data_key);
+	};
 
 	return {
 		async get(data_key) {
-			const file = s3_client.file(data_key);
+			const file = await s3_file(data_key);
 
-			// Probe for existence. S3Client.file().exists() returns false for 404.
-			const exists_result = await try_catch_async(
-				() => file.exists(),
-				() => false,
-			);
-
-			if (!exists_result.ok || !exists_result.value) {
-				return null;
-			}
+			// exists() resolves false only on a genuine 404; auth/network/5xx failures
+			// reject and surface as storage_error, never as a miss.
+			if (!(await file.exists())) return null;
 
 			// Object exists. Return handle with lazy bytes() and native stream().
 			const handle: DataStorageHandle = {
@@ -125,12 +128,12 @@ export function create_r2_data_storage(config: R2S3Config): DataStorage {
 		},
 
 		async put(data_key, data) {
-			const file = s3_client.file(data_key);
+			const file = await s3_file(data_key);
 			await file.write(data);
 		},
 
 		async delete(data_key) {
-			const file = s3_client.file(data_key);
+			const file = await s3_file(data_key);
 			// Ignore 404s on delete (idempotent) — result intentionally unchecked.
 			const result = await try_catch_async(
 				() => file.delete(),
@@ -139,13 +142,10 @@ export function create_r2_data_storage(config: R2S3Config): DataStorage {
 			void result;
 		},
 
+		// A failing probe rejects; create_data_client resolves false and emits the error.
 		async exists(data_key) {
-			const file = s3_client.file(data_key);
-			const result = await try_catch_async(
-				() => file.exists(),
-				() => false,
-			);
-			return result.ok ? result.value : false;
+			const file = await s3_file(data_key);
+			return file.exists();
 		},
 	};
 }

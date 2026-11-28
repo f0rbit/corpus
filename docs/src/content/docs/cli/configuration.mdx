@@ -116,6 +116,8 @@ The CLI reads the following environment variables as a fallback source:
 | `CORPUS_R2_ACCESS_KEY_ID` | R2 API token ID (S3 access key) | `abc123...` |
 | `CORPUS_R2_SECRET_ACCESS_KEY` | R2 API token secret (S3 secret) | `yJhbGc...` |
 
+The two R2 variables are only needed for data access (`cat`, `clone`). Metadata-only commands (`stores`, `versions`, `show`, `lineage`) work without them; a data command run without both fails with an error naming them.
+
 ### Token scopes
 
 **D1 and R2 require different credentials:**

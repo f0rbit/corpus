@@ -16,7 +16,7 @@ import type {
 import { ok, err } from "../types.js";
 import { to_bytes, filter_snapshots } from "../utils.js";
 import { first, to_fallback, try_catch_async } from "../result.js";
-import { storage_error } from "./errors.js";
+import { data_not_found, storage_error } from "./errors.js";
 
 export type MetadataStorage = {
 	get: (store_id: string, version: string) => Promise<SnapshotMeta | null>;
@@ -177,7 +177,7 @@ export function create_data_client(storage: DataStorage, emit: Emit): DataClient
 			});
 
 			if (!handle) {
-				return err({ kind: "not_found", store_id: data_key, version: "" });
+				return err(data_not_found(data_key));
 			}
 
 			return ok({

@@ -308,6 +308,40 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 	});
 
+	describe("without R2 credentials", () => {
+		const no_r2 = { CORPUS_R2_ACCESS_KEY_ID: undefined, CORPUS_R2_SECRET_ACCESS_KEY: undefined };
+
+		for (const argv of [
+			["stores"],
+			["versions", "items"],
+			["show", "items", "latest"],
+			["lineage", "items", "latest"],
+		]) {
+			it(`metadata-only \`${argv.join(" ")}\` still succeeds`, async () => {
+				const result = await run_in_process(argv, no_r2);
+				expect(result.stderr).toBe("");
+				expect(result.code).toBe(0);
+			});
+		}
+
+		it("`cat` fails naming both env vars instead of reporting a missing object", async () => {
+			const result = await run_in_process(["cat", "items", "latest"], { CORPUS_R2_SECRET_ACCESS_KEY: undefined });
+			expect(result.code).toBe(1);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("CORPUS_R2_ACCESS_KEY_ID");
+			expect(result.stderr).toContain("CORPUS_R2_SECRET_ACCESS_KEY");
+			expect(result.stderr).not.toContain("not found");
+			expect(result.stderr).not.toContain("test-access-key-id");
+		});
+
+		it("`clone` fails the same way", async () => {
+			const dest = join(work_dir, "clone-no-r2");
+			const result = await run_in_process(["clone", "fake", dest], no_r2);
+			expect(result.code).toBe(1);
+			expect(result.stderr).toContain("CORPUS_R2_ACCESS_KEY_ID and CORPUS_R2_SECRET_ACCESS_KEY");
+		});
+	});
+
 	it("`cat` keeps stdout pure data: the config-less note goes to stderr", async () => {
 		const result = await run_in_process(["cat", "items", "latest"]);
 		expect(result.code).toBe(0);

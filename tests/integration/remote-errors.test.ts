@@ -137,17 +137,57 @@ describe("remote adapters — error paths", () => {
 
 			fail_head_and_delete();
 			expect(await backend.data.exists("k")).toBe(false);
+			expect(events.some((e) => e.type === "error" && e.error.kind === "storage_error")).toBe(true);
 		});
 
-		it("get is not_found when the exists probe errors", async () => {
+		// a failed probe (auth/5xx) is a storage error, never a miss
+		it.each([403, 500])("get is storage_error when the exists probe fails with %d", async (status) => {
 			const backend = make_backend();
 			await backend.data.put("k", new Uint8Array([1, 2, 3]));
 
-			fail_head_and_delete();
+			s3.set_responder((request) => (request.method === "HEAD" ? new Response("", { status }) : undefined));
 			const result = await backend.data.get("k");
 			expect(result.ok).toBe(false);
 			if (result.ok) return;
-			expect(result.error.kind).toBe("not_found");
+			expect(result.error.kind).toBe("storage_error");
+			if (result.error.kind !== "storage_error") return;
+			expect(result.error.operation).toBe("data.get");
+		});
+
+		it("get of a genuinely missing key is not_found naming the store prefix and key", async () => {
+			const result = await make_backend().data.get("hansard/raw/v1");
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			expect(result.error).toEqual({
+				kind: "not_found",
+				store_id: "hansard",
+				version: "hansard/raw/v1",
+				message: "data object missing",
+			});
+		});
+
+		it("empty credentials fail every data op loudly without contacting R2", async () => {
+			const backend = create_remote_backend({
+				account_id: "acct",
+				database_id: "db",
+				api_token,
+				d1_base_url: d1.url,
+				r2: { bucket: "b", access_key_id: "", secret_access_key: "", endpoint: s3.url },
+			});
+			const seen: string[] = [];
+			s3.set_responder((request) => {
+				seen.push(request.method);
+				return undefined;
+			});
+			const got = await backend.data.get("k");
+			const put = await backend.data.put("k", new Uint8Array([1]));
+			expect(await backend.data.exists("k")).toBe(false);
+			for (const result of [got, put]) {
+				expect(result.ok).toBe(false);
+				if (result.ok || result.error.kind !== "storage_error") throw new Error("expected storage_error");
+				expect(result.error.cause.message).toContain("R2 credentials missing");
+			}
+			expect(seen).toEqual([]);
 		});
 
 		it("delete swallows errors", async () => {

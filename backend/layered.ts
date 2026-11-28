@@ -19,6 +19,7 @@ import { ok, err } from "../types.js";
 import { resolve_observation_id } from "../observations/id.js";
 import { to_bytes } from "../utils.js";
 import { first, to_nullable } from "../result.js";
+import { data_not_found } from "./errors.js";
 
 export type LayeredBackendOptions = {
 	read: Backend[];
@@ -177,7 +178,7 @@ export function create_layered_backend(options: LayeredBackendOptions): Backend 
 				if (result.ok) return result;
 				if (result.error.kind !== "not_found") return result;
 			}
-			return err({ kind: "not_found", store_id: data_key, version: "" });
+			return err(data_not_found(data_key));
 		},
 
 		async put(data_key, payload): Promise<Result<void, CorpusError>> {
