@@ -1851,6 +1851,15 @@ TOTAL           278       175             46</pre>
               </div>
             </section>
           </article>
+          <div class="proof">
+            <p><strong>Addendum 2026-11-28 — 0.10.1 fix branch (<code>fix/live-validation-0.10.1</code>), live re-check against chamber stage <code>tom</code>.</strong> Read-only, pure-env path from a scratch cwd, real entrypoint <code>bun cli/index.ts</code>, no R2 creds exported. Secret grep over the capture: 0 hits.</p>
+            <ul>
+              <li><strong>7.1 entity_key fix: PASS.</strong> <code>stores --counts</code>, <code>versions hansard-raw --limit 3</code>, <code>show hansard-summary latest</code> and <code>cat hansard-summary latest</code> all exit 1 with <code>error: Storage error during metadata.&lt;op&gt;: corpus_snapshots is missing column "entity_key" — run your drizzle-kit migration … — caused by: D1 HTTP error 400: no such column: corpus_snapshots.entity_key at offset N: SQLITE_ERROR</code>. No row reads back <code>entity_key: "entity_key"</code>, and the D1 400 envelope text now reaches the mapping (no generic <code>400 Bad Request</code>). <code>--json</code> variants emit one <code>{ "error": { "kind": "storage_error", … } }</code> document on stdout.</li>
+              <li><strong>7.3-a R2 creds fix: not reachable live while D1 is unmigrated.</strong> Every data command resolves metadata first, and that now fails on the drift (the correct precedence). The missing-creds path is proven in-process instead: <code>tests/integration/cli-entrypoint.test.ts</code> "without R2 credentials" shows <code>cat</code>/<code>clone</code> fail naming <code>CORPUS_R2_ACCESS_KEY_ID</code> and <code>CORPUS_R2_SECRET_ACCESS_KEY</code> while metadata commands succeed. Re-check live after chamber migrates D1.</li>
+              <li><strong>7.3-b note stream: fixed</strong> (repro <code>/tmp/corpus-phase7/repro/note-on-stdout.ts</code> now gives piped stdout that parses as JSON). Live <code>cat</code> rendering stays blocked on the migration plus the R2 token.</li>
+              <li>7.4 (4)–(6) stay BLOCKED: they need chamber's D1 migration (adding <code>entity_key</code>) and the R2 Object Read Only token.</li>
+            </ul>
+          </div>
         </section>
       </section>
 

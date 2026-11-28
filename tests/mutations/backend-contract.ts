@@ -5,11 +5,11 @@ const model = "tests/property/backend-equivalence.test.ts";
 const drizzle = "backend/drizzle-storage.ts";
 const remote_r2 = "backend/remote-r2.ts";
 
-// old = contract (pre-prune, from the base commit) + remote-r2 unit tests + model; new = pruned contract + model.
+// old = contract (pre-prune, from the base commit) + model (the remote-r2 unit tests were deleted before 0.10.0); new = pruned contract + model.
 // Every mutant targets a path one of the pruned/deleted tests exercised.
 export const manifest = {
 	cluster: "backend-contract",
-	old_tests: [contract, "tests/unit/remote-r2.test.ts", model],
+	old_tests: [contract, model],
 	new_tests: [contract, model],
 	mutations: [
 		{
@@ -44,15 +44,15 @@ export const manifest = {
 		{
 			id: "backend-contract/remote-r2-exists-inverted",
 			file: remote_r2,
-			find: "return result.ok ? result.value : false;",
-			replace: "return result.ok ? !result.value : false;",
+			find: "return file.exists();",
+			replace: "return file.exists().then((present) => !present);",
 			guards: "data exists (pruned: exists true/false; remote-r2.test exists tests)",
 		},
 		{
 			id: "backend-contract/remote-r2-get-missing-returns-handle",
 			file: remote_r2,
-			find: "if (!exists_result.ok || !exists_result.value) {\n\t\t\t\treturn null;",
-			replace: "if (!exists_result.ok && false) {\n\t\t\t\treturn null;",
+			find: "if (!(await file.exists())) return null;",
+			replace: "if (false as boolean) return null;",
 			guards: "data get of a missing key is null/not_found (pruned: returns not_found for missing data)",
 		},
 		{

@@ -1,4 +1,4 @@
-# @f0rbit/corpus v0.10.0
+# @f0rbit/corpus v0.10.1
 
 > A functional snapshotting library for TypeScript with versioned data storage, lineage tracking, and multiple backend support
 
@@ -35,7 +35,7 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - [Observations API](https://f0rbit.github.io/corpus/api/core/observations/): API reference for extracting and querying structured facts from versioned documents
 - [Pointer Utilities](https://f0rbit.github.io/corpus/api/core/pointers/): Utility functions for creating, comparing, and resolving SnapshotPointers
 - [Core Types](https://f0rbit.github.io/corpus/api/core/types/): Type definitions for Corpus, Store, Result, and errors
-- [Extending Backends](https://f0rbit.github.io/corpus/api/extending-backends/): Implement custom storage backends using the adapter interfaces.
+- [Extending Backends](https://f0rbit.github.io/corpus/api/extending-backends/): Implement, wrap, and test custom storage backends against the public Backend type.
 - [Drizzle Schema](https://f0rbit.github.io/corpus/api/schema/): Database schema exports for direct Drizzle ORM access to corpus tables
 - [Streaming](https://f0rbit.github.io/corpus/api/streaming/): Stream-based reads and writes for large payloads via SnapshotHandle, get_handle, and put_stream.
 - [Utility Functions](https://f0rbit.github.io/corpus/api/utilities/): Extended utilities for Result types, concurrency control, hashing, and versioning in Corpus.

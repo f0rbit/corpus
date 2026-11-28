@@ -1,4 +1,4 @@
-import type { Backend } from "../types.js";
+import type { Backend, DataClient } from "../types.js";
 import { type Result, err, ok } from "../types.js";
 import type { CorpusError } from "../types.js";
 import type { CorpusCliConfig } from "./config-schema.js";
@@ -119,21 +119,37 @@ export async function resolve_backend(
 		});
 	}
 
+	const has_r2_credentials = !!access_key_id && !!secret_access_key;
+
+	// Without R2 credentials the S3 client is never constructed (remote-r2 builds
+	// it lazily) and every data op fails loudly; metadata stays fully usable.
 	const remote_config = {
 		account_id,
 		database_id,
 		api_token,
 		r2: {
 			bucket,
-			access_key_id: access_key_id || "",
-			secret_access_key: secret_access_key || "",
+			access_key_id: access_key_id ?? "",
+			secret_access_key: secret_access_key ?? "",
 			...(r2_endpoint && { endpoint: r2_endpoint }),
 		},
 		...(d1_base_url && { d1_base_url }),
 	};
 
 	const sink = create_error_sink();
-	return ok(track_errors(create_remote_backend({ ...remote_config, on_event: sink.on_event }), sink));
+	const remote = create_remote_backend({ ...remote_config, on_event: sink.on_event });
+	return ok(track_errors(has_r2_credentials ? remote : { ...remote, data: credentialless_data() }, sink));
+}
+
+export const missing_r2_credentials: CorpusError = {
+	kind: "invalid_config",
+	message:
+		"R2 data access requires the CORPUS_R2_ACCESS_KEY_ID and CORPUS_R2_SECRET_ACCESS_KEY env vars (metadata-only commands work without them)",
+};
+
+function credentialless_data(): DataClient {
+	const fail = (): Promise<Result<never, CorpusError>> => Promise.resolve(err(missing_r2_credentials));
+	return { get: fail, put: fail, delete: fail, exists: () => Promise.resolve(false) };
 }
 
 const uuid_pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -4,6 +4,7 @@ import { ok, err } from "../../types.js";
 import { resolve_backend } from "../resolve-backend.js";
 import { sniff_wrangler } from "../wrangler.js";
 import { load_cli_config } from "../load-config.js";
+import { resolve_meta } from "../lookup.js";
 import { render_tree } from "../output.js";
 import type { TreeNode } from "../output.js";
 import type { ParentRef } from "../../types.js";
@@ -73,8 +74,10 @@ export const lineage_command: Command = {
 
 		// Confirm the root exists before walking — a missing root is a real
 		// error, not a lineage fact (missing ANCESTORS render as `(missing)`).
-		const root_result = await backend.metadata.get(store_id, version);
+		// `latest` resolves here, so the walk and the --json root use the real version.
+		const root_result = await resolve_meta(backend, store_id, version);
 		if (!root_result.ok) return root_result;
+		const root_version = root_result.value.version;
 
 		const nodes: LineageNode[] = [];
 		const seen = new Set<string>();
@@ -106,12 +109,12 @@ export const lineage_command: Command = {
 			}
 		};
 
-		await visit(store_id, version, 0);
+		await visit(store_id, root_version, 0);
 		spin.stop();
 
 		if (ctx.json) {
 			ctx.output.json({
-				root: { store: store_id, version },
+				root: { store: store_id, version: root_version },
 				nodes: nodes.map((node) => ({
 					store: node.store,
 					version: node.version,

@@ -30,6 +30,7 @@ export const manifest = {
 		"tests/integration/layered-backend.test.ts",
 		"tests/integration/observations-id.test.ts",
 		"tests/unit/cli-main.test.ts",
+		"tests/integration/schema-drift.test.ts",
 	],
 	// Not listed (unkillable): `desc(sql`rowid`)` tie-break removal in drizzle list/get_latest is an equivalent mutant
 	// while idx_store_created exists (a reverse index scan already yields ties in rowid-desc order).
@@ -82,6 +83,27 @@ export const manifest = {
 			find: "conditions.push(eq(corpus_observations.entity_key, opts.entity_key));",
 			replace: "void opts.entity_key;",
 			guards: "observation entity filter runs in SQL before LIMIT",
+		},
+		{
+			id: "guards/drizzle-select-unqualified",
+			file: drizzle,
+			find: "sql`${name}.${sql.identifier(column.name)}`.mapWith(column),",
+			replace: "sql`${sql.identifier(column.name)}`.mapWith(column),",
+			guards: "select lists are table-qualified, so a missing column can't fall back to a string literal (DQS)",
+		},
+		{
+			id: "guards/drizzle-schema-guard-off",
+			file: drizzle,
+			find: "return sql`not exists (select ${sql.join(Object.values(columns), sql`, `)} from ${table} limit 0)`;",
+			replace: "void table;\n\treturn sql`1`;",
+			guards: "list_stores and deletes reference every column, so they fail on a drifted table too",
+		},
+		{
+			id: "guards/drizzle-drift-mapping-off",
+			file: drizzle,
+			find: "return (cause) => storage_error(operation)(schema_drift_error(cause) ?? cause);",
+			replace: "return (cause) => storage_error(operation)(cause);",
+			guards: "a missing-column failure carries the actionable migration message",
 		},
 		{
 			id: "guards/memory-latest-strict-gt",

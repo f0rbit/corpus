@@ -15,8 +15,22 @@
  * internally, then batch them itself.
  */
 
-import { and, desc, eq, gt, inArray, like, lt, ne, sql } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import {
+	and,
+	desc,
+	eq,
+	getTableColumns,
+	getTableName,
+	gt,
+	inArray,
+	like,
+	lt,
+	ne,
+	sql,
+	type GetColumnData,
+	type SQL,
+} from "drizzle-orm";
+import type { BaseSQLiteDatabase, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { corpus_observations, type ObservationsStorage, type StorageQueryOpts } from "../observations/index.js";
 import { observation_id_collision } from "../observations/id.js";
 import { first, to_fallback, to_nullable, try_catch_async } from "../result.js";
@@ -38,6 +52,68 @@ import { parse_snapshot_meta } from "../utils.js";
 export type DrizzleDb<TRunResult = unknown> = BaseSQLiteDatabase<"async", TRunResult, Record<string, never>>;
 
 type Emit = (event: CorpusEvent) => void;
+
+type Columns<T extends SQLiteTable> = T["_"]["columns"];
+type QualifiedColumns<T extends SQLiteTable> = { [K in keyof Columns<T>]: SQL<GetColumnData<Columns<T>[K]>> };
+
+// drizzle renders a single-table select list unqualified ("entity_key"), and SQLite's double-quoted-string
+// fallback turns a quoted name matching no column into a string literal: a table missing a column would read
+// back its NAME as every row's value. Qualified names have no such fallback, so a missing column fails at prepare.
+function qualified<T extends SQLiteTable>(table: T): QualifiedColumns<T> {
+	const name = sql.identifier(getTableName(table));
+	const entries = Object.entries(getTableColumns(table)).map(([key, column]) => [
+		key,
+		sql`${name}.${sql.identifier(column.name)}`.mapWith(column),
+	]);
+	return Object.fromEntries(entries) as QualifiedColumns<T>;
+}
+
+const snapshot_columns = qualified(corpus_snapshots);
+const observation_columns = qualified(corpus_observations);
+
+// For statements that don't select every column (list_stores, deletes): an uncorrelated LIMIT 0 probe naming
+// every qualified column fails a drifted table at prepare, yet runs once and reads no rows — list_stores keeps
+// its covering-index scan (a per-row column reference would force a table lookup for every row).
+function schema_guard(table: SQLiteTable, columns: Record<string, SQL>): SQL {
+	return sql`not exists (select ${sql.join(Object.values(columns), sql`, `)} from ${table} limit 0)`;
+}
+
+// drizzle wraps the driver error ("Failed query: ..."), so the SQLite text lives further down the cause chain
+function cause_messages(cause: unknown): string[] {
+	const messages: string[] = [];
+	for (let current = cause, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth++) {
+		messages.push(current.message);
+	}
+	return messages;
+}
+
+const missing_column_patterns = [
+	/no such column: "?(corpus_snapshots|corpus_observations)"?\."?(\w+)/,
+	/table "?(corpus_snapshots|corpus_observations)"? has no column named "?(\w+)/,
+];
+
+/**
+ * Maps a driver "missing column" failure on a corpus table to an actionable error naming the column and the fix.
+ * `undefined` when the cause is any other failure.
+ */
+export function schema_drift_error(cause: unknown): Error | undefined {
+	for (const message of cause_messages(cause)) {
+		for (const pattern of missing_column_patterns) {
+			const match = pattern.exec(message);
+			if (match?.[1] !== undefined && match[2] !== undefined) {
+				return new Error(
+					`${match[1]} is missing column "${match[2]}" — run your drizzle-kit migration for the installed @f0rbit/corpus schema before deploying (see the Cloudflare guide's upgrade section)`,
+					{ cause },
+				);
+			}
+		}
+	}
+	return undefined;
+}
+
+function drizzle_error(operation: string): (cause: unknown) => CorpusError {
+	return (cause) => storage_error(operation)(schema_drift_error(cause) ?? cause);
+}
 
 function snapshot_row_to_meta(row: typeof corpus_snapshots.$inferSelect): SnapshotMeta {
 	return parse_snapshot_meta(row);
@@ -81,7 +157,13 @@ export function meta_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, meta: Sn
 export function meta_delete_stmt<TRunResult>(db: DrizzleDb<TRunResult>, store_id: string, version: string) {
 	return db
 		.delete(corpus_snapshots)
-		.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)));
+		.where(
+			and(
+				eq(corpus_snapshots.store_id, store_id),
+				eq(corpus_snapshots.version, version),
+				schema_guard(corpus_snapshots, snapshot_columns),
+			),
+		);
 }
 
 /** Shared insert statement for a `corpus_observations` row. Used by `backend/cloudflare.ts`'s `apply_batch` (the non-batched `create_drizzle_observations_storage.put_row` builds its own insert inline). */
@@ -91,7 +173,9 @@ export function obs_insert_stmt<TRunResult>(db: DrizzleDb<TRunResult>, row: type
 
 /** Shared delete statement for a `corpus_observations` row. Used by `backend/cloudflare.ts`'s `apply_batch` (the non-batched `create_drizzle_observations_storage.delete_row` builds its own delete inline). */
 export function obs_delete_stmt<TRunResult>(db: DrizzleDb<TRunResult>, id: string) {
-	return db.delete(corpus_observations).where(eq(corpus_observations.id, id));
+	return db
+		.delete(corpus_observations)
+		.where(and(eq(corpus_observations.id, id), schema_guard(corpus_observations, observation_columns)));
 }
 
 /**
@@ -106,14 +190,14 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 		async get(store_id, version) {
 			const lookup = await try_catch_async(async () => {
 				const rows = await db
-					.select()
+					.select(snapshot_columns)
 					.from(corpus_snapshots)
 					.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.version, version)))
 					.limit(1);
 
 				const row = to_nullable(first(rows));
 				return row ? snapshot_row_to_meta(row) : null;
-			}, storage_error("metadata.get"));
+			}, drizzle_error("metadata.get"));
 
 			if (!lookup.ok) {
 				emit({ type: "error", error: lookup.error });
@@ -129,7 +213,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 		async put(meta) {
 			const result = await try_catch_async(async () => {
 				await meta_insert_stmt(db, meta);
-			}, storage_error("metadata.put"));
+			}, drizzle_error("metadata.put"));
 			if (!result.ok) {
 				emit({ type: "error", error: result.error });
 				return result;
@@ -141,7 +225,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 		async delete(store_id, version) {
 			const result = await try_catch_async(async () => {
 				await meta_delete_stmt(db, store_id, version);
-			}, storage_error("metadata.delete"));
+			}, drizzle_error("metadata.delete"));
 			if (!result.ok) {
 				emit({ type: "error", error: result.error });
 				return result;
@@ -171,7 +255,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			}
 
 			let query = db
-				.select()
+				.select(snapshot_columns)
 				.from(corpus_snapshots)
 				.where(and(...conditions))
 				.orderBy(desc(corpus_snapshots.created_at), desc(sql`rowid`));
@@ -180,7 +264,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 				query = query.limit(opts.limit) as typeof query;
 			}
 
-			const rows = await try_catch_async(() => query, storage_error("metadata.list"));
+			const rows = await try_catch_async(() => query, drizzle_error("metadata.list"));
 			if (!rows.ok) {
 				emit({ type: "error", error: rows.error });
 				return;
@@ -199,7 +283,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 		async get_latest(store_id, opts) {
 			const lookup = await try_catch_async(async () => {
 				const rows = await db
-					.select()
+					.select(snapshot_columns)
 					.from(corpus_snapshots)
 					.where(
 						opts?.entity_key === undefined
@@ -211,7 +295,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 
 				const row = to_nullable(first(rows));
 				return row ? snapshot_row_to_meta(row) : null;
-			}, storage_error("metadata.get_latest"));
+			}, drizzle_error("metadata.get_latest"));
 
 			if (!lookup.ok) {
 				emit({ type: "error", error: lookup.error });
@@ -225,7 +309,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 
 		async *get_children(parent_store_id, parent_version) {
 			const rows = await db
-				.select()
+				.select(snapshot_columns)
 				.from(corpus_snapshots)
 				.where(
 					sql`EXISTS (
@@ -244,7 +328,7 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 			const lookup = await try_catch_async(
 				async () => {
 					const rows = await db
-						.select()
+						.select(snapshot_columns)
 						.from(corpus_snapshots)
 						.where(and(eq(corpus_snapshots.store_id, store_id), eq(corpus_snapshots.content_hash, content_hash)))
 						.limit(1);
@@ -259,8 +343,12 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 
 		async *list_stores() {
 			const rows = await try_catch_async(
-				() => db.selectDistinct({ store_id: corpus_snapshots.store_id }).from(corpus_snapshots),
-				storage_error("metadata.list_stores"),
+				() =>
+					db
+						.selectDistinct({ store_id: snapshot_columns.store_id })
+						.from(corpus_snapshots)
+						.where(schema_guard(corpus_snapshots, snapshot_columns)),
+				drizzle_error("metadata.list_stores"),
 			);
 			if (!rows.ok) {
 				emit({ type: "error", error: rows.error });
@@ -274,19 +362,13 @@ export function create_drizzle_snapshot_metadata<TRunResult>(db: DrizzleDb<TRunR
 	};
 }
 
-// drizzle wraps the driver error ("Failed query: ..."), so the UNIQUE text lives further down the cause chain
-const is_observation_id_conflict = (cause: unknown): boolean => {
-	const messages: string[] = [];
-	for (let current = cause, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth++) {
-		messages.push(current.message);
-	}
-	return messages.some((m) => m.includes("UNIQUE constraint failed") && m.includes("corpus_observations.id"));
-};
+const is_observation_id_conflict = (cause: unknown): boolean =>
+	cause_messages(cause).some((m) => m.includes("UNIQUE constraint failed") && m.includes("corpus_observations.id"));
 
 const observation_put_error =
 	(id: string) =>
 	(cause: unknown): CorpusError =>
-		is_observation_id_conflict(cause) ? observation_id_collision(id) : storage_error("observations.put")(cause);
+		is_observation_id_conflict(cause) ? observation_id_collision(id) : drizzle_error("observations.put")(cause);
 
 /**
  * Builds the `ObservationsStorage` implementation over `corpus_observations`,
@@ -295,7 +377,12 @@ const observation_put_error =
  * @category Backends
  * @group Storage Backends
  */
-export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TRunResult>): ObservationsStorage {
+export function create_drizzle_observations_storage<TRunResult>(
+	db: DrizzleDb<TRunResult>,
+	emit: Emit = () => undefined,
+): ObservationsStorage {
+	const select_rows = () => db.select(observation_columns).from(corpus_observations);
+
 	return {
 		async put_row(row) {
 			const result = await try_catch_async(async () => {
@@ -307,9 +394,9 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 
 		async get_row(id) {
 			return try_catch_async(async () => {
-				const rows = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
+				const rows = await select_rows().where(eq(corpus_observations.id, id)).limit(1);
 				return to_nullable(first(rows));
-			}, storage_error("observations.get"));
+			}, drizzle_error("observations.get"));
 		},
 
 		async *query_rows(opts: StorageQueryOpts = {}) {
@@ -353,9 +440,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 				conditions.push(eq(corpus_observations.entity_key, opts.entity_key));
 			}
 
-			let query = db
-				.select()
-				.from(corpus_observations)
+			let query = select_rows()
 				.where(conditions.length > 0 ? and(...conditions) : undefined)
 				.orderBy(desc(corpus_observations.created_at), desc(sql`rowid`));
 
@@ -363,23 +448,28 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 				query = query.limit(opts.limit) as typeof query;
 			}
 
-			const rows = await query;
-			for (const row of rows) {
+			// same contract as metadata.list: a failure is an `error` event and the iterable ends
+			const rows = await try_catch_async(() => query, drizzle_error("observations.query"));
+			if (!rows.ok) {
+				emit({ type: "error", error: rows.error });
+				return;
+			}
+			for (const row of rows.value) {
 				yield row;
 			}
 		},
 
 		async delete_row(id) {
 			return try_catch_async(async () => {
-				const existing = await db.select().from(corpus_observations).where(eq(corpus_observations.id, id)).limit(1);
+				const existing = await select_rows().where(eq(corpus_observations.id, id)).limit(1);
 
 				if (existing.length === 0) {
 					return false;
 				}
 
-				await db.delete(corpus_observations).where(eq(corpus_observations.id, id));
+				await obs_delete_stmt(db, id);
 				return true;
-			}, storage_error("observations.delete"));
+			}, drizzle_error("observations.delete"));
 		},
 
 		async delete_by_source(store_id, version, path) {
@@ -393,10 +483,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 					conditions.push(eq(corpus_observations.source_path, path));
 				}
 
-				const to_delete = await db
-					.select()
-					.from(corpus_observations)
-					.where(and(...conditions));
+				const to_delete = await select_rows().where(and(...conditions));
 
 				const count = to_delete.length;
 
@@ -405,7 +492,7 @@ export function create_drizzle_observations_storage<TRunResult>(db: DrizzleDb<TR
 				}
 
 				return count;
-			}, storage_error("observations.delete_by_source"));
+			}, drizzle_error("observations.delete_by_source"));
 		},
 	};
 }
