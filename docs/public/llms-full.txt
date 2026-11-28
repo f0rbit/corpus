@@ -41,7 +41,7 @@ Full docs for LLM consumption: https://f0rbit.github.io/corpus/llms-full.txt
 - [Observations API](https://f0rbit.github.io/corpus/api/core/observations/): API reference for extracting and querying structured facts from versioned documents
 - [Pointer Utilities](https://f0rbit.github.io/corpus/api/core/pointers/): Utility functions for creating, comparing, and resolving SnapshotPointers
 - [Core Types](https://f0rbit.github.io/corpus/api/core/types/): Type definitions for Corpus, Store, Result, and errors
-- [Extending Backends](https://f0rbit.github.io/corpus/api/extending-backends/): Implement custom storage backends using the adapter interfaces.
+- [Extending Backends](https://f0rbit.github.io/corpus/api/extending-backends/): Implement, wrap, and test custom storage backends against the public Backend type.
 - [Drizzle Schema](https://f0rbit.github.io/corpus/api/schema/): Database schema exports for direct Drizzle ORM access to corpus tables
 - [Streaming](https://f0rbit.github.io/corpus/api/streaming/): Stream-based reads and writes for large payloads via SnapshotHandle, get_handle, and put_stream.
 - [Utility Functions](https://f0rbit.github.io/corpus/api/utilities/): Extended utilities for Result types, concurrency control, hashing, and versioning in Corpus.
@@ -2866,27 +2866,23 @@ type ListOpts = {
 
 ### Extending Backends (api/extending-backends.mdx)
 
-> Implement custom storage backends using the adapter interfaces.
+> Implement, wrap, and test custom storage backends against the public Backend type.
 
 import { Aside } from '@astrojs/starlight/components';
 
-If the built-in backends (memory, file, Cloudflare) don't fit your use case, you can implement a custom backend by implementing the adapter interfaces and wrapping them with the provided factory functions.
+If the built-in backends (memory, file, Cloudflare, remote) don't fit your storage, write your own. A backend is a plain object that satisfies the exported `Backend` type. There is no base class and no registration step: anything that type-checks as a `Backend` can go into `create_corpus().with_backend(...)`.
 
-## Overview
+This page uses only names exported from `@f0rbit/corpus` and `@f0rbit/corpus/testing`.
 
-A backend chains together three parts:
+<Aside type="note">
+  The built-in backends are assembled from internal adapter helpers in corpus's `backend/` directory. Those helpers are not part of the public API and may change between releases. Custom backends implement `MetadataClient` and `DataClient` directly, as shown below.
+</Aside>
 
-1. **Adapter interfaces** — Your implementation of metadata and data storage (thin, single-method operations)
-2. **Wrapper factories** — `create_metadata_client()`, `create_data_client()` that add error handling, event emission, and Result wrapping
-3. **Backend composition** — Combine the clients into a `Backend` object
-
-This layering minimizes boilerplate: you implement the bare storage logic; the wrappers handle error wrapping, deduplication, and event emission.
-
-## The Backend Interface
-
-For reference, here's what you're assembling into:
+## The `Backend` type
 
 ```typescript
+import type { BatchOp, CorpusError, DataClient, EventHandler, MetadataClient, ObservationsClient, Result } from '@f0rbit/corpus'
+
 type Backend = {
   metadata: MetadataClient
   data: DataClient
@@ -2896,212 +2892,252 @@ type Backend = {
 }
 ```
 
-See [Backend Types](/corpus/api/backends/types) for the full `MetadataClient` and `DataClient` interfaces. The optional `apply_batch` hook is covered in [Optional `apply_batch` hook](#optional-apply_batch-hook) below.
+| Member         | Required | What it does                                                                                              |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `metadata`     | yes      | Snapshot metadata: get/put/delete, filtered listing, `get_latest`, lineage children, hash lookup           |
+| `data`         | yes      | Content-addressed blobs keyed by `data_key`                                                               |
+| `observations` | no       | Enables `corpus.observations`. Without it, observation APIs are unavailable                               |
+| `on_event`     | no       | The handler the backend reports `CorpusEvent`s to, `error` events included                                |
+| `apply_batch`  | no       | Atomic commit for `corpus.transaction()`. Without it, transactions use a sequential best-effort fallback  |
 
-## Implementing MetadataStorage
+See [Backend Types](/corpus/api/backends/types) for the full `MetadataClient` and `DataClient` signatures.
 
-Metadata storage handles versioned snapshots (without data):
+## Implementing `Backend` directly
 
-```typescript
-type MetadataStorage = {
-  get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
-  put: (meta: SnapshotMeta) => Promise<void>
-  delete: (store_id: string, version: string) => Promise<void>
-  list: (store_id: string) => AsyncIterable<SnapshotMeta>
-  find_by_hash: (store_id: string, hash: string) => Promise<SnapshotMeta | null>
-}
-```
-
-### Contract
-
-- **get**: Return the metadata row, or `null` if not found. Don't throw.
-- **put**: Store or update the metadata. Return `void` or throw if I/O fails.
-- **delete**: Remove metadata. No error if already absent.
-- **list**: Yield all metadata rows for a store (order doesn't matter). No pagination—the wrapper handles that.
-- **find_by_hash**: Find any version with this content hash (used for deduplication). Return the first match or `null`. It searches the whole history, so it is for dedup, not change detection (use `put(data, { if_changed: true })` for that).
-
-### Example: Postgres Metadata Adapter
+The example below is a complete backend built on `Map`s. Swap the maps for your storage (a KV namespace, a SQL table, an object store) and keep the same `Result` shapes and ordering rules.
 
 ```typescript
-import type { SnapshotMeta } from '@f0rbit/corpus'
+import { create_observations_client, create_observations_storage, err, ok, try_catch_async } from '@f0rbit/corpus'
+import type {
+  Backend,
+  BatchOp,
+  CorpusError,
+  CorpusEvent,
+  DataClient,
+  DataHandle,
+  EventHandler,
+  ListOpts,
+  MetadataClient,
+  ObservationRow,
+  Result,
+  SnapshotMeta,
+} from '@f0rbit/corpus'
 
-type MetadataStorage = {
-  get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
-  put: (meta: SnapshotMeta) => Promise<void>
-  delete: (store_id: string, version: string) => Promise<void>
-  list: (store_id: string) => AsyncIterable<SnapshotMeta>
-  find_by_hash: (store_id: string, hash: string) => Promise<SnapshotMeta | null>
-}
+export type MapBackendOptions = { on_event?: EventHandler }
 
-export function create_postgres_metadata_adapter(db: Pool): MetadataStorage {
-  return {
-    async get(store_id, version) {
-      const result = await db.query(
-        'SELECT * FROM corpus_snapshots WHERE store_id = $1 AND version = $2',
-        [store_id, version]
-      )
-      if (result.rows.length === 0) return null
-      return result.rows[0] as SnapshotMeta
+const meta_key = (store_id: string, version: string): string => `${store_id}\u0000${version}`
+
+const as_error = (cause: unknown): Error => (cause instanceof Error ? cause : new Error(String(cause)))
+
+const one_chunk = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes)
+      controller.close()
+    },
+  })
+
+const read_all = async (input: ReadableStream<Uint8Array> | Uint8Array): Promise<Uint8Array> =>
+  input instanceof Uint8Array ? input : new Uint8Array(await new Response(input).arrayBuffer())
+
+// Newest first. Map iteration is insertion order, so reversing before the
+// stable sort means the most recently put snapshot wins a created_at tie.
+const newest_first = (metas: SnapshotMeta[]): SnapshotMeta[] =>
+  metas.toReversed().toSorted((a, b) => b.created_at.getTime() - a.created_at.getTime())
+
+const matches = (meta: SnapshotMeta, opts: ListOpts): boolean =>
+  (opts.before === undefined || meta.created_at < opts.before) &&
+  (opts.after === undefined || meta.created_at > opts.after) &&
+  (opts.tags === undefined || opts.tags.every((tag) => meta.tags?.includes(tag) === true)) &&
+  (opts.entity_key === undefined || meta.entity_key === opts.entity_key)
+
+export function create_map_backend(options: MapBackendOptions = {}): Backend {
+  const metas = new Map<string, SnapshotMeta>()
+  const blobs = new Map<string, Uint8Array>()
+  const rows = new Map<string, ObservationRow>()
+  const emit = (event: CorpusEvent): void => options.on_event?.(event)
+
+  const in_store = (store_id: string): SnapshotMeta[] => [...metas.values()].filter((m) => m.store_id === store_id)
+
+  const metadata: MetadataClient = {
+    async get(store_id, version): Promise<Result<SnapshotMeta, CorpusError>> {
+      const meta = metas.get(meta_key(store_id, version))
+      emit({ type: 'meta_get', store_id, version, found: meta !== undefined })
+      if (meta === undefined) return err({ kind: 'not_found', store_id, version })
+      return ok(meta)
     },
 
-    async put(meta) {
-      await db.query(
-        `INSERT INTO corpus_snapshots (store_id, version, content_hash, data_key, created_at, size_bytes, parents)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (store_id, version) DO UPDATE SET ...`,
-        [meta.store_id, meta.version, meta.content_hash, meta.data_key, meta.created_at, meta.size_bytes, JSON.stringify(meta.parents)]
+    async put(meta): Promise<Result<void, CorpusError>> {
+      metas.set(meta_key(meta.store_id, meta.version), meta)
+      emit({ type: 'meta_put', store_id: meta.store_id, version: meta.version })
+      return ok(undefined)
+    },
+
+    async delete(store_id, version): Promise<Result<void, CorpusError>> {
+      metas.delete(meta_key(store_id, version))
+      emit({ type: 'meta_delete', store_id, version })
+      return ok(undefined)
+    },
+
+    async *list(store_id, opts: ListOpts = {}) {
+      // filter first, then limit
+      const filtered = newest_first(in_store(store_id)).filter((m) => matches(m, opts))
+      const page = opts.limit ? filtered.slice(0, opts.limit) : filtered
+      yield* page
+      emit({ type: 'meta_list', store_id, count: page.length })
+    },
+
+    async get_latest(store_id, opts = {}): Promise<Result<SnapshotMeta, CorpusError>> {
+      const scoped = in_store(store_id).filter((m) => opts.entity_key === undefined || m.entity_key === opts.entity_key)
+      const latest = newest_first(scoped).at(0)
+      if (latest === undefined) return err({ kind: 'not_found', store_id, version: 'latest' })
+      return ok(latest)
+    },
+
+    async *get_children(parent_store_id, parent_version) {
+      yield* [...metas.values()].filter((m) =>
+        m.parents.some((p) => p.store_id === parent_store_id && p.version === parent_version),
       )
     },
 
-    async delete(store_id, version) {
-      await db.query(
-        'DELETE FROM corpus_snapshots WHERE store_id = $1 AND version = $2',
-        [store_id, version]
-      )
+    async find_by_hash(store_id, content_hash) {
+      return in_store(store_id).find((m) => m.content_hash === content_hash) ?? null
     },
 
-    async *list(store_id) {
-      const result = await db.query(
-        'SELECT * FROM corpus_snapshots WHERE store_id = $1 ORDER BY created_at DESC',
-        [store_id]
-      )
-      for (const row of result.rows) {
-        yield row as SnapshotMeta
-      }
-    },
-
-    async find_by_hash(store_id, hash) {
-      const result = await db.query(
-        'SELECT * FROM corpus_snapshots WHERE store_id = $1 AND content_hash = $2 LIMIT 1',
-        [store_id, hash]
-      )
-      if (result.rows.length === 0) return null
-      return result.rows[0] as SnapshotMeta
+    async *list_stores() {
+      yield* [...new Set([...metas.values()].map((m) => m.store_id))].toSorted()
     },
   }
-}
-```
 
-## Implementing DataStorage
+  const data: DataClient = {
+    async get(data_key): Promise<Result<DataHandle, CorpusError>> {
+      const bytes = blobs.get(data_key)
+      if (bytes === undefined) return err({ kind: 'not_found', store_id: data_key, version: '' })
+      return ok({ bytes: async () => bytes, stream: () => one_chunk(bytes) })
+    },
 
-Data storage handles binary blob persistence. Since 0.4.0, `get` returns a lazy handle so backends with native streaming (R2, `Bun.file()`) can avoid buffering large objects:
-
-```typescript
-type DataStorage = {
-  get: (data_key: string) => Promise<DataStorageHandle | null>
-  put: (data_key: string, data: Uint8Array) => Promise<void>
-  delete: (data_key: string) => Promise<void>
-  exists: (data_key: string) => Promise<boolean>
-}
-
-type DataStorageHandle = {
-  bytes: () => Promise<Uint8Array>
-  stream?: () => ReadableStream<Uint8Array>
-}
-```
-
-### Contract
-
-- **get**: Return a `DataStorageHandle`, or `null` if not found. Don't throw.
-- **put**: Store the bytes. Overwrite if already present. Throw on I/O failure.
-- **delete**: Remove the blob. No error if already absent.
-- **exists**: Return whether the key exists (used for deduplication checks).
-
-The handle's `bytes()` is mandatory; `stream()` is optional. If you don't provide a native stream, `create_data_client` falls back to a one-chunk wrapper around `bytes()`. Implement `stream()` when the underlying storage supports it natively (R2 `object.body`, `Bun.file().stream()`).
-
-### Example Sketch: R2-Compatible Storage
-
-```typescript nocheck
-export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStorage> {
-  return {
-    async get(data_key) {
-      const obj = await bucket.get(data_key)
-      if (!obj) return null
-      return {
-        bytes: async () => new Uint8Array(await obj.arrayBuffer()),
-        stream: () => obj.body as ReadableStream<Uint8Array>,
+    async put(data_key, input): Promise<Result<void, CorpusError>> {
+      const read = await try_catch_async(
+        () => read_all(input),
+        (cause): CorpusError => ({ kind: 'storage_error', operation: 'data.put', cause: as_error(cause) }),
+      )
+      if (!read.ok) {
+        emit({ type: 'error', error: read.error })
+        return read
       }
+      blobs.set(data_key, read.value)
+      return ok(undefined)
     },
 
-    async put(data_key, data) {
-      await bucket.put(data_key, data)
-    },
-
-    async delete(data_key) {
-      await bucket.delete(data_key)
+    async delete(data_key): Promise<Result<void, CorpusError>> {
+      blobs.delete(data_key)
+      return ok(undefined)
     },
 
     async exists(data_key) {
-      const obj = await bucket.head(data_key)
-      return obj !== null
+      return blobs.has(data_key)
     },
   }
-}
-```
 
-### Migration: 0.4.0 — `DataStorage.get` returns `DataStorageHandle`
+  const observations = create_observations_client(
+    create_observations_storage({
+      get_all: async () => [...rows.values()],
+      set_all: async (next) => {
+        rows.clear()
+        for (const row of next) rows.set(row.id, row)
+      },
+      get_one: async (id) => rows.get(id) ?? null,
+      add_one: async (row): Promise<Result<void, CorpusError>> => {
+        if (rows.has(row.id)) {
+          const cause = new Error(`observation id "${row.id}" already exists`)
+          return err({ kind: 'validation_error', message: cause.message, cause })
+        }
+        rows.set(row.id, row)
+        return ok(undefined)
+      },
+      remove_one: async (id): Promise<Result<boolean, CorpusError>> => ok(rows.delete(id)),
+    }),
+    metadata,
+    emit,
+  )
 
-Before 0.4.0, `DataStorage.get` returned `Promise<Uint8Array | null>`. From 0.4.0 it returns `Promise<DataStorageHandle | null>`. This was driven by the new streaming read surface ([`Store.get_handle`](/corpus/api/streaming)) — backends with native streams (R2, `Bun.file().stream()`) can now flow data through to consumers without buffering.
-
-For backends that genuinely only have a bytes-getter, use the `wrap_bytes_storage` helper to keep the migration to a single line:
-
-```typescript nocheck
-import { create_data_client, wrap_bytes_storage } from '@f0rbit/corpus/backend/base'
-
-// before — pre-0.4.0
-const data = create_data_client(my_bytes_storage, emit)
-
-// after — 0.4.0
-const data = create_data_client(wrap_bytes_storage(my_bytes_storage), emit)
-```
-
-`wrap_bytes_storage` produces a `DataStorageHandle` whose `bytes()` returns the stored bytes and whose `stream()` wraps them in a one-chunk `ReadableStream`. Existing semantics are preserved — `bytes()` callers see no change, and `stream()` callers get a single-chunk read instead of a true streaming read. Upgrade to a native `stream()` only when the underlying storage offers one.
-
-The consumer-facing `DataHandle` (the shape returned by `DataClient.get`) is unchanged — only the adapter contract moved.
-
-## Wrapping Adapters into Clients
-
-Use the factory functions from `backend/base.ts` to wrap adapters and get error handling + event emission for free:
-
-```typescript nocheck
-import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
-import type { Backend, EventHandler } from '@f0rbit/corpus'
-
-export function create_custom_backend(
-  metaAdapter: MetadataStorage,
-  dataAdapter: DataStorage,
-  on_event?: EventHandler
-): Backend {
-  const emit = on_event || (() => {})
-
-  return {
-    metadata: create_metadata_client(metaAdapter, emit),
-    data: create_data_client(dataAdapter, emit),
-    on_event,
+  async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
+    const ids = ops.flatMap((op) => (op.type === 'observation_put' ? [op.row.id] : []))
+    const duplicate = ids.find((id, i) => rows.has(id) || ids.indexOf(id) !== i)
+    if (duplicate !== undefined) {
+      return err({
+        kind: 'transaction_aborted',
+        reason: 'apply_batch_failed',
+        cause: new Error(`observation id "${duplicate}" already exists`),
+      })
+    }
+    // Validation happened up front, and nothing below awaits, so no other
+    // call can observe a half-applied batch.
+    for (const op of ops) {
+      switch (op.type) {
+        case 'meta_put':
+          metas.set(meta_key(op.meta.store_id, op.meta.version), op.meta)
+          break
+        case 'meta_delete':
+          metas.delete(meta_key(op.store_id, op.version))
+          break
+        case 'data_put':
+          blobs.set(op.data_key, op.bytes)
+          break
+        case 'observation_put':
+          rows.set(op.row.id, op.row)
+          break
+        case 'observation_delete':
+          rows.delete(op.id)
+          break
+      }
+    }
+    return ok(undefined)
   }
+
+  return { metadata, data, observations, on_event: options.on_event, apply_batch }
 }
 ```
 
-What you get from the wrapper:
-
-- **Error wrapping**: Catches throws and converts them to `Result<T, CorpusError>` with `kind: 'storage_error'`
-- **Event emission**: Emits `meta_get`, `meta_put`, `data_get`, `data_put`, etc.
-- **Deduplication tracking**: `deduplicated: true` on events when content hash matches
-
-## Optional `apply_batch` hook
-
-`corpus.transaction()` (see [Transactions](/corpus/guides/transactions/)) buffers ops inside the body and submits them in one shot at commit time. Backends opt into atomic application by exporting an `apply_batch` method; backends that don't fall back to a sequential best-effort path inside `corpus.transaction()`.
-
-### Signature
+Use it like any built-in backend:
 
 ```typescript
-type Backend = {
-  // ...
-  apply_batch?: (ops: BatchOp[]) => Promise<Result<void, CorpusError>>
-}
+import { create_corpus, define_store, text_codec } from '@f0rbit/corpus'
+import type { Backend } from '@f0rbit/corpus'
+
+declare function create_map_backend(): Backend // from the example above
+
+const notes = create_corpus()
+  .with_backend(create_map_backend())
+  .with_store(define_store('notes', text_codec()))
+  .build()
+
+const put = await notes.stores.notes.put('hello')
 ```
 
-`BatchOp` is a discriminated union covering every mutation a transaction can produce:
+### Errors are values
+
+Every `Result`-returning method must **return** its failure, never throw it. Don't count on corpus to catch a throw for you: it can reach the caller as a rejected promise instead of a `CorpusError`. Wrap I/O that can reject (network calls, `fetch`, driver queries) at the edge with `try_catch_async` and map the failure to a `CorpusError`, usually `{ kind: 'storage_error', operation, cause }`. Use `not_found` for absent records; it is not a storage error.
+
+Keep error messages about *what* failed (status code, key, SQL error text). Never put credentials or connection strings in an error message.
+
+### `list_stores` (optional)
+
+`metadata.list_stores` enumerates every store id. The `corpus` CLI's `stores` command and an unfiltered `copy()` need it. Callers that need it and find it missing report an actionable error rather than treating the backend as empty, so leaving it out is safe. All built-in backends yield the ids sorted.
+
+### Observations (optional)
+
+`create_observations_storage` and `create_observations_client` are public. They turn a row-level adapter (`get_all`, `set_all`, `get_one`, `add_one`, `remove_one`) into a full `ObservationsClient`: validation, staleness, filtering and `entity_key` inheritance included. Pass your `metadata` client so staleness checks and `entity_key` inheritance read your snapshots. Pass your emitter so rejected queries surface as `validation_error` events.
+
+An adapter can also provide `query(opts)` and `delete_by_source(...)` to push filtering into your storage. Without them, the storage wrapper loads every row and filters in memory. See `ObservationsAdapter` and `StorageQueryOpts` in [Observations](/corpus/api/core/observations).
+
+### `on_event`
+
+Return the handler you were given as `on_event` and call it from your methods. Emit `error` events at minimum: listing methods have no other way to report a failure (see [semantics](#semantics-a-backend-must-honour)). Tools such as `with_error_tracking` and the CLI hook in through `on_event`.
+
+### `apply_batch` (optional)
+
+`corpus.transaction()` buffers its body's ops and submits them as one `BatchOp[]` at commit:
 
 ```typescript
 type BatchOp =
@@ -3112,214 +3148,229 @@ type BatchOp =
   | { type: 'observation_delete'; id: string }
 ```
 
-Ops arrive in the order the body emitted them. The implementation is free to reorder internally (e.g. write all data blobs before metadata) but the post-commit state must match a serial application of the original order.
+Ops arrive in body order. You may reorder internally, for example writing all blobs before any metadata, as long as the final state matches applying the ops in their original order.
 
-### Contract
+`apply_batch` must be **all-or-nothing from a reader's point of view**:
 
-`apply_batch` must be **all-or-nothing from a reader's perspective**:
+- On success, return `ok(undefined)`. Every op is visible to later reads.
+- On failure, return `err({ kind: 'transaction_aborted', reason: 'apply_batch_failed', cause })`. No op may be visible. A repeated caller-supplied observation id is one of these failures.
+- If your storage can't guarantee that (some ops already landed), say so with `partial_commit`:
 
-- On success, return `ok(undefined)`. Every op in the batch is visible to subsequent reads.
-- On failure, return `err({ kind: 'transaction_aborted', reason: 'apply_batch_failed', cause })`. **No op** in the batch should be visible to subsequent reads. If your storage cannot guarantee this (e.g. the operation is not natively transactional and you've already written some ops), surface `partial_commit` honestly with `ops_completed` / `ops_failed` counts:
+```typescript
+import { err } from '@f0rbit/corpus'
+import type { CorpusError, Result } from '@f0rbit/corpus'
 
-```typescript nocheck
-return err({
-  kind: 'partial_commit',
-  ops_completed: 3,
-  ops_failed: 2,
-  cause,
-})
+const report_partial = (ops_completed: number, ops_failed: number, cause: Error): Result<void, CorpusError> =>
+  err({ kind: 'partial_commit', ops_completed, ops_failed, cause })
 ```
 
-Throwing from inside `apply_batch` is a contract violation — wrap external calls and translate failures to `Result`.
-
-### Fallback semantics when `apply_batch` is absent
-
-`corpus.transaction()` runs each op against the live backend in order. On the first failure, it issues compensating deletes for every op already applied, in reverse order:
+**Leaving `apply_batch` out** is valid. The remote backend does, because D1's HTTP API has no multi-statement transaction. `corpus.transaction()` then applies ops one at a time against `metadata` and `data`. On the first failure it undoes what it can, in reverse order:
 
 - `meta_put` → `metadata.delete`
-- `data_put` → `data.delete` (best-effort; absence is fine because data is content-addressed)
-- `observation_put` → `observations.delete`
-- `meta_delete` / `observation_delete` → **non-undoable** — surfaces `partial_commit` if any have already applied
+- `data_put` → `data.delete` (best-effort; data is content-addressed)
+- `meta_delete` / `observation_delete` can't be undone, so any that already applied turn the result into `partial_commit`
 
-If a compensation also fails, the transaction returns `partial_commit`. Otherwise it returns `transaction_aborted` with `reason: 'apply_batch_failed'`.
-
-This is intentionally best-effort. **Backends with non-trivial atomicity needs — anything that touches multiple stores, observations, or external services — should ship `apply_batch`.** The fallback is a safety net for simple custom backends; consumers that mix observations into transactions need a real `apply_batch` (the fallback returns `invalid_config` for `observation_put` / `observation_delete` ops to avoid silently diverging the buffered observation id from a re-minted server-side id).
-
-### Worked example: Postgres adapter
-
-A Postgres-backed backend wrapping `pg`'s transaction helper:
-
-```typescript nocheck
-import type { BatchOp, Backend, CorpusError, Result } from '@f0rbit/corpus'
-import { ok, err } from '@f0rbit/corpus'
-
-export function create_postgres_backend(pool: Pool): Backend {
-  // ...metadata, data, observations, on_event wired up as elsewhere...
-
-  async function apply_batch(ops: BatchOp[]): Promise<Result<void, CorpusError>> {
-    const client = await pool.connect()
-    try {
-      await client.query('BEGIN')
-
-      for (const op of ops) {
-        switch (op.type) {
-          case 'meta_put':
-            await client.query(meta_insert_sql, meta_insert_params(op.meta))
-            break
-          case 'meta_delete':
-            await client.query(meta_delete_sql, [op.store_id, op.version])
-            break
-          case 'data_put':
-            await client.query(data_insert_sql, [op.data_key, op.bytes])
-            break
-          case 'observation_put':
-            await client.query(obs_insert_sql, obs_insert_params(op.row))
-            break
-          case 'observation_delete':
-            await client.query(obs_delete_sql, [op.id])
-            break
-        }
-      }
-
-      await client.query('COMMIT')
-      return ok(undefined)
-    } catch (cause) {
-      await client.query('ROLLBACK').catch(() => {})
-      return err({
-        kind: 'transaction_aborted',
-        reason: 'apply_batch_failed',
-        cause: cause instanceof Error ? cause : new Error(String(cause)),
-      })
-    } finally {
-      client.release()
-    }
-  }
-
-  return { metadata, data, observations, on_event, apply_batch }
-}
-```
-
-Postgres is the easy case: `BEGIN` / `COMMIT` / `ROLLBACK` give true atomicity for free. The harder cases — multi-bucket object storage, cross-database writes — generally don't have that primitive and have to surface `partial_commit` honestly.
+If every undo succeeds, the transaction returns `transaction_aborted`; if any undo fails, `partial_commit`. Observation ops always fail on this path (`observation ops in transactions require backend.apply_batch`), so **a backend that supports observations inside transactions must implement `apply_batch`**. The fallback is a safety net for simple stores, not a transaction.
 
 <Aside type="tip">
-  See `backend/cloudflare.ts` for a hybrid example: D1's `db.batch()` gives atomic SQL, but R2 has no multi-object atomicity, so the impl writes R2 first (orphan-tolerant because content-addressed) and only then submits the D1 batch.
+  Native storage transactions (SQL `BEGIN`/`COMMIT`, D1's `db.batch()`) make `apply_batch` straightforward. When blobs and metadata live in different systems, write the blobs first (content-addressed, so orphans are harmless) and commit the metadata last as one atomic step. The Cloudflare backend works this way.
 </Aside>
 
-## Observations Support (Optional)
+## Wrapping an existing backend
 
-Observations are stored separately from metadata/data. If you want to support observations, implement an observations adapter:
-
-```typescript
-type ObservationsStorage = {
-  put_row: (row: ObservationRow) => Promise<Result<ObservationRow, CorpusError>>
-  get_row: (id: string) => Promise<Result<ObservationRow | null, CorpusError>>
-  query_rows: (opts?: StorageQueryOpts) => AsyncIterable<ObservationRow>
-  delete_row: (id: string) => Promise<Result<boolean, CorpusError>>
-  delete_by_source: (store_id: string, version: string, path?: string) => Promise<Result<number, CorpusError>>
-}
-```
-
-### Required Methods
-
-You must implement all methods above. Here's a minimal outline:
-
-- **put_row**: Store an observation row (with JSON content). Return the row.
-- **get_row**: Retrieve a row by ID, or `null`.
-- **query_rows**: Yield all rows matching filters (type, source_store, date ranges, etc.). Return as async iterable.
-- **delete_row**: Remove a row. Return `true` if deleted, `false` if not found.
-- **delete_by_source**: Remove all rows pointing to a specific source (store + version). Return count deleted.
-
-### Optional Optimizations
-
-The wrapper (`create_observations_storage`) can fall back to per-row operations if you don't provide optimized batch methods. However, providing these improves performance:
+A `Backend` is a plain object, so decorators are object spreads. The example below counts operations and injects a failure into data writes. Both wrap `create_memory_backend()`, and the result goes into `create_layered_backend`:
 
 ```typescript
-type ObservationsAdapter = ObservationsStorage & {
-  // Optional: batch query with filters (called by wrapper if present)
-  query_rows_optimized?: (opts: StorageQueryOpts) => AsyncIterable<ObservationRow>
+import { create_layered_backend, create_memory_backend, err } from '@f0rbit/corpus'
+import type { Backend, CorpusError, Result } from '@f0rbit/corpus'
 
-  // Optional: efficiently delete by source prefix (called if present)
-  delete_by_source_prefix?: (store_id: string, version_prefix: string) => Promise<Result<number, CorpusError>>
-}
-```
-
-### Wrapping into Client
-
-```typescript
-import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
-
-const storage = create_observations_storage(adapter)
-const client = create_observations_client(storage, metadata_client)
-```
-
-## Example: Full Custom Backend
-
-Here's a skeleton for a custom backend combining all pieces:
-
-```typescript nocheck
-import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
-import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
-import type { Backend, MetadataStorage, DataStorage, EventHandler } from '@f0rbit/corpus'
-import type { ObservationsStorage } from '@f0rbit/corpus'
-
-export interface CustomBackendConfig {
-  metaAdapter: MetadataStorage
-  dataAdapter: DataStorage
-  obsAdapter?: ObservationsStorage
-  on_event?: EventHandler
-}
-
-export function create_custom_backend(config: CustomBackendConfig): Backend {
-  const emit = config.on_event || (() => {})
-
+export function with_metrics(inner: Backend, counts: Map<string, number>): Backend {
+  const tick = (op: string): void => {
+    counts.set(op, (counts.get(op) ?? 0) + 1)
+  }
   return {
-    metadata: create_metadata_client(config.metaAdapter, emit),
-    data: create_data_client(config.dataAdapter, emit),
-    observations: config.obsAdapter
-      ? create_observations_client(
-          create_observations_storage(config.obsAdapter),
-          create_metadata_client(config.metaAdapter, emit)
-        )
-      : undefined,
-    on_event: config.on_event,
+    ...inner,
+    metadata: {
+      ...inner.metadata,
+      get: (store_id, version) => {
+        tick('meta.get')
+        return inner.metadata.get(store_id, version)
+      },
+      put: (meta) => {
+        tick('meta.put')
+        return inner.metadata.put(meta)
+      },
+    },
+    data: {
+      ...inner.data,
+      put: (data_key, bytes) => {
+        tick('data.put')
+        return inner.data.put(data_key, bytes)
+      },
+    },
   }
 }
-```
 
-## Error Handling
+// Fails every data write after the first `allowed`. Dropping apply_batch
+// forces corpus.transaction() onto the sequential fallback, so compensation
+// and partial_commit paths get exercised.
+export function with_failing_data_puts(inner: Backend, allowed: number): Backend {
+  let puts = 0
+  const { apply_batch: _atomic, ...rest } = inner
+  return {
+    ...rest,
+    data: {
+      ...inner.data,
+      async put(data_key, bytes): Promise<Result<void, CorpusError>> {
+        puts += 1
+        if (puts > allowed) {
+          return err({ kind: 'storage_error', operation: 'data.put', cause: new Error('injected failure') })
+        }
+        return inner.data.put(data_key, bytes)
+      },
+    },
+  }
+}
 
-Adapters should:
+const counts = new Map<string, number>()
+const cache = with_metrics(create_memory_backend(), counts)
+const durable = create_memory_backend()
 
-- **Not throw** for not-found cases; return `null` instead
-- **Throw on I/O failures** (network, disk, permissions); the wrapper converts to `Result` with `kind: 'storage_error'`
-- Keep error messages descriptive for debugging
-
-The wrapper automatically logs errors via the `on_event` handler if provided.
-
-## Testing Custom Backends
-
-Use the integration test suite to validate your backend:
-
-```typescript nocheck
-import { runBackendContractTests } from '@f0rbit/corpus'
-
-describe('custom backend', () => {
-  runBackendContractTests(
-    'my-custom-backend',
-    async () => create_custom_backend(config),
-    async (backend) => {
-      // Cleanup function (optional)
-      await cleanup()
-    }
-  )
+const layered = create_layered_backend({
+  read: [cache, durable],
+  write: [cache, durable],
 })
 ```
 
-## See Also
+Things to know when you wrap:
 
-- [Backend Types](/corpus/api/backends/types) — Full interface definitions
-- [Memory Backend](/corpus/api/backends/memory) — Simple reference implementation
-- [File Backend](/corpus/api/backends/file) — Complete production implementation
+- **Spreading keeps `inner.apply_batch`**, and it writes to the inner storage directly. Transactional writes bypass your wrapped `metadata`/`data` methods. Wrap or drop `apply_batch` if the decorator must see every write.
+- **`inner.observations` was built over `inner.metadata`**, not your wrapper. Observation reads and staleness checks don't go through the decorator.
+- The built-in clients don't depend on `this`, so spreading their methods is safe. If a client you wrap does use `this`, bind it.
+- `create_layered_backend` sends `apply_batch` and `list_stores` to the **bottom write layer only**. Transactional writes skip cache layers, which fill lazily on reads. See [Layered](/corpus/api/backends/layered).
+
+## Semantics a backend must honour
+
+Every built-in backend follows these rules, and code written against one backend relies on them:
+
+- **Newest first, ties by insertion order.** `list` yields newest `created_at` first. When two snapshots share a `created_at` (same millisecond), the most recently **put** one comes first, and `get_latest` returns it. Re-putting an existing `(store_id, version)` keeps its original insertion position. Never order by the version string: versions are not lexicographically sortable.
+- **Filters apply before `limit`.** `before`, `after`, `tags` (every tag must be present), and `entity_key` (exact match; unkeyed snapshots never match a keyed filter) all narrow the set *before* `limit` truncates it. In SQL, they belong in the `WHERE` clause; filtering in JavaScript after a SQL `LIMIT` returns too few rows. `cursor` is not interpreted by any built-in backend.
+- **`get_latest(store_id, { entity_key })`** scopes to that entity. Without `entity_key` it is store-wide and ignores entities. Not found means `err({ kind: 'not_found', store_id, version: 'latest' })`.
+- **Listings report failures as `error` events, then end.** `list`, `list_stores` and `get_children` return `AsyncIterable`s, which have no error channel. On a storage failure, emit `{ type: 'error', error }` through `on_event` and finish the iterable. Callers that must tell "empty" from "failed" use `with_error_tracking` / `collect_listing`, which read those events.
+- **`data.exists` returns a plain boolean.** On a storage failure, emit an `error` event and return `false`.
+- **`find_by_hash` searches the whole history** for deduplication. Change detection (`put(data, { if_changed: true })`) goes through `get_latest` instead.
+- **Optional fields are omitted, not `undefined`.** If your storage returns `NULL` for `entity_key`, `invoked_at` or `tags`, drop the key before returning the `SnapshotMeta`.
+- **Observation ids are caller-supplied or generated, never overwritten.** Putting an id that already exists returns `validation_error`. Inside `apply_batch` it aborts the batch with `transaction_aborted`. Check for the collision in the same atomic section as the insert.
+- **Data before metadata.** Metadata must never point at a blob that doesn't exist. `copy()` and the transaction paths write `data` before `metadata` and rely on it. Orphaned blobs are harmless because they are content-addressed.
+
+## Testing a custom backend
+
+Corpus's own **backend contract suite** and **backend equivalence models** live in its repository tests (`tests/integration/backend-contract.test.ts`, `tests/property/backend-equivalence.test.ts`). They are not a published export. To use them, copy them into your project as a starting point.
+
+What *is* published is `law.provider_equivalence` from `@f0rbit/corpus/testing`. It runs generated command sequences against a small reference model and every provider you list, comparing results after each command, and shrinks any divergence to a minimal sequence. Put `create_memory_backend()` next to your backend: when both agree with the model, your backend behaves like the reference.
+
+```typescript
+import { test } from 'bun:test'
+import { create_memory_backend, err, ok } from '@f0rbit/corpus'
+import type { Backend, CorpusError, ParentRef, Result, SnapshotMeta } from '@f0rbit/corpus'
+import { fc, law } from '@f0rbit/corpus/testing'
+
+declare function create_map_backend(): Backend // the backend under test
+
+type Model = { metas: SnapshotMeta[] }
+
+const store_ids = ['a', 'b']
+
+const meta_arb: fc.Arbitrary<SnapshotMeta> = fc.record({
+  store_id: fc.constantFrom(...store_ids),
+  version: fc.constantFrom('v1', 'v2', 'v3'),
+  parents: fc.constant<ParentRef[]>([]),
+  created_at: fc.integer({ min: 0, max: 2 }).map((s) => new Date(s * 1000)), // few values → ties
+  content_hash: fc.constantFrom('h1', 'h2'),
+  content_type: fc.constant('text/plain'),
+  size_bytes: fc.nat(100),
+  data_key: fc.constantFrom('k1', 'k2'),
+})
+
+const in_store = (m: Model, store_id: string): SnapshotMeta[] => m.metas.filter((x) => x.store_id === store_id)
+
+const newest_first = (metas: SnapshotMeta[]): SnapshotMeta[] =>
+  metas.toReversed().toSorted((a, b) => b.created_at.getTime() - a.created_at.getTime())
+
+const put = (meta: SnapshotMeta) =>
+  law.equivalence_command<Model, Backend, Result<void, CorpusError>>({
+    label: `put(${meta.store_id}/${meta.version})`,
+    on_model: (m) => {
+      const i = m.metas.findIndex((x) => x.store_id === meta.store_id && x.version === meta.version)
+      if (i === -1) m.metas.push(meta)
+      else m.metas[i] = meta
+      return ok(undefined)
+    },
+    on_sut: (b) => b.metadata.put(meta),
+  })
+
+const get = (store_id: string, version: string) =>
+  law.equivalence_command<Model, Backend, Result<SnapshotMeta, CorpusError>>({
+    label: `get(${store_id}/${version})`,
+    on_model: (m) => {
+      const found = in_store(m, store_id).find((x) => x.version === version)
+      if (found === undefined) return err({ kind: 'not_found', store_id, version })
+      return ok(found)
+    },
+    on_sut: (b) => b.metadata.get(store_id, version),
+  })
+
+const latest = (store_id: string) =>
+  law.equivalence_command<Model, Backend, Result<SnapshotMeta, CorpusError>>({
+    label: `get_latest(${store_id})`,
+    on_model: (m) => {
+      const found = newest_first(in_store(m, store_id)).at(0)
+      if (found === undefined) return err({ kind: 'not_found', store_id, version: 'latest' })
+      return ok(found)
+    },
+    on_sut: (b) => b.metadata.get_latest(store_id),
+  })
+
+const list = (store_id: string, limit: number) =>
+  law.equivalence_command<Model, Backend, Result<SnapshotMeta[], CorpusError>>({
+    label: `list(${store_id}, limit=${String(limit)})`,
+    on_model: (m) => ok(newest_first(in_store(m, store_id)).slice(0, limit)),
+    on_sut: async (b) => ok(await Array.fromAsync(b.metadata.list(store_id, { limit }))),
+  })
+
+test('map backend is equivalent to the memory backend', async () => {
+  await law.provider_equivalence<Model, Backend>({
+    model: () => ({ metas: [] }),
+    providers: [
+      { label: 'memory', build: () => create_memory_backend() },
+      { label: 'map', build: () => create_map_backend() },
+    ],
+    commands: [
+      meta_arb.map(put),
+      fc.tuple(fc.constantFrom(...store_ids), fc.constantFrom('v1', 'v2', 'v3')).map(([s, v]) => get(s, v)),
+      fc.constantFrom(...store_ids).map(latest),
+      fc.tuple(fc.constantFrom(...store_ids), fc.integer({ min: 1, max: 3 })).map(([s, n]) => list(s, n)),
+    ],
+    equivalence: { results_agree: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+    numRuns: 200,
+    maxCommands: 30,
+    size: 'max',
+  })
+})
+```
+
+Grow the command pool to match your backend's surface: `list` with `tags`/`entity_key`/`before`/`after`, `delete`, `data.put`/`data.get`, observations. The model is the spec, so keep it small and obviously correct. Payload arbitraries inside commands must be plain `fc.*` values, not `testing.compose`, because the latter's shrinker may not terminate. See [Testing laws](/corpus/testing/laws/) for the rest of the substrate.
+
+<Aside type="caution">
+  The memory backend implements `apply_batch`; a backend without it takes the sequential transaction fallback. Test transactions separately against your backend, including a failing write, which `with_failing_data_puts` above can simulate.
+</Aside>
+
+## See also
+
+- [Backend Types](/corpus/api/backends/types): full `MetadataClient` / `DataClient` definitions
+- [Memory Backend](/corpus/api/backends/memory): the reference implementation to compare against
+- [Layered](/corpus/api/backends/layered): composing backends
+- [Transactions](/corpus/guides/transactions/): what `apply_batch` is committing
 
 ---
 
@@ -3717,7 +3768,7 @@ Streamability composes structurally. `compose(text_codec(), gzip_codec())` keeps
 
 - [Codecs](/corpus/api/codecs) — `compose()`, built-in codecs, streamability table
 - [Core Types](/corpus/api/core/types) — `SnapshotHandle<T>`, `Store<T>`, `StreamableValue`
-- [Extending Backends](/corpus/api/extending-backends) — `DataStorageHandle` for custom backends
+- [Extending Backends](/corpus/api/extending-backends) — returning a streamable `DataHandle` from a custom backend
 
 ---
 
