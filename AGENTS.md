@@ -38,7 +38,7 @@ This is a **single-package** library (not a monorepo). All source lives at the r
 │   ├── meta.ts           # serialize_meta — single source of truth for SnapshotMeta → JSON document
 │   ├── lookup.ts         # Shared show/cat version resolution; store-not-found errors
 │   ├── backend-errors.ts # WeakMap-backed listing-error tracker for CLI commands (collect_list)
-│   └── commands/         # Command registry + bodies: stores, versions, show, cat, lineage, clone
+│   └── commands/         # Command registry + bodies: stores, versions, show, cat, lineage, clone (files not listed individually)
 ├── codecs/               # Layer codecs: gzip.ts, encrypt.ts
 ├── backend/              # Backend implementations
 │   ├── base.ts           # MetadataStorage / DataStorage adapter interfaces
@@ -59,8 +59,8 @@ This is a **single-package** library (not a monorepo). All source lives at the r
 │   ├── id.ts             # Caller-supplied observation id resolution (validate-or-generate, collision error)
 │   ├── types.ts
 │   └── utils.ts          # create_pointer, resolve_path, apply_span, ...
-├── testing/              # Property-based testing substrate — see "Testing substrate" below
-│   ├── laws/             # law.* property laws (round-trip, idempotent, functor, equality, error-path-exhaustive, provider-equivalence)
+├── testing/              # Property-based testing substrate — see "Testing substrate" below (files not listed individually)
+│   ├── laws/             # law.* property laws (round-trip, idempotent, functor, equality, error-path-exhaustive, provider-equivalence) (files not listed individually)
 │   └── vending/          # Auto-load walker + registrar discovery (walker.ts, auto-load.ts)
 ├── tests/
 │   ├── unit/             # result, concurrency, builder/type-level tests, cli-args/config/output/main, coverage-diff-content, testing substrate
