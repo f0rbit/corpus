@@ -61,7 +61,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Create `drizzle.config.ts` in your project root and point it at that file:
 
-```typescript
+```typescript nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
@@ -316,7 +316,7 @@ function getCorpus(env: Env) {
 
 Always check the `Result` type from operations:
 
-```typescript
+```typescript nocheck
 const result = await corpus.stores.cache.get(version)
 
 if (!result.ok) {

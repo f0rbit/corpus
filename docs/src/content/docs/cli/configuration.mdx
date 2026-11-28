@@ -27,12 +27,12 @@ A wrangler `database_id` that isn't a UUID (e.g. an SST/IaC placeholder like `pl
 Create a `corpus.config.ts` file in your workspace root (or pass `--config <path>` to override). Use `define_config` to get type checking:
 
 ```typescript
-import { define_config } from '@f0rbit/corpus/cli'
+import { define_config } from '@f0rbit/corpus'
 
 export default define_config({
   stores: [
-    { id: 'users', codec: /* optional */ },
-    { id: 'posts', codec: /* optional */ },
+    { id: 'users' },   // codec optional — used by `corpus cat` to decode snapshot data
+    { id: 'posts' },
   ],
   environments: {
     remote: {
@@ -59,8 +59,8 @@ The `stores` array lists store definitions. If present, only these stores are co
 <Aside type="tip">
 For true single-source-of-truth, import your store definitions from your application instead of duplicating them:
 
-```typescript
-import { define_config } from '@f0rbit/corpus/cli'
+```typescript nocheck
+import { define_config } from '@f0rbit/corpus'
 import { my_stores } from '@myapp/schema'  // Import your real store defs
 
 export default define_config({
@@ -75,7 +75,7 @@ export default define_config({
 Name your environments and define connection parameters:
 
 **Remote (Cloudflare D1 + R2):**
-```typescript
+```typescript nocheck
 remote: {
   account_id: 'your-cf-account-id',        // Falls back to CLOUDFLARE_ACCOUNT_ID / wrangler sniff if omitted
   database_id: 'your-d1-database-id',      // Falls back to wrangler sniff / CORPUS_D1_DATABASE_ID if omitted
@@ -88,7 +88,7 @@ remote: {
 All fields here are individually optional in the schema — resolution falls through to wrangler sniffing and then environment variables per the precedence table above. A run only fails if `account_id`, `database_id`, `bucket`, or the `CLOUDFLARE_API_TOKEN` env var can't be resolved from *any* source.
 
 **File (local file system):**
-```typescript
+```typescript nocheck
 local: {
   file: './corpus-data',  // Path to corpus data directory
 }

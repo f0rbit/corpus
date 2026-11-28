@@ -57,7 +57,7 @@ type CorpusInfra = {
 
 ### SST Config
 
-```typescript
+```typescript nocheck
 // sst.config.ts
 import { createCorpusInfra } from '@f0rbit/corpus'
 
@@ -92,7 +92,7 @@ export default $config({
 
 ### Worker Code
 
-```typescript
+```typescript nocheck
 // src/index.ts
 import { Resource } from 'sst'
 import { 
@@ -146,7 +146,7 @@ export { corpus_snapshots, corpus_observations } from '@f0rbit/corpus/schema'
 
 Then configure `drizzle.config.ts`:
 
-```typescript
+```typescript nocheck
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({

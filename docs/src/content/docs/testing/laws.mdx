@@ -14,17 +14,17 @@ Laws are pre-built property checkers that verify your code respects a contract. 
 Use this for any codec, serializer, or bidirectional transformation.
 
 ```typescript
-import { testing, text_codec } from "@f0rbit/corpus";
+import { testing } from "@f0rbit/corpus";
 
-const text_codec = {
+const my_codec = {
   encode: (x: string) => new TextEncoder().encode(x),
   decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
 };
 
 await testing.law.round_trip(
   testing.fc.string(),
-  text_codec.encode,
-  text_codec.decode
+  my_codec.encode,
+  my_codec.decode
 );
 ```
 
@@ -35,12 +35,14 @@ The law generates 100 random strings by default, encodes each, decodes it, and a
 - `equals` — custom equality check; defaults to `Bun.deepEquals` under Bun (required on Node)
 
 ```typescript
+import { testing } from "@f0rbit/corpus";
+
 await testing.law.round_trip(
   testing.arb(UserSchema),
   user => JSON.stringify(user),
   json => JSON.parse(json),
   {
-    equals: (a, b) => a.id === b.id && a.name === b.name,
+    equals: (a, b) => (a as User).id === (b as User).id && (a as User).name === (b as User).name,
     numRuns: 200,
   }
 );
@@ -79,13 +81,12 @@ Use this for types that implement the functor laws (arrays, optionals, Results, 
 import { testing } from "@f0rbit/corpus";
 
 const arr = [1, 2, 3];
-const f = (x: number) => x * 2;
-const g = (x: number) => x + 1;
 
 await testing.law.functor({
   arb: testing.arb(ArraySchema),
-  map: (arr, fn) => arr.map(fn),
+  map: (arr, fn) => (arr as unknown[]).map(fn),
   equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  fn_arb: testing.fc.constant((x: unknown) => x),
 });
 ```
 
@@ -109,24 +110,30 @@ The headline law: compile-time exhaustiveness (TypeScript enforces you handle ev
 
 ```typescript
 import { testing } from "@f0rbit/corpus";
-import { CORPUS_ERROR_BRAND } from "@f0rbit/corpus/testing";
 import type { Result } from "@f0rbit/corpus";
+
+// A custom tagged error union (any `{ kind: string }` union works)
+type GetUserError =
+  | { kind: "not_found"; user_id: string }
+  | { kind: "decode_error"; cause: Error }
+  | { kind: "timeout"; duration: number };
+
+const GET_USER_BRAND = Symbol("GetUserError");
 
 // Example: a function that returns multiple error kinds
 async function get_user(
   id: string,
   opts?: { timeout?: number }
-): Promise<Result<User, CorpusError>> {
-  // Can return: not_found, decode_error, timeout, or ok
+): Promise<Result<User, GetUserError>> {
+  return err({ kind: "not_found", user_id: id });
 }
 
 await testing.law.error_path_exhaustive(get_user, {
-  error_brand: CORPUS_ERROR_BRAND,
+  error_brand: GET_USER_BRAND,
   provoke: {
     not_found: (f) => [f.user_id],
     decode_error: (f) => [corrupt_bytes(f)],
-    timeout: (f) => [undefined, { timeout: f.duration }],
-    // TypeScript enforces every variant is listed here
+    timeout: (f) => ['user-id', { timeout: f.duration }],
   },
   only: ["not_found", "decode_error"], // optional: test only a subset
   numRuns: 200,
@@ -185,20 +192,21 @@ const increment_cmd = testing.law.equivalence_command<CounterModel, Counter, Res
   on_sut: (c) => c.increment(),
 });
 
-const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, void>({
+const reset_cmd = testing.law.equivalence_command<CounterModel, Counter, Result<void, CounterError>>({
   label: "reset()",
   on_model: (m) => {
     m.count = 0;
+    return ok(undefined);
   },
   on_sut: (c) => c.reset(),
 });
 
 await testing.law.provider_equivalence({
   model: () => ({ count: 0 }),
-  providers: {
-    memory: () => new MemoryCounter(),
-    persistent: () => new FileBackedCounter(),
-  },
+  providers: [
+    { label: "memory", build: () => new MemoryCounter() },
+    { label: "persistent", build: () => new FileBackedCounter() },
+  ],
   commands: [increment_cmd, reset_cmd],
   equivalence: {
     results_agree: (a, b) => a === b,
@@ -237,7 +245,7 @@ The command carries both results and compares them automatically.
 
 **Options:**
 - `model()` — factory returning a fresh model instance per run (must return fresh, not reused)
-- `providers` — labelled object of provider factories (one per SUT)
+- `providers` — labelled provider factories, one per system-under-test (`{ label, build }` entries)
 - `commands` — pool of `equivalence_command` instances and/or arbitraries of commands
 - `equivalence.results_agree(model_r, sut_r)` — equality check for ok-values (or raw results when non-Result-shaped)
 - `numRuns` — property runs; default 100
@@ -259,20 +267,20 @@ The command carries both results and compares them automatically.
 Use `testing.cover()` (Hedgehog-style) to assert parts of your test space got exercised:
 
 ```typescript
-await testing.law.round_trip(
-  testing.compose((draw) => {
-    const x = draw(testing.fc.integer());
-    testing.cover(x > 0, "positive");
-    testing.cover(x < 0, "negative");
-    testing.cover(x === 0, "zero");
-    return x;
-  }),
-  encode,
-  decode,
-  { numRuns: 200 }
+await testing.cover(
+  testing.fc.integer(),
+  async () => true,
+  {
+    labels: [
+      { name: "negative", min_percent: 25, matches: (n) => n < 0 },
+      { name: "zero", min_percent: 1, matches: (n) => n === 0 },
+      { name: "positive", min_percent: 25, matches: (n) => n > 0 },
+    ],
+  }
 );
 
-// If the labels don't hit, the law throws with coverage stats
+// If the labels don't hit their minimum, the checker throws CoverageError
+// listing every label's observed vs. minimum percentage
 ```
 
 ### Opting Out of Shrinking
@@ -293,8 +301,8 @@ await testing.law.round_trip(
   {
     equals: (a, b) => {
       // Ignore the `_internal_cache` field
-      const { _internal_cache: _, ...a_clean } = a;
-      const { _internal_cache: __, ...b_clean } = b;
+      const { _internal_cache: _, ...a_clean } = a as Record<string, unknown>;
+      const { _internal_cache: __, ...b_clean } = b as Record<string, unknown>;
       return JSON.stringify(a_clean) === JSON.stringify(b_clean);
     },
   }

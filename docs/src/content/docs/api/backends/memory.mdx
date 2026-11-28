@@ -5,7 +5,7 @@ description: In-memory storage backend for testing and development
 
 import { Aside } from '@astrojs/starlight/components';
 
-```ts
+```ts nocheck
 function create_memory_backend(options?: MemoryBackendOptions): Backend
 ```
 
@@ -140,7 +140,9 @@ describe('shopping cart', () => {
     // This test has a fresh backend - no data from previous test
     const result = await corpus.stores.carts.get_latest()
     expect(result.ok).toBe(false)
-    expect(result.error.kind).toBe('not_found')
+    if (!result.ok) {
+      expect(result.error.kind).toBe('not_found')
+    }
   })
 })
 ```
@@ -186,6 +188,7 @@ it('tracks lineage across stores', async () => {
     .build()
 
   const source = await corpus.stores.sources.put({ data: 'input' })
+  if (!source.ok) throw source.error
   
   await corpus.stores.derived.put(
     { result: 'output' },

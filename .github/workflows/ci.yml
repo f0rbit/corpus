@@ -28,6 +28,10 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # docs snippets typecheck (MDX code fences + testing template)
+      - name: Docs snippet check
+        run: bun run docs:check
+
       # --coverage enforces the per-file 80% floor from bunfig.toml
       - name: Run tests
         run: bun test --coverage

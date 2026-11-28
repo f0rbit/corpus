@@ -3,7 +3,7 @@ title: define_store
 description: Create a type-safe store definition
 ---
 
-```ts
+```ts nocheck
 function define_store<Id extends string, T>(
   id: Id,
   codec: Codec<T>,
@@ -78,12 +78,11 @@ const hansard = define_store('hansard', text_codec(), {
   }
 })
 
-// Usage
+// Usage — corpus generates the version; data_key_fn builds the path from it
 await corpus.stores.hansard.put(transcript, {
-  version: 'v1',
   tags: ['date:2024-03-15', 'chamber:house']
 })
-// Stored at: australia-house/raw/2024-03-15/v1
+// Stored at: australia-house/raw/2024-03-15/<generated version>
 ```
 
 ### Example: Custom Namespace Prefixes

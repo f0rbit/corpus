@@ -5,7 +5,7 @@ description: Create a typed Store instance bound to a backend
 
 import { Aside } from '@astrojs/starlight/components';
 
-```ts
+```ts nocheck
 function create_store<T>(
   backend: Backend, 
   definition: StoreDefinition<string, T>
@@ -59,12 +59,14 @@ Stores automatically deduplicate content. If you store the same data twice, it c
 const v1 = await store.put({ name: 'Same' })
 const v2 = await store.put({ name: 'Same' })
 
-// Same content hash, same data_key
-v1.value.content_hash === v2.value.content_hash // true
-v1.value.data_key === v2.value.data_key // true
+if (v1.ok && v2.ok) {
+  // Same content hash, same data_key
+  v1.value.content_hash === v2.value.content_hash // true
+  v1.value.data_key === v2.value.data_key // true
 
-// But different versions
-v1.value.version !== v2.value.version // true
+  // But different versions
+  v1.value.version !== v2.value.version // true
+}
 ```
 
 ## See Also

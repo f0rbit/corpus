@@ -61,7 +61,7 @@ create_memory_backend({
 Local filesystem storage using Bun's file APIs.
 
 ```typescript
-import { create_file_backend } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 const backend = create_file_backend({
   base_path: './data/corpus'
@@ -117,9 +117,9 @@ Combines multiple backends with read/write separation for caching and replicatio
 ```typescript
 import { 
   create_layered_backend, 
-  create_memory_backend, 
-  create_file_backend 
+  create_memory_backend
 } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
 
 const cache = create_memory_backend()
 const storage = create_file_backend({ base_path: './data' })
@@ -185,23 +185,24 @@ const backend = create_layered_backend({
 You can create custom backends by implementing the `Backend` interface:
 
 ```typescript
-import type { Backend, MetadataClient, DataClient } from '@f0rbit/corpus'
+import { ok } from '@f0rbit/corpus'
+import type { Backend, SnapshotMeta, DataHandle } from '@f0rbit/corpus'
 
 const customBackend: Backend = {
   metadata: {
-    get: async (store_id, version) => { /* ... */ },
-    put: async (meta) => { /* ... */ },
-    delete: async (store_id, version) => { /* ... */ },
-    list: async function* (store_id, opts) { /* ... */ },
-    get_latest: async (store_id) => { /* ... */ },
-    get_children: async function* (parent_store_id, parent_version) { /* ... */ },
-    find_by_hash: async (store_id, content_hash) => { /* ... */ },
+    get: async (store_id, version) => ok({} as SnapshotMeta),        // Result<SnapshotMeta, CorpusError>
+    put: async (meta) => ok(undefined),                              // Result<void, CorpusError>
+    delete: async (store_id, version) => ok(undefined),
+    list: async function* (store_id, opts) { /* yield SnapshotMeta values */ },
+    get_latest: async (store_id, opts) => ok({} as SnapshotMeta),
+    get_children: async function* (parent_store_id, parent_version) { /* yield SnapshotMeta values */ },
+    find_by_hash: async (store_id, content_hash) => null,          // SnapshotMeta | null
   },
   data: {
-    get: async (data_key) => { /* ... */ },
-    put: async (data_key, data) => { /* ... */ },
-    delete: async (data_key) => { /* ... */ },
-    exists: async (data_key) => { /* ... */ },
+    get: async (data_key) => ok({} as DataHandle),                   // Result<DataHandle, CorpusError>
+    put: async (data_key, data) => ok(undefined),
+    delete: async (data_key) => ok(undefined),
+    exists: async (data_key) => true,                                // boolean
   },
   on_event: (event) => { /* optional event handler */ },
 }

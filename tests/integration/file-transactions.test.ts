@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { z } from "zod";
 import { create_file_backend, recover } from "../../backend/file.js";
 import { create_corpus, define_store, json_codec, ok } from "../../index.js";
-import type { Backend, Corpus, SnapshotMeta, Store } from "../../types.js";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import type { Backend, BatchOp, Corpus, CorpusEvent, SnapshotMeta, Store } from "../../types.js";
+import { chmod, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { chmodSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { make_tmp_dir, remove_tmp_dir } from "../support/tmp.js";
 
@@ -30,6 +31,37 @@ describe("file backend - apply_batch", () => {
 
 	afterEach(async () => {
 		await remove_tmp_dir(test_dir);
+	});
+
+	it("reports a failed staging cleanup as an error event and returns the original abort", async () => {
+		const events: CorpusEvent[] = [];
+		const backend = create_file_backend({ base_path: test_dir, on_event: (e) => events.push(e) });
+
+		// The op's `bytes` getter runs mid-staging: it makes the staging dir read-only, so the
+		// staged write fails AND the cleanup `rm` can't unlink entries from it.
+		const poisoned = {
+			type: "data_put",
+			data_key: "items/k",
+			get bytes(): Uint8Array {
+				const stale = readdirSync(test_dir).filter((n) => n.startsWith(".tx-"));
+				for (const name of stale) chmodSync(join(test_dir, name), 0o500);
+				return new Uint8Array([1]);
+			},
+		} as unknown as BatchOp;
+
+		const result = await backend.apply_batch!([poisoned]);
+
+		for (const name of readdirSync(test_dir).filter((n) => n.startsWith(".tx-"))) {
+			await chmod(join(test_dir, name), 0o700);
+		}
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error.kind).toBe("transaction_aborted");
+		const cleanup = events.find((e) => e.type === "error" && e.error.kind === "storage_error");
+		expect(cleanup).toBeDefined();
+		if (cleanup?.type === "error" && cleanup.error.kind === "storage_error") {
+			expect(cleanup.error.operation).toBe("apply_batch.cleanup");
+		}
 	});
 
 	it("commits a mixed batch (meta_put + data_put + meta_delete) atomically", async () => {

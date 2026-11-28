@@ -21,6 +21,7 @@ import { ok, err } from "../types.js";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { create_metadata_client, create_data_client } from "./base.js";
+import { storage_error } from "./errors.js";
 import { try_catch_async } from "../result.js";
 import type { MetadataStorage, DataStorage } from "./base.js";
 import { z } from "zod/v4";
@@ -243,7 +244,6 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			return {
 				bytes: async () => new Uint8Array(await file.arrayBuffer()),
 				stream: () => file.stream(),
-				size: file.size,
 			};
 		},
 
@@ -526,8 +526,12 @@ export function create_file_backend(config: FileBackendConfig): Backend {
 			return ok(undefined);
 		} catch (cause) {
 			// Staging-phase failure: nothing was visible to readers, so this
-			// is a clean abort. Nuke the staging dir.
-			await rm(tx_dir, { recursive: true, force: true }).catch(() => {});
+			// is a clean abort. Nuke the staging dir. If the cleanup itself
+			// fails, surface it as an error event but return the ORIGINAL
+			// transaction error — the cleanup failure must not mask it.
+			await rm(tx_dir, { recursive: true, force: true }).catch((cleanup_cause: unknown) => {
+				emit({ type: "error", error: storage_error("apply_batch.cleanup")(cleanup_cause) });
+			});
 			return err({
 				kind: "transaction_aborted",
 				reason: "apply_batch_failed",

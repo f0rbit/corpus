@@ -13,10 +13,10 @@ Traditional example-based tests check a few handpicked cases. Property tests gen
 
 ```typescript
 // Example-based: you pick specific cases
-test("round-trip encodes and decodes", () => {
+test("round-trip encodes and decodes", async () => {
   const text = "hello";
-  const encoded = text_codec.encode(text);
-  const decoded = text_codec.decode(encoded);
+  const encoded = await text_codec().encode(text);
+  const decoded = await text_codec().decode(encoded);
   expect(decoded).toBe(text);
 });
 
@@ -26,8 +26,8 @@ import { testing, text_codec } from "@f0rbit/corpus";
 test("round-trip works for all strings", async () => {
   await testing.law.round_trip(
     testing.fc.string(),
-    text_codec.encode,
-    text_codec.decode
+    text_codec().encode,
+    text_codec().decode
   );
 });
 ```
@@ -69,8 +69,8 @@ The testing substrate is exposed under two paths — pick whichever fits your us
 // Direct entry point (preferred in hot-path tests — skips main barrel)
 import * as testing from "@f0rbit/corpus/testing";
 
-// Or via the main barrel (only one import for everything)
-import { testing } from "@f0rbit/corpus";
+// Or via the main barrel (only one import for everything):
+// import { testing } from "@f0rbit/corpus";
 
 // Both resolve to the same API
 const arb = testing.arb(MySchema);

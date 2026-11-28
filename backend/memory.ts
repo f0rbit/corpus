@@ -119,7 +119,6 @@ export function create_memory_backend(options?: MemoryBackendOptions): Backend {
 							controller.close();
 						},
 					}),
-				size: bytes.byteLength,
 			};
 		},
 

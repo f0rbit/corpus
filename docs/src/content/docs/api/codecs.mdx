@@ -39,7 +39,7 @@ Codecs define how data is serialized for storage and deserialized on retrieval. 
 
   **Migration:** wrap the body of an existing sync codec in `async` (one-line change). Built-in codecs were updated in 0.4.0 — consumers using only `store.put` / `store.get` see no break. Consumers calling `codec.encode` / `codec.decode` directly need `await`.
 
-  ```ts
+  ```ts nocheck
   // before
   encode: (value) => new TextEncoder().encode(value)
   // after
@@ -49,8 +49,8 @@ Codecs define how data is serialized for storage and deserialized on retrieval. 
 
 ## json_codec
 
-```ts
-function json_codec<T>(schema: ZodLike<T>): Codec<T>
+```ts nocheck
+function json_codec<T>(schema: Parser<T>): Codec<T>
 ```
 
 Creates a JSON codec with Zod schema validation. Data is validated on decode (read), ensuring type safety when retrieving stored data.
@@ -76,7 +76,7 @@ Works with both Zod 3.x and 4.x through structural typing:
 
 ```ts
 // Any object with a parse method works
-type ZodLike<T> = { parse: (data: unknown) => T }
+type Parser<T> = { parse: (data: unknown) => T }
 ```
 
 ### Validation Example
@@ -101,7 +101,7 @@ if (!result.ok && result.error.kind === 'decode_error') {
 
 ## text_codec
 
-```ts
+```ts nocheck
 function text_codec(): Codec<string>
 ```
 
@@ -141,7 +141,7 @@ if (latest.ok) {
 
 ## binary_codec
 
-```ts
+```ts nocheck
 function binary_codec(): Codec<Uint8Array>
 ```
 
@@ -159,6 +159,9 @@ const documents = define_store('documents', binary_codec())
 ### Example
 
 ```ts
+import { create_corpus, define_store, binary_codec } from '@f0rbit/corpus'
+import { create_file_backend } from '@f0rbit/corpus/file'
+
 const corpus = create_corpus()
   .with_backend(create_file_backend({ base_path: './data' }))
   .with_store(define_store('images', binary_codec()))
@@ -190,7 +193,7 @@ if (result.ok) {
 
 ## compose
 
-```ts
+```ts nocheck
 function compose<T>(head: Codec<T>, ...layers: BytesCodec[]): Codec<T>
 ```
 
@@ -232,7 +235,7 @@ This propagates to the [`Store<T>` type](/corpus/api/streaming#compile-time-guar
 
 ## gzip_codec
 
-```ts
+```ts nocheck
 function gzip_codec(): BytesCodec
 ```
 
@@ -259,7 +262,7 @@ Both `encode_stream` and `decode_stream` are present, so a `compose(text_codec()
 
 ## encrypt_codec
 
-```ts
+```ts nocheck
 function encrypt_codec(key: CryptoKey): BytesCodec
 ```
 
@@ -329,7 +332,7 @@ type Codec<T> = {
 
 ### MessagePack Example
 
-```ts
+```ts nocheck
 import { encode, decode } from '@msgpack/msgpack'
 
 function msgpack_codec<T>(schema: Parser<T>): Codec<T> {

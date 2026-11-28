@@ -58,7 +58,7 @@ type MetadataStorage = {
 ### Example: Postgres Metadata Adapter
 
 ```typescript
-import { SnapshotMeta } from '@f0rbit/corpus'
+import type { SnapshotMeta } from '@f0rbit/corpus'
 
 type MetadataStorage = {
   get: (store_id: string, version: string) => Promise<SnapshotMeta | null>
@@ -132,7 +132,6 @@ type DataStorage = {
 type DataStorageHandle = {
   bytes: () => Promise<Uint8Array>
   stream?: () => ReadableStream<Uint8Array>
-  size?: number
 }
 ```
 
@@ -147,7 +146,7 @@ The handle's `bytes()` is mandatory; `stream()` is optional. If you don't provid
 
 ### Example Sketch: R2-Compatible Storage
 
-```typescript
+```typescript nocheck
 export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStorage> {
   return {
     async get(data_key) {
@@ -156,7 +155,6 @@ export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStor
       return {
         bytes: async () => new Uint8Array(await obj.arrayBuffer()),
         stream: () => obj.body as ReadableStream<Uint8Array>,
-        size: obj.size,
       }
     },
 
@@ -182,7 +180,7 @@ Before 0.4.0, `DataStorage.get` returned `Promise<Uint8Array | null>`. From 0.4.
 
 For backends that genuinely only have a bytes-getter, use the `wrap_bytes_storage` helper to keep the migration to a single line:
 
-```typescript
+```typescript nocheck
 import { create_data_client, wrap_bytes_storage } from '@f0rbit/corpus/backend/base'
 
 // before â€” pre-0.4.0
@@ -200,7 +198,7 @@ The consumer-facing `DataHandle` (the shape returned by `DataClient.get`) is unc
 
 Use the factory functions from `backend/base.ts` to wrap adapters and get error handling + event emission for free:
 
-```typescript
+```typescript nocheck
 import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
 import type { Backend, EventHandler } from '@f0rbit/corpus'
 
@@ -258,7 +256,7 @@ Ops arrive in the order the body emitted them. The implementation is free to reo
 - On success, return `ok(undefined)`. Every op in the batch is visible to subsequent reads.
 - On failure, return `err({ kind: 'transaction_aborted', reason: 'apply_batch_failed', cause })`. **No op** in the batch should be visible to subsequent reads. If your storage cannot guarantee this (e.g. the operation is not natively transactional and you've already written some ops), surface `partial_commit` honestly with `ops_completed` / `ops_failed` counts:
 
-```typescript
+```typescript nocheck
 return err({
   kind: 'partial_commit',
   ops_completed: 3,
@@ -286,7 +284,7 @@ This is intentionally best-effort. **Backends with non-trivial atomicity needs â
 
 A Postgres-backed backend wrapping `pg`'s transaction helper:
 
-```typescript
+```typescript nocheck
 import type { BatchOp, Backend, CorpusError, Result } from '@f0rbit/corpus'
 import { ok, err } from '@f0rbit/corpus'
 
@@ -393,7 +391,7 @@ const client = create_observations_client(storage, metadata_client)
 
 Here's a skeleton for a custom backend combining all pieces:
 
-```typescript
+```typescript nocheck
 import { create_metadata_client, create_data_client } from '@f0rbit/corpus/backend/base'
 import { create_observations_client, create_observations_storage } from '@f0rbit/corpus'
 import type { Backend, MetadataStorage, DataStorage, EventHandler } from '@f0rbit/corpus'
@@ -437,7 +435,7 @@ The wrapper automatically logs errors via the `on_event` handler if provided.
 
 Use the integration test suite to validate your backend:
 
-```typescript
+```typescript nocheck
 import { runBackendContractTests } from '@f0rbit/corpus'
 
 describe('custom backend', () => {
