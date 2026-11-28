@@ -1496,7 +1496,7 @@
           <article class="task" id="task-7-1">
             <header>
               <h3>Task 7.1: 0.3.4 ↔ 0.8.0 schema + row-shape compatibility pre-check with pinned regression fixtures</h3>
-              <span class="badge todo">todo</span>
+              <span class="badge blocked" title="live check 2026-11-28 found drift: pre-0.9 tables lack entity_key and 0.10.0 reads it as the literal string 'entity_key'; pinned fixture suite not yet written">blocked — live drift found (entity_key literal); fixture suite not written</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1538,7 +1538,24 @@
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder (must include the explicit drift verdict).</div>
+              <div class="proof">
+                <p><strong>Live compat pre-check, 2026-11-28, at <code>76043e8</code> (0.10.0), against chamber stage <code>tom</code>.</strong> All operations were read-only. <code>PRAGMA table_info</code> and <code>PRAGMA index_list</code> went through D1's HTTP <code>/query</code> endpoint. The CLI ran from a scratch cwd outside any repo, using the pure-env recipe from 7.2. A programmatic secret grep over all 90 captures found 0 hits. The pinned fixture suite (<code>tests/fixtures/compat/corpus-0.3.4/**</code>, <code>tests/integration/compat-0-3-4.test.ts</code>) has <strong>not been written</strong>: neither path exists in the tree, although the devpad task is marked COMPLETED. This proof covers only the live half.</p>
+                <p>Live column sets (chamber's tables are on the 0.3.4/0.8 shape):</p>
+                <pre>corpus_snapshots:    store_id(pk1) version(pk2) parents created_at invoked_at content_hash content_type size_bytes data_key tags
+                     indexes: idx_data_key idx_content_hash idx_store_created
+corpus_observations: id(pk) type source_store_id source_version source_path source_span_start source_span_end
+                     content confidence observed_at created_at derived_from
+                     indexes: idx_obs_type_source idx_obs_type_observed idx_obs_source idx_obs_type</pre>
+                <p><strong>Drift verdict: DRIFT FOUND.</strong> Neither table has the 0.9.0 <code>entity_key</code> column or its index. Chamber has not run the "migrate D1 before deploying 0.9" step, and its data was written by 0.3.4, so that is expected. The compat question is whether 0.10.0 still reads these tables cleanly. <strong>It does not. The reads succeed but return silently wrong data.</strong></p>
+                <ul>
+                  <li><code>stores</code>, <code>stores --counts</code>, <code>versions</code>, <code>show</code> and <code>lineage</code> all exit 0. Counts are unchanged from 7.2 (9 stores, 278 versions, identical per store).</li>
+                  <li>BUT every snapshot reads back with <code>entity_key: "entity_key"</code>. All 67 <code>hansard-summary</code> versions in <code>versions --json</code> and <code>show --json</code>'s <code>meta.entity_key</code> have it, and the human <code>versions</code> table prints <code>entity_key</code> in that column on every row. The published <code>bunx @f0rbit/corpus@0.10.0</code> behaves identically: <code>stores --counts --json</code> is byte-identical to the source run, and <code>versions</code> shows the same literal.</li>
+                  <li>Cause: drizzle's single-table <code>select()</code> emits unqualified double-quoted column names (<code>select …, "entity_key" from "corpus_snapshots"</code>). SQLite (and D1) resolves a double-quoted identifier that matches no column as a <em>string literal</em> (the DQS misfeature). It is not an error. Filtered paths use the qualified <code>"corpus_snapshots"."entity_key"</code>, which <em>does</em> fail. <code>versions --entity …</code> exits 1 with <code>storage_error … D1 HTTP error 400</code>, which is loud and correct.</li>
+                  <li>Impact: any consumer reading an unmigrated pre-0.9 database through ≥0.9 sees a fake entity on every row. A clone (<code>copy()</code> copies <code>SnapshotMeta</code> verbatim) would persist <code>entity_key: "entity_key"</code> into the replica. <code>get_latest(store, { entity_key })</code> and <code>is_stale</code> would key off it. The same mechanism applies to <code>corpus_observations</code>. This is inferred: <code>show --observations --json</code> doesn't serialise observation <code>entity_key</code>, so it couldn't be observed live.</li>
+                  <li>Local repro with no network: <code>/tmp/corpus-phase7/repro/entity-key-literal.ts</code>. It runs bun:sqlite with the pre-0.9 DDL, then <code>drizzle(...).select().from(corpus_snapshots)</code> and <code>parse_snapshot_meta</code>. Output: <code>raw row entity_key: "entity_key"</code>, <code>parsed meta entity_key: "entity_key"</code>, and the filtered query throws <code>no such column: corpus_snapshots.entity_key</code>. Fix candidates are a point release and the owner's decision. Options: (a) select an explicit table-qualified column list so a missing column errors loudly; (b) a one-time <code>PRAGMA table_info</code> schema probe at backend construction that returns an actionable "migrate D1: missing entity_key" error; (c) at minimum, reject <code>entity_key === "entity_key"</code> rows in <code>parse_snapshot_meta</code> (a hack, not recommended).</li>
+                </ul>
+                <p>Other 0.3.4 row-shape fidelity (dates, parents, tags, hashes, sizes) is unchanged from 7.2's PASS. The only drift is the missing column.</p>
+              </div>
             </section>
           </article>
 
@@ -1700,7 +1717,7 @@ AZ402A6E  2026-05-17T07:30:35.451Z  86667       04ee5e9c7011  chamber:senate, �
           <article class="task" id="task-7-3">
             <header>
               <h3>Task 7.3: Live data-path validation — cat (raw + config-less fallback) against chamber content</h3>
-              <span class="badge blocked" title="needs R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY)">blocked — needs R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY)</span>
+              <span class="badge blocked" title="needs R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY); 2 CLI bugs found 2026-11-28">blocked — needs R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY); bugs 7.3-a/7.3-b found</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1741,14 +1758,23 @@ AZ402A6E  2026-05-17T07:30:35.451Z  86667       04ee5e9c7011  chamber:senate, �
             </section>
             <section data-kind="proof">
               <h4>Proof</h4>
-              <div class="empty-proof">To be filled by verification coder.</div>
+              <div class="proof">
+                <p><strong>Run 2026-11-28 at <code>76043e8</code> (0.10.0). Still blocked on the R2 prerequisite.</strong> Chamber's <code>.env</code> was checked by listing key names only. It holds <code>CLOUDFLARE_API_TOKEN</code>, <code>CLOUDFLARE_DEFAULT_ACCOUNT_ID</code> and <code>CLOUDFLARE_ACCOUNT_ID</code>, but <strong>no R2 S3 credentials</strong>. <strong>The user must mint an R2 API token with <em>Object Read Only</em> scope on bucket <code>chamber-tom-chamberbucketbucket-mftdknux</code> and export <code>CORPUS_R2_ACCESS_KEY_ID</code> and <code>CORPUS_R2_SECRET_ACCESS_KEY</code></strong>, for example by adding them to chamber's <code>.env</code>. No token was minted or derived. Byte-exact <code>--raw</code> reads, the fallback rendering of real content, and the <code>--json</code> content match are all blocked on that.</p>
+                <p>What ran without R2 creds, using the targets <code>hansard-raw latest</code> (= <code>AZ401YCb</code>, <code>text/plain</code>) and <code>hansard-summary latest</code> (= <code>AZ46c8_c</code>, <code>application/json</code>, 84,900 B):</p>
+                <ul>
+                  <li><code>latest</code> resolves via <code>get_latest</code>. <code>cat … latest</code> reached the data fetch for the same version that <code>versions --limit 1</code> and <code>show … latest</code> report (<code>AZ46c8_c</code>). PASS.</li>
+                  <li><strong>Bug 7.3-a: R2 auth failure is reported as <code>not_found</code>, naming the data key as the store.</strong> Every data read exits 1 with <code>error: store "australia-senate/summary/2026-05-14/AZ46c8_c" not found</code>. The same happens for <code>clone</code> (<code>store "bill-documents/r7448/explanatory_memorandum/…" not found</code>). Causes: <code>cli/resolve-backend.ts:128-129</code> defaults missing R2 creds to <code>""</code> instead of failing data commands up front. <code>backend/remote-r2.ts:111</code> then maps a failed <code>exists()</code> (<code>!exists_result.ok</code>) to <code>null</code>. <code>backend/base.ts:180</code> turns that into <code>not_found</code>, with <code>store_id</code> set to the data key. <code>exists()</code> likewise returns <code>false</code>. This is the same "error looks like absence" class as 7.2's bug 1. Local repro: <code>/tmp/corpus-phase7/repro/r2-auth-as-not-found.ts</code>. A fake S3 answering 403 gives <code>{"kind":"not_found","store_id":"hansard/raw/2026-05-14/v1","version":""}</code> and <code>exists(): false</code>.</li>
+                  <li><strong>Bug 7.3-b: the fallback note goes to stdout even when piped.</strong> <code>cli/output.ts:97-100</code> <code>note()</code> suppresses only under <code>--quiet</code>/<code>--json</code> and writes to <strong>stdout</strong>, regardless of TTY. Live result: piped <code>cat hansard-summary latest</code> stdout begins with <code>(no corpus.config.ts — rendered from content_type, not a codec)</code>. That breaks <code>cat … | jq</code> and <code>cat … &gt; file</code>, and it violates this task's "stderr-or-suppressed" spec. Under <code>--quiet</code> stdout was 0 B (PASS), <code>--json</code> emitted a single document (PASS), and 0 ANSI bytes appeared in the piped capture. Local repro: <code>/tmp/corpus-phase7/repro/note-on-stdout.ts</code>. A file backend with one JSON snapshot gives piped stdout first line = the note, and <code>JSON.parse(stdout)</code> fails. Fix candidates: write notes to stderr, or suppress them when stdout is not a TTY.</li>
+                </ul>
+                <p>Adversary checklist: byte-count equality is BLOCKED (R2). ESC-free piped stdout PASSes, but the piped stdout is impure because of bug 7.3-b. The note is suppressed under <code>--quiet</code>/<code>--json</code>: PASS. No secrets, 0 hits over 90 captures: PASS. The blocked prerequisite is named exactly: PASS.</p>
+              </div>
             </section>
           </article>
 
           <article class="task" id="task-7-4">
             <header>
               <h3>Task 7.4: Data-key aliasing audit, then clone tom→file dry-run + real run + idempotency re-run</h3>
-              <span class="badge blocked" title="steps 1–3 done; steps 4–6 blocked">blocked — steps 1–3 done; real clone + idempotency need R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY)</span>
+              <span class="badge blocked" title="steps 1–3 re-passed 2026-11-28; steps 4–6 blocked">blocked — steps 1–3 re-passed 2026-11-28; real clone needs R2 Object Read Only token (CORPUS_R2_ACCESS_KEY_ID/CORPUS_R2_SECRET_ACCESS_KEY) and the entity_key read fix or a chamber D1 migration</span>
             </header>
             <dl class="meta">
               <dt>Files</dt>
@@ -1814,6 +1840,14 @@ TOTAL           278       175             46</pre>
 9       278              0</pre>
                 <p>Per-store notes reported the same counts as the audit (e.g. <code>hansard-summary: +67 copied, 0 skipped</code>). The table correctly omits the <code>data_objects</code>/<code>bytes</code> columns (PASS for 5.2's caveat in table mode). The dest dir <code>~/tmp/chamber-clone-audit-20261031</code> <strong>was not created</strong> (<code>ls</code> → No such file or directory, before and after both dry-runs). <strong>Papercut / caveat violation in <code>--json</code>:</strong> <code>clone … --dry-run --json</code> emits the raw <code>CopySummary</code>, <code>{ …, "versions_copied": 278, "versions_skipped": 0, "data_objects_copied": 0, "data_objects_skipped": 0, "bytes_copied": 0, "dry_run": true }</code>. That states unknown data/byte counts as <code>0</code>, which the AGENTS.md dry-run rule says renderers must not imply. Fix: omit those fields, or make them <code>null</code>, when <code>dry_run</code>. Also, "versions_copied" is the wrong label in dry-run mode (nothing was copied); "would copy" would read better.</p>
                 <p><strong>(4)–(6) blocked:</strong> the real clone, replica validation (<code>cat --raw</code> + <code>cmp</code>), idempotency re-run and source-unchanged check all need an R2 <em>Object Read Only</em> API token, exported as <code>CORPUS_R2_ACCESS_KEY_ID</code>/<code>CORPUS_R2_SECRET_ACCESS_KEY</code>. That is a user prerequisite and does not exist yet. They also need the <code>backend_selector</code> entrypoint bug above fixed first. Note for (4): the replica will hold 9 stores, not 14, because only 9 have data.</p>
+                <p><strong>Re-run 2026-11-28 at <code>76043e8</code> (0.10.0, real entrypoint <code>bun cli/index.ts</code>; the selector bug above is fixed).</strong> This was read-only against chamber. The clone dest was <code>$(mktemp -d)/clone</code>, outside both repos, and it was <code>rm -rf</code>'d after verification. Secret grep: 0 hits.</p>
+                <ul>
+                  <li><strong>(1) Audit</strong>, repeated over all 14 stores (<code>versions &lt;store&gt; --json</code>; the 5 empty stores now exit 1 with <code>store "…" not found (no versions)</code>). The sanitisation is verbatim from <code>backend/file.ts:43</code>: <code>return `${data_key.replace(/\//g, "_")}.bin`;</code>. Totals are <strong>identical to 2026-10-31</strong>: 278 versions, 175 distinct keys, 175 sanitised names, 46 keys containing <code>_</code>, <strong>0 collisions</strong>. Every per-store count matches a live <code>stores --counts --json</code>.</li>
+                  <li><strong>(2) Gate</strong>: 0 collisions, so the gate passes. The layout fix stays deferred.</li>
+                  <li><strong>(3) Dry-run</strong>: exit 0 in ~1.3 s. Notes read <code>hansard-summary: +67 would copy, 0 skipped</code> and the table reads <code>9 / versions_would_copy 278 / versions_skipped 0</code>. <code>--json</code> gives <code>data_objects_copied</code>/<code>data_objects_skipped</code>/<code>bytes_copied</code> = <code>null</code> with <code>dry_run: true</code>, so the October caveat violation is fixed (PASS). The dest dir was not created (PASS).</li>
+                  <li><strong>(4)–(6) still BLOCKED</strong> on the R2 Object Read Only token (see 7.3). A real <code>clone</code> without creds exits 1 with the misleading <code>not_found</code> from 7.3-a on the first data object. The dest is left with 0 files and <code>stores --file &lt;dest&gt;</code> = <code>[]</code>, so the data-before-metadata ordering held live and nothing dangles.</li>
+                  <li><strong>New blocker for (4), found by 7.1's live check:</strong> chamber's tables lack <code>entity_key</code>, and 0.10.0 reads every row as <code>entity_key: "entity_key"</code>. A real clone today would write that bogus entity into every replica <code>_meta.json</code>. Before the real run, either chamber migrates D1 (adds <code>entity_key</code>) or corpus ships a point release fixing the read (see 7.1's proof).</li>
+                </ul>
               </div>
             </section>
           </article>
