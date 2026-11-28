@@ -308,6 +308,13 @@ describe("CLI entrypoint — real argv pipeline against remote fakes", () => {
 		});
 	});
 
+	it("`cat` keeps stdout pure data: the config-less note goes to stderr", async () => {
+		const result = await run_in_process(["cat", "items", "latest"]);
+		expect(result.code).toBe(0);
+		expect(z.object({ id: z.string() }).strict().parse(JSON.parse(result.stdout))).toEqual({ id: "a" });
+		expect(result.stderr).toBe("(no corpus.config.ts — rendered from content_type, not a codec)\n");
+	});
+
 	describe("missing stores", () => {
 		it("`versions no-such-store` fails with a store-level message", async () => {
 			const result = await run_in_process(["versions", "no-such-store"]);

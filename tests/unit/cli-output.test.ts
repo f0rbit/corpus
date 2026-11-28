@@ -207,13 +207,23 @@ describe("cli output", () => {
 	});
 
 	describe("create_console_output — note", () => {
-		it("prints a dim note when decoration is enabled", () => {
-			const { stdout, opts } = capture_sinks();
+		it("prints a dim note to stderr when decoration is enabled", () => {
+			const { stdout, stderr, opts } = capture_sinks();
+			const output = create_console_output(base_opts({ stderr_is_tty: true, ...opts }));
+
+			output.note("decoded via content_type");
+
+			expect(stdout).toEqual([]);
+			expect(stderr.join("")).toBe(`${ESC}[2mdecoded via content_type${ESC}[0m\n`);
+		});
+
+		it("a piped stderr gets the note without ESC bytes", () => {
+			const { stderr, opts } = capture_sinks();
 			const output = create_console_output(base_opts({ stdout_is_tty: true, ...opts }));
 
 			output.note("decoded via content_type");
 
-			expect(stdout.join("").includes("decoded via content_type")).toBe(true);
+			expect(stderr.join("")).toBe("decoded via content_type\n");
 		});
 	});
 
@@ -325,11 +335,11 @@ describe("cli output", () => {
 			expect(wrong).toEqual([]);
 		});
 
-		it("note visible ⇔ ¬quiet ∧ ¬json", () => {
+		it("note visible on stderr ⇔ ¬quiet ∧ ¬json, never on stdout", () => {
 			const wrong = flags.filter((f) => {
-				const { stdout, opts } = capture_sinks();
+				const { stdout, stderr, opts } = capture_sinks();
 				create_console_output(base_opts({ ...f, ...opts })).note("visible-note");
-				return stdout.join("").includes("visible-note") !== (!f.quiet && !f.json);
+				return stderr.join("").includes("visible-note") !== (!f.quiet && !f.json) || stdout.length > 0;
 			});
 			expect(wrong).toEqual([]);
 		});

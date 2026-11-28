@@ -176,7 +176,7 @@ corpus show <store> <version> --json       # Machine-readable format
 }
 ```
 
-`<version>` may be `latest` (resolved like `cat`). With `--observations`, `observations` is always present (an empty array when there are none); without it the key is omitted. A store with no versions at all fails with `error: store "<store>" not found (no versions)` and exit 1.
+Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are detected and marked `(cycle)` to prevent infinite output.
 
 ### cat
 
@@ -224,7 +224,7 @@ corpus lineage <store> <version> --depth 5 # Custom depth
 corpus lineage <store> <version> --json    # Machine-readable
 ```
 
-Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are detected and marked `(cycle)` to prevent infinite output.
+`<version>` may be `latest` (resolved like `cat`; `root.version` in `--json` is the resolved version). Renders an ASCII tree (default) or JSON with full parent metadata. Cycles are detected and marked `(cycle)` to prevent infinite output.
 
 **--json output shape:**
 
@@ -314,10 +314,11 @@ JSON output is always valid and parseable, with no ANSI escape codes, spinners, 
 
 ### Piping
 
-Spinners (progress indicators) write to stderr, not stdout, so pipes stay clean:
+Spinners and notes (progress lines, the `cat` content-type fallback hint) write to stderr, not stdout, so pipes stay clean:
 
 ```bash
 corpus stores | wc -l           # stdout clean, spinner on stderr
+corpus cat store latest | jq .  # fallback note on stderr, JSON on stdout
 corpus cat store ver --raw | sha256sum  # raw bytes unpolluted
 ```
 

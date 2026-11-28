@@ -52,6 +52,7 @@ export function create_console_output(opts: OutputOpts): Output {
 	const color = opts.stdout_is_tty && !opts.json && !opts.no_color;
 	const spinner_enabled = opts.stderr_is_tty && !opts.json && !opts.quiet && !opts.ci && !opts.no_color;
 	const ansi = create_ansi(color);
+	const note_ansi = create_ansi(opts.stderr_is_tty && !opts.json && !opts.no_color);
 
 	const stdout_write =
 		opts.stdout_write ??
@@ -94,9 +95,10 @@ export function create_console_output(opts: OutputOpts): Output {
 		bytes(data: Uint8Array): void {
 			stdout_write(data);
 		},
+		// Decoration, not data: stderr keeps `corpus cat ... | jq` parseable.
 		note(text: string): void {
 			if (opts.quiet || opts.json) return;
-			stdout_write(`${ansi.dim(text)}\n`);
+			stderr_write(`${note_ansi.dim(text)}\n`);
 		},
 		spinner(label: string): SpinnerHandle {
 			const spin = create_spinner({ write: stderr_write, enabled: spinner_enabled });
