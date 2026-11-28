@@ -8,13 +8,14 @@ export default define_lint_config({
 	tsconfig_root_dir: import.meta.dirname,
 	overrides: [
 		{
-			// f0rbit/require-d1-wrapper targets RPC-entrypoint consumers that must route
-			// through a service's own createD1Database (e.g. @devpad/schema/database/d1)
-			// before touching drizzle. corpus itself is the generic backend factory —
-			// create_cloudflare_backend takes a raw D1Database from ITS caller and is the
-			// library-level equivalent of that wrapper, not a consumer bypassing one.
-			// TODO(lint): scope the rule to drizzle-orm/d1 call sites only (remote-d1.ts's
-			// drizzle-orm/sqlite-proxy call shouldn't match at all) — track upstream in lint.
+			// Both files are flagged by f0rbit/require-d1-wrapper ("drizzle() called
+			// with a raw D1 binding — wrap it with createD1Database(...) first"):
+			// cloudflare.ts takes a raw D1Database from ITS caller and IS the
+			// library-level wrapper; remote-d1.ts uses drizzle-orm/sqlite-proxy,
+			// whose callback driver doesn't route through createD1Database at all.
+			// The rule can't distinguish either shape from a consumer bypass.
+			// TODO(lint): scope the rule to drizzle-orm/d1 call sites only — track
+			// upstream in lint.
 			files: ["backend/cloudflare.ts", "backend/remote-d1.ts"],
 			rules: { "f0rbit/require-d1-wrapper": "off" },
 		},

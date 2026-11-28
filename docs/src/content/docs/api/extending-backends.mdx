@@ -132,7 +132,6 @@ type DataStorage = {
 type DataStorageHandle = {
   bytes: () => Promise<Uint8Array>
   stream?: () => ReadableStream<Uint8Array>
-  size?: number
 }
 ```
 
@@ -156,7 +155,6 @@ export async function create_r2_data_adapter(bucket: R2Bucket): Promise<DataStor
       return {
         bytes: async () => new Uint8Array(await obj.arrayBuffer()),
         stream: () => obj.body as ReadableStream<Uint8Array>,
-        size: obj.size,
       }
     },
 

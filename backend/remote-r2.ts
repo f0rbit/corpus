@@ -48,7 +48,6 @@ type S3FileLike = {
 	stream: () => ReadableStream<Uint8Array>;
 	write: (data: Uint8Array) => Promise<unknown>;
 	delete: () => Promise<void>;
-	size: number;
 };
 
 /**
@@ -120,7 +119,6 @@ export function create_r2_data_storage(config: R2S3Config): DataStorage {
 					return new Uint8Array(buffer);
 				},
 				stream: () => file.stream(),
-				size: file.size,
 			};
 
 			return handle;

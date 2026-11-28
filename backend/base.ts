@@ -36,7 +36,6 @@ export type DataStorageHandle = {
 	bytes: () => Promise<Uint8Array>;
 	/** Optional native stream. If absent, `create_data_client` falls back to a one-chunk wrapper around `bytes()`. */
 	stream?: () => ReadableStream<Uint8Array>;
-	size?: number;
 };
 
 export type DataStorage = {
@@ -72,7 +71,6 @@ export function wrap_bytes_storage(storage: BytesStorage): DataStorage {
 			return {
 				bytes: async () => bytes,
 				stream: () => one_chunk_stream(bytes),
-				size: bytes.byteLength,
 			};
 		},
 		put: storage.put,
