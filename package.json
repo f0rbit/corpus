@@ -77,6 +77,7 @@
 		"typecheck": "tsc --noEmit",
 		"coverage:diff": "bun scripts/coverage-diff.ts",
 		"mutate": "bun scripts/mutation-check.ts",
+		"health": "bun scripts/health.ts",
 		"gate": "bunx f0rbit-lint check && bun run typecheck && bun test --coverage && bun run lint && bun run fmt:check && bun run build",
 		"prepublishOnly": "npm run build",
 		"docs:dev": "cd docs && bun run dev",

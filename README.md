@@ -95,13 +95,6 @@ If you're building a package with types you want to test via property-based test
 
 ## todo
 
-- [ ] implement ttl/expiration support with auto-cleanup
-- [ ] add batch operations (put_many, get_many) for bulk imports
-- [ ] add diff(v1, v2) function for comparing json snapshots
-- [ ] implement data compaction (merge old versions)
-- [ ] add rate limiting awareness for cloudflare api limits
-- [ ] add signed url support for direct r2 access to large files
 - [ ] implement garbage collection for orphaned data blobs (especially r2 objects orphaned by aborted cross-store transactions — see `.plans/cross-store-atomic.md`)
-- [ ] add retry logic with exponential backoff for network failures
-- [ ] graduation: `f0rbit/no-ambient-effects` warns (32, @f0rbit/lint 0.3.0) — `generate_version`/`generate_observation_id`'s clock/rng reads and `corpus.ts`/`observations/storage.ts`'s inline `new Date()` timestamps sit in general-purpose modules, not dedicated provider files, so `ambient_effect_files` would over-suppress; revisit as a real clock/rng-injection refactor if it becomes a testing pain point (see the backend-equivalence suite's existing Date-precision special-casing)
-- [ ] graduation: `f0rbit/prefer-pipe` warns (7, @f0rbit/lint 0.3.0) — all inside `corpus.transaction(async (tx) => ...)` test bodies that thread 2-3 prior Result values into a later step; `pipe()`'s single-threaded chain doesn't compose cleanly for that shape without nesting. Revisit if result.ts grows a multi-value combinator
+- [ ] graduation: `f0rbit/no-ambient-effects` warns (32, @f0rbit/lint 0.3.0) — `generate_version`/`generate_observation_id`'s clock/rng reads and `corpus.ts`/`observations/storage.ts`'s inline `new Date()` timestamps sit in general-purpose modules, not dedicated provider files, so `ambient_effect_files` would over-suppress; revisit as a real clock/rng-injection refactor if it becomes a testing pain point (see the backend-equivalence suite's existing Date-precision special-casing; context in AGENTS.md's linting section)
+- [ ] graduation: `f0rbit/prefer-pipe` warns (7, @f0rbit/lint 0.3.0) — all inside `corpus.transaction(async (tx) => ...)` test bodies that thread 2-3 prior Result values into a later step; `pipe()`'s single-threaded chain doesn't compose cleanly for that shape without nesting. Revisit if result.ts grows a multi-value combinator (context in AGENTS.md's linting section)
